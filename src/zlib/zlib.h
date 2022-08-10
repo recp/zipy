@@ -19,8 +19,6 @@
 
 #include "../common.h"
 
-#include "common.h"
-
 UNZ_INLINE
 const uint8_t*
 zlib_header(unzip_t * __restrict stream, unzip_chunk_t * __restrict ch) {
