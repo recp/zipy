@@ -14,8 +14,8 @@
  * limitations under the License.
  */
 
-#ifndef defl_h
-#define defl_h
+#ifndef infl_h
+#define infl_h
 
 #include "../common.h"
 
@@ -23,4 +23,4 @@ UNZ_HIDE
 void
 infl(unzip_t * __restrict stream, const uint8_t * __restrict p, uint32_t len);
 
-#endif /* defl_h */
+#endif /* infl_h */
