@@ -52,7 +52,7 @@ unzip_include_chunk(unzip_t    * __restrict stream,
 UNZ_EXPORT
 UnzipResult
 unzip(unzip_t * __restrict stream) {
-
+  
   return UNZ_OK;
 }
 
@@ -65,5 +65,13 @@ unzip_chunk(unzip_t * __restrict stream, const void * __restrict ptr, size_t len
 UNZ_EXPORT
 void
 unzip_cleanup(unzip_t * __restrict stream) {
-  
+  unzip_chunk_t *chk, *tofree;
+
+  if ((chk = stream->chunks_first)) {
+    tofree = chk;
+    chk    = chk->next;
+    free(tofree);
+  }
+
+  free(stream);
 }
