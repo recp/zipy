@@ -74,9 +74,11 @@ unzip_cleanup(unzip_t * __restrict stream) {
   unzip_chunk_t *chk, *tofree;
 
   if ((chk = stream->chunks_first)) {
-    tofree = chk;
-    chk    = chk->next;
-    free(tofree);
+    do {
+      tofree = chk;
+      chk    = chk->next;
+      free(tofree);
+    } while ((chk = stream->chunks_first));
   }
 
   free(stream);
