@@ -17,6 +17,10 @@
 #ifndef defl_h
 #define defl_h
 
-#include <stdio.h>
+#include "../common.h"
+
+UNZ_HIDE
+void
+infl(unzip_t * __restrict stream, const uint8_t * __restrict p, uint32_t len);
 
 #endif /* defl_h */

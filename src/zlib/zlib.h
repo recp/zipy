@@ -17,5 +17,29 @@
 #ifndef unz_zlib_h
 #define unz_zlib_h
 
+#include "../common.h"
+
+#include "common.h"
+
+UNZ_INLINE
+const uint8_t*
+zlib_header(unzip_t * __restrict stream, unzip_chunk_t * __restrict ch) {
+  const uint8_t *p;
+  uint8_t        cm, cinfo, fcheck, fdict, flevel;
+
+  p       = ch->p;
+  cinfo   = *p++;
+  cm      = cinfo & 0xf;
+  cinfo >>= 4;
+
+  flevel = *p++;
+  fcheck = flevel & 0xf;
+  fdict  = (flevel & 0x10) >> 4;
+  flevel = (flevel & 0xe0) >> 5;
+
+  if (fdict) { p += 4; }
+
+  return p;
+}
 
 #endif /* unz_zlib_h */

@@ -15,6 +15,8 @@
  */
 
 #include "common.h"
+#include "zlib/zlib.h"
+#include "infl/infl.h"
 
 UNZ_EXPORT
 unzip_t *
@@ -53,12 +55,19 @@ UNZ_EXPORT
 UnzipResult
 unzip(unzip_t * __restrict stream) {
   unzip_chunk_t *chk;
-  
-  if (!(chk = stream->chunks_first)) {
-    return UNZ_NOOP;
-  }
+  const uint8_t *p;
 
-  
+  if (!(chk = stream->chunks_first)) { return UNZ_NOOP; }
+
+  /* TODO: currently only zlib is implemented */
+
+  do {
+    if (likely(stream->header)) { p = chk->p;                   }
+    else                        { p = zlib_header(stream, chk); }
+
+    infl(stream, p, chk->len);
+  } while ((chk = chk->next));
+
   return UNZ_OK;
 }
 

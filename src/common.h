@@ -24,6 +24,14 @@
 #include "../include/unzip/common.h"
 #include "../include/unzip/unzip.h"
 
+#ifdef __GNUC__
+#  define unlikely(expr) __builtin_expect(!!(expr), 0)
+#  define likely(expr)   __builtin_expect(!!(expr), 1)
+#else
+#  define unlikely(expr) (expr)
+#  define likely(expr)   (expr)
+#endif
+
 typedef struct unzip_chunk_t {
   struct unzip_chunk_t *next;
   const uint8_t        *p;
@@ -33,6 +41,8 @@ typedef struct unzip_chunk_t {
 typedef struct unzip_t {
   unzip_chunk_t  *chunks_first;
   unzip_chunk_t  *chunks_last;
+  
+  void           *header;
 
   void          *(*malloc)(size_t);
   void          *(*realloc)(void *, size_t);
