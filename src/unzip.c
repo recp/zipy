@@ -52,6 +52,12 @@ unzip_include_chunk(unzip_t    * __restrict stream,
 UNZ_EXPORT
 UnzipResult
 unzip(unzip_t * __restrict stream) {
+  unzip_chunk_t *chk;
+  
+  if (!(chk = stream->chunks_first)) {
+    return UNZ_NOOP;
+  }
+
   
   return UNZ_OK;
 }

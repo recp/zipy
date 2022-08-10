@@ -10,18 +10,19 @@
 		1E1066F028A2CD7B008664A6 /* common.h in Headers */ = {isa = PBXBuildFile; fileRef = 1E1066E928A2CD7B008664A6 /* common.h */; };
 		1E1066F128A2CD7B008664A6 /* unzip.h in Headers */ = {isa = PBXBuildFile; fileRef = 1E1066EA28A2CD7B008664A6 /* unzip.h */; };
 		1E1066F228A2CD7B008664A6 /* unzip.c in Sources */ = {isa = PBXBuildFile; fileRef = 1E1066EC28A2CD7B008664A6 /* unzip.c */; };
-		1E1066F328A2CD7B008664A6 /* defl.h in Headers */ = {isa = PBXBuildFile; fileRef = 1E1066EE28A2CD7B008664A6 /* defl.h */; };
-		1E1066F428A2CD7B008664A6 /* defl.c in Sources */ = {isa = PBXBuildFile; fileRef = 1E1066EF28A2CD7B008664A6 /* defl.c */; };
+		1E1066F328A2CD7B008664A6 /* infl.h in Headers */ = {isa = PBXBuildFile; fileRef = 1E1066EE28A2CD7B008664A6 /* infl.h */; };
+		1E1066F428A2CD7B008664A6 /* infl.c in Sources */ = {isa = PBXBuildFile; fileRef = 1E1066EF28A2CD7B008664A6 /* infl.c */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
 		1E1066E928A2CD7B008664A6 /* common.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; path = common.h; sourceTree = "<group>"; };
 		1E1066EA28A2CD7B008664A6 /* unzip.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; path = unzip.h; sourceTree = "<group>"; };
 		1E1066EC28A2CD7B008664A6 /* unzip.c */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.c; path = unzip.c; sourceTree = "<group>"; };
-		1E1066EE28A2CD7B008664A6 /* defl.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; path = defl.h; sourceTree = "<group>"; };
-		1E1066EF28A2CD7B008664A6 /* defl.c */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.c; path = defl.c; sourceTree = "<group>"; };
+		1E1066EE28A2CD7B008664A6 /* infl.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; path = infl.h; sourceTree = "<group>"; };
+		1E1066EF28A2CD7B008664A6 /* infl.c */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.c; path = infl.c; sourceTree = "<group>"; };
 		1E1066FA28A2DF87008664A6 /* common.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = common.h; sourceTree = "<group>"; };
 		1EE5A37E28A1BA670061A48E /* libunzip.dylib */ = {isa = PBXFileReference; explicitFileType = "compiled.mach-o.dylib"; includeInIndex = 0; path = libunzip.dylib; sourceTree = BUILT_PRODUCTS_DIR; };
+		1EE8048B28A4024900ECD6A7 /* zlib.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = zlib.h; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -55,28 +56,21 @@
 		1E1066EB28A2CD7B008664A6 /* src */ = {
 			isa = PBXGroup;
 			children = (
-				1EA5770C28A3A1CA008532D7 /* types */,
-				1E1066ED28A2CD7B008664A6 /* defl */,
+				1EE8048A28A4024000ECD6A7 /* zlib */,
+				1E1066ED28A2CD7B008664A6 /* infl */,
 				1E1066FA28A2DF87008664A6 /* common.h */,
 				1E1066EC28A2CD7B008664A6 /* unzip.c */,
 			);
 			path = src;
 			sourceTree = "<group>";
 		};
-		1E1066ED28A2CD7B008664A6 /* defl */ = {
+		1E1066ED28A2CD7B008664A6 /* infl */ = {
 			isa = PBXGroup;
 			children = (
-				1E1066EE28A2CD7B008664A6 /* defl.h */,
-				1E1066EF28A2CD7B008664A6 /* defl.c */,
+				1E1066EE28A2CD7B008664A6 /* infl.h */,
+				1E1066EF28A2CD7B008664A6 /* infl.c */,
 			);
-			path = defl;
-			sourceTree = "<group>";
-		};
-		1EA5770C28A3A1CA008532D7 /* types */ = {
-			isa = PBXGroup;
-			children = (
-			);
-			path = types;
+			path = infl;
 			sourceTree = "<group>";
 		};
 		1EE5A37528A1BA660061A48E = {
@@ -96,6 +90,14 @@
 			name = Products;
 			sourceTree = "<group>";
 		};
+		1EE8048A28A4024000ECD6A7 /* zlib */ = {
+			isa = PBXGroup;
+			children = (
+				1EE8048B28A4024900ECD6A7 /* zlib.h */,
+			);
+			path = zlib;
+			sourceTree = "<group>";
+		};
 /* End PBXGroup section */
 
 /* Begin PBXHeadersBuildPhase section */
@@ -104,7 +106,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				1E1066F028A2CD7B008664A6 /* common.h in Headers */,
-				1E1066F328A2CD7B008664A6 /* defl.h in Headers */,
+				1E1066F328A2CD7B008664A6 /* infl.h in Headers */,
 				1E1066F128A2CD7B008664A6 /* unzip.h in Headers */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -166,7 +168,7 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				1E1066F428A2CD7B008664A6 /* defl.c in Sources */,
+				1E1066F428A2CD7B008664A6 /* infl.c in Sources */,
 				1E1066F228A2CD7B008664A6 /* unzip.c in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
