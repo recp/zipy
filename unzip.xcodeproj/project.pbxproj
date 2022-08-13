@@ -12,6 +12,7 @@
 		1E1066F228A2CD7B008664A6 /* unzip.c in Sources */ = {isa = PBXBuildFile; fileRef = 1E1066EC28A2CD7B008664A6 /* unzip.c */; };
 		1E1066F328A2CD7B008664A6 /* infl.h in Headers */ = {isa = PBXBuildFile; fileRef = 1E1066EE28A2CD7B008664A6 /* infl.h */; };
 		1E1066F428A2CD7B008664A6 /* infl.c in Sources */ = {isa = PBXBuildFile; fileRef = 1E1066EF28A2CD7B008664A6 /* infl.c */; };
+		1E99A4D628A783B000F901D6 /* endian.h in Headers */ = {isa = PBXBuildFile; fileRef = 1E99A4D528A783B000F901D6 /* endian.h */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -21,6 +22,7 @@
 		1E1066EE28A2CD7B008664A6 /* infl.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; path = infl.h; sourceTree = "<group>"; };
 		1E1066EF28A2CD7B008664A6 /* infl.c */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.c; path = infl.c; sourceTree = "<group>"; };
 		1E1066FA28A2DF87008664A6 /* common.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = common.h; sourceTree = "<group>"; };
+		1E99A4D528A783B000F901D6 /* endian.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; path = endian.h; sourceTree = "<group>"; };
 		1EE5A37E28A1BA670061A48E /* libunzip.dylib */ = {isa = PBXFileReference; explicitFileType = "compiled.mach-o.dylib"; includeInIndex = 0; path = libunzip.dylib; sourceTree = BUILT_PRODUCTS_DIR; };
 		1EE8048B28A4024900ECD6A7 /* zlib.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = zlib.h; sourceTree = "<group>"; };
 /* End PBXFileReference section */
@@ -60,6 +62,7 @@
 				1E1066ED28A2CD7B008664A6 /* infl */,
 				1E1066FA28A2DF87008664A6 /* common.h */,
 				1E1066EC28A2CD7B008664A6 /* unzip.c */,
+				1E99A4D528A783B000F901D6 /* endian.h */,
 			);
 			path = src;
 			sourceTree = "<group>";
@@ -106,6 +109,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				1E1066F028A2CD7B008664A6 /* common.h in Headers */,
+				1E99A4D628A783B000F901D6 /* endian.h in Headers */,
 				1E1066F328A2CD7B008664A6 /* infl.h in Headers */,
 				1E1066F128A2CD7B008664A6 /* unzip.h in Headers */,
 			);
