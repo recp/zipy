@@ -40,7 +40,7 @@ infl(unzip_t * __restrict stream, const uint8_t * __restrict p, uint32_t len) {
         be_16(nlen, p);
 
         /* TODO: option to skip this */
-        if (len != ~nlen) { return -2; }
+        if (unlikely(len != ~nlen)) { return -2; }
 
         memcpy(stream->dst, p, len);
         continue;
