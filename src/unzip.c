@@ -65,10 +65,15 @@ unzip(unzip_t * __restrict stream) {
     if (likely(stream->header)) { p = chk->p;                   }
     else                        { p = zlib_header(stream, chk); }
 
-    infl(stream, p, chk->len);
+    if (infl(stream, p, chk->len) < 0) {
+      goto err;
+    }
   } while ((chk = chk->next));
 
   return UNZ_OK;
+
+err:
+  return UNZ_ERR;
 }
 
 UNZ_EXPORT

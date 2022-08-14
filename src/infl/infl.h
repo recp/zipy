@@ -20,7 +20,7 @@
 #include "../common.h"
 
 UNZ_HIDE
-void
+int
 infl(unzip_t * __restrict stream, const uint8_t * __restrict p, uint32_t len);
 
 #endif /* infl_h */
