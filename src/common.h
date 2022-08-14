@@ -48,7 +48,7 @@ typedef struct unzip_t {
   void          *(*realloc)(void *, size_t);
   void           (*free)(void *);
 
-  const uint8_t *dst;
+  uint8_t       *dst;
   uint32_t       dstlen;
 } unzip_t;
 

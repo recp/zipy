@@ -15,9 +15,47 @@
  */
 
 #include "infl.h"
+#include "../endian.h"
 
 UNZ_HIDE
 int
 infl(unzip_t * __restrict stream, const uint8_t * __restrict p, uint32_t len) {
-  
+  const uint8_t *end;
+  uint8_t        bfinal, btype;
+
+  end = p + len;
+
+  /* TODO: option to check enough input / output memory */
+  do {
+    bfinal  = *p++;
+    btype   = bfinal & 0x6;
+    bfinal &= 0x1;
+
+    switch (btype) {
+      case 0x0: {
+        /* no compression */
+        uint16_t len, nlen;
+
+        be_16(len,  p);
+        be_16(nlen, p);
+
+        /* TODO: option to skip this */
+        if (len != ~nlen) { return -2; }
+
+        memcpy(stream->dst, p, len);
+        continue;
+      }
+      case 0x2:
+        /* static huffman */
+        break;
+      case 0x4:
+        /* dynamic huffman */
+        break;
+      default:
+        /* unkown btype */
+        return -1;
+    }
+  } while (p < end);
+
+  return 0;
 }
