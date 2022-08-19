@@ -35,18 +35,11 @@
 
 typedef struct unzip_chunk_t {
   struct unzip_chunk_t *next;
-
-  union {
-    const uint8_t        *p;
-    FILE                 *file;
-  };
-
-  union {
-    uint32_t            len;
-    uint32_t            off;
-  };
-
-  bool ismmap;
+  FILE                 *file;
+  const uint8_t        *p;
+  uint32_t              len;
+  uint32_t              off;
+  bool                  ismmap;
 } unzip_chunk_t;
 
 typedef struct unzip_t {

@@ -36,14 +36,35 @@ unzip_init_mem(const void * __restrict dst, uint32_t dstlen) {
 
 UNZ_EXPORT
 void
-unzip_include_chunk(unzip_t    * __restrict stream,
-                    const void * __restrict chkptr,
-                    uint32_t                chklen) {
+unzip_include_fchunk(unzip_t    * __restrict stream,
+                     FILE       * __restrict file,
+                     uint32_t                off,
+                     uint32_t                len) {
   unzip_chunk_t *chk;
+
+  chk         = calloc(1, sizeof(*chk));
+  chk->file   = file;
+  chk->off    = off;
+  chk->len    = len;
+  chk->ismmap = false;
+
+  if (!stream->chunks_first) { stream->chunks_first      = chk; }
+  else                       { stream->chunks_last->next = chk; }
   
-  chk      = calloc(1, sizeof(*chk));
-  chk->p   = chkptr;
-  chk->len = chklen;
+  stream->chunks_last = chk;
+}
+
+UNZ_EXPORT
+void
+unzip_include_chunk(unzip_t    * __restrict stream,
+                    const void * __restrict ptr,
+                    uint32_t                len) {
+  unzip_chunk_t *chk;
+
+  chk         = calloc(1, sizeof(*chk));
+  chk->p      = ptr;
+  chk->len    = len;
+  chk->ismmap = true;
 
   if (!stream->chunks_first) { stream->chunks_first      = chk; }
   else                       { stream->chunks_last->next = chk; }

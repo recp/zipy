@@ -44,14 +44,33 @@ unzip_init_mem(const void * __restrict dst, uint32_t dstlen);
  *  will assume that the chunk that include  zip header already included
  *
  * @param[in,out] stream    zip stream: NULL to get created one, stream to continue unzipping.
- * @param[in]     chkptr    compressed data (memory addr to unzip)
- * @param[in]     chklen    size of compressed data
+ * @param[in]     ptr           compressed data (memory addr to unzip)
+ * @param[in]     len           size of chunk
  */
 UNZ_EXPORT
 void
 unzip_include_chunk(unzip_t    * __restrict stream,
-                    const void * __restrict chkptr,
-                    uint32_t                chklen);
+                    const void * __restrict ptr,
+                    uint32_t                len);
+
+/*!
+ * @brief appends a chunk to unzip stream to uncompress, the chunks may be separated from each other
+ *        but can be uncompressed together
+ *
+ *  this appends uncopressed data into src which specified with unzip_init(), the subsequent calls
+ *  will assume that the chunk that include  zip header already included
+ *
+ * @param[in,out] stream    zip stream: NULL to get created one, stream to continue unzipping.
+ * @param[in]     file        compressed data's file
+ * @param[in]     off          offset of chunk
+ * @param[in]     len          size of chunk
+ */
+UNZ_EXPORT
+void
+unzip_include_fchunk(unzip_t    * __restrict stream,
+                     FILE       * __restrict file,
+                     uint32_t                off,
+                     uint32_t                len);
 
 /*!
  * @brief unzip the contents memory addr, for files they must be open and passed to as memory addr
