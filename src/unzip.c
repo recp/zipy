@@ -24,7 +24,7 @@ unzip_init_mem(const void * __restrict dst, uint32_t dstlen) {
   unzip_t *zip;
   
   zip          = calloc(1, sizeof(*zip));
-  zip->dst     = dst;
+  zip->dst     = (uint8_t *)dst;
   zip->dstlen  = dstlen;
 
   zip->malloc  = malloc;
