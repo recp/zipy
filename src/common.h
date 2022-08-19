@@ -19,6 +19,7 @@
 
 #include <string.h>
 #include <stdlib.h>
+#include <stdio.h>
 #include <math.h>
 
 #include "../include/unzip/common.h"
@@ -34,8 +35,18 @@
 
 typedef struct unzip_chunk_t {
   struct unzip_chunk_t *next;
-  const uint8_t        *p;
-  uint32_t              len;
+
+  union {
+    const uint8_t        *p;
+    FILE                 *file;
+  };
+
+  union {
+    uint32_t            len;
+    uint32_t            off;
+  };
+
+  bool ismmap;
 } unzip_chunk_t;
 
 typedef struct unzip_t {
