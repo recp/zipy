@@ -98,12 +98,6 @@ err:
 }
 
 UNZ_EXPORT
-UnzipResult
-unzip_chunk(unzip_t * __restrict stream, const void * __restrict ptr, size_t len) {
-  return UNZ_OK;
-}
-
-UNZ_EXPORT
 void
 unzip_cleanup(unzip_t * __restrict stream) {
   unzip_chunk_t *chk, *tofree;
