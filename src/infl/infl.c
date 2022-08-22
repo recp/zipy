@@ -15,6 +15,7 @@
  */
 
 #include "infl.h"
+#include "huff.h"
 #include "../endian.h"
 
 UNZ_HIDE
@@ -45,9 +46,12 @@ infl(unzip_t * __restrict stream, const uint8_t * __restrict p, uint32_t len) {
         memcpy(stream->dst, p, len);
         continue;
       }
-      case 0x2:
+      case 0x2: {
         /* static huffman */
+        huff_dec_t litlen_dec, dist_dec;
+        
         break;
+      }
       case 0x4:
         /* dynamic huffman */
         break;

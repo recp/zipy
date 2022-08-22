@@ -13,6 +13,8 @@
 		1E1066F328A2CD7B008664A6 /* infl.h in Headers */ = {isa = PBXBuildFile; fileRef = 1E1066EE28A2CD7B008664A6 /* infl.h */; };
 		1E1066F428A2CD7B008664A6 /* infl.c in Sources */ = {isa = PBXBuildFile; fileRef = 1E1066EF28A2CD7B008664A6 /* infl.c */; };
 		1E99A4D628A783B000F901D6 /* endian.h in Headers */ = {isa = PBXBuildFile; fileRef = 1E99A4D528A783B000F901D6 /* endian.h */; };
+		1E99A4D928A84A9E00F901D6 /* huff.h in Headers */ = {isa = PBXBuildFile; fileRef = 1E99A4D728A84A9E00F901D6 /* huff.h */; };
+		1E99A4DA28A84A9E00F901D6 /* huff.c in Sources */ = {isa = PBXBuildFile; fileRef = 1E99A4D828A84A9E00F901D6 /* huff.c */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -22,7 +24,10 @@
 		1E1066EE28A2CD7B008664A6 /* infl.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; path = infl.h; sourceTree = "<group>"; };
 		1E1066EF28A2CD7B008664A6 /* infl.c */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.c; path = infl.c; sourceTree = "<group>"; };
 		1E1066FA28A2DF87008664A6 /* common.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = common.h; sourceTree = "<group>"; };
+		1E92188828B173E800D26C8C /* lz77.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = lz77.h; sourceTree = "<group>"; };
 		1E99A4D528A783B000F901D6 /* endian.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; path = endian.h; sourceTree = "<group>"; };
+		1E99A4D728A84A9E00F901D6 /* huff.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = huff.h; sourceTree = "<group>"; };
+		1E99A4D828A84A9E00F901D6 /* huff.c */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.c; path = huff.c; sourceTree = "<group>"; };
 		1EE5A37E28A1BA670061A48E /* libunzip.dylib */ = {isa = PBXFileReference; explicitFileType = "compiled.mach-o.dylib"; includeInIndex = 0; path = libunzip.dylib; sourceTree = BUILT_PRODUCTS_DIR; };
 		1EE8048B28A4024900ECD6A7 /* zlib.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = zlib.h; sourceTree = "<group>"; };
 /* End PBXFileReference section */
@@ -70,6 +75,9 @@
 		1E1066ED28A2CD7B008664A6 /* infl */ = {
 			isa = PBXGroup;
 			children = (
+				1E92188828B173E800D26C8C /* lz77.h */,
+				1E99A4D728A84A9E00F901D6 /* huff.h */,
+				1E99A4D828A84A9E00F901D6 /* huff.c */,
 				1E1066EE28A2CD7B008664A6 /* infl.h */,
 				1E1066EF28A2CD7B008664A6 /* infl.c */,
 			);
@@ -108,6 +116,7 @@
 			isa = PBXHeadersBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				1E99A4D928A84A9E00F901D6 /* huff.h in Headers */,
 				1E1066F028A2CD7B008664A6 /* common.h in Headers */,
 				1E99A4D628A783B000F901D6 /* endian.h in Headers */,
 				1E1066F328A2CD7B008664A6 /* infl.h in Headers */,
@@ -172,6 +181,7 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				1E99A4DA28A84A9E00F901D6 /* huff.c in Sources */,
 				1E1066F428A2CD7B008664A6 /* infl.c in Sources */,
 				1E1066F228A2CD7B008664A6 /* unzip.c in Sources */,
 			);
