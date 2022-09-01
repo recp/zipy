@@ -33,6 +33,8 @@
 #  define likely(expr)   (expr)
 #endif
 
+#define ARRAY_LEN(ARR) (sizeof(ARR) / sizeof(ARR[0]))
+
 typedef struct unzip_chunk_t {
   struct unzip_chunk_t *next;
   FILE                 *file;
@@ -56,8 +58,7 @@ typedef struct unzip_t {
   uint32_t       dstlen;
 } unzip_t;
 
-uint32_t
-revbits32(uint32_t x) {
+UNZ_INLINE uint32_t revbits32(uint32_t x) {
 #if defined(__arm__) || defined(__aarch64__)
   __asm__( "rbit %0, %1" : "=r" ( x ) : "r" ( x ) );
   return x;
@@ -81,14 +82,14 @@ revbits32(uint32_t x) {
 #endif
 }
 
-unsigned char reverse_bit8(unsigned char x)
+UNZ_INLINE unsigned char reverse_bit8(unsigned char x)
 {
   x = ((x & 0x55) << 1) | ((x & 0xAA) >> 1);
   x = ((x & 0x33) << 2) | ((x & 0xCC) >> 2);
   return (x << 4) | (x >> 4);
 }
 
-unsigned short reverse_bit16(unsigned short x)
+UNZ_INLINE unsigned short reverse_bit16(unsigned short x)
 {
   x = ((x & 0x5555) << 1) | ((x & 0xAAAA) >> 1);
   x = ((x & 0x3333) << 2) | ((x & 0xCCCC) >> 2);
@@ -96,7 +97,7 @@ unsigned short reverse_bit16(unsigned short x)
   return (x << 8) | (x >> 8);
 }
 
-unsigned int reverse_bit32(unsigned int x)
+UNZ_INLINE unsigned int reverse_bit32(unsigned int x)
 {
   x = ((x & 0x55555555) << 1) | ((x & 0xAAAAAAAA) >> 1);
   x = ((x & 0x33333333) << 2) | ((x & 0xCCCCCCCC) >> 2);
