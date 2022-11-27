@@ -102,6 +102,8 @@ void
 unzip_cleanup(unzip_t * __restrict stream) {
   unzip_chunk_t *chk, *tofree;
 
+  if (!stream) return;
+
   if ((chk = stream->chunks_first)) {
     do {
       tofree = chk;
