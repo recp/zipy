@@ -25,10 +25,10 @@ extern "C" {
 typedef struct unzip_t unzip_t;
 
 /*!
- * @brief initialize zip for destination
+ * @brief initialize zip for memory, the destination must be a known-size memory addr
  *
- * @param[in]     dst           compressed data (memory addr to unzip)
- * @param[in]     dstlen    size of compressed data
+ * @param[in]     dst       uncompressed data (memory addr to unzip)
+ * @param[in]     dstlen    size of uncompressed data in bytes
  *
  * @returns zip stream to use later
  */
