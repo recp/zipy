@@ -30,10 +30,10 @@ zlib_header(unzip_t * __restrict stream, unzip_chunk_t * __restrict ch) {
   cm      = cinfo & 0xf;
   cinfo >>= 4;
 
-  flevel = *p++;
-  fcheck = flevel & 0xf;
-  fdict  = (flevel & 0x10) >> 4;
-  flevel = (flevel & 0xe0) >> 5;
+  flevel   = *p++;
+  fcheck  = flevel & 0xf;
+  fdict   = (flevel & 0x10) >> 4;
+  flevel   = (flevel & 0xe0) >> 5;
 
   if (fdict) { p += 4; }
 
