@@ -76,6 +76,12 @@ extern "C" {
 #  define __has_builtin(x) 0
 #endif
 
+#if defined(__SIZEOF_INT128__)
+typedef __uint128_t big_int_t;
+#else
+typedef uintmax_t   big_int_t;
+#endif
+
 typedef enum UnzipResult {
   UNZ_NOOP     =  1,     /* no operation needed */
   UNZ_OK       =  0,
