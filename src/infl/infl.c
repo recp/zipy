@@ -88,7 +88,7 @@ static const int codelen_lengths_order[MAX_CODELEN_LENS] =
 { 16, 17, 18, 0, 8, 7, 9, 6, 10, 5, 11, 4, 12, 3, 13, 2, 14, 1, 15 };
 
 #define EXTRACT_BITS(buffer, count) ((buffer) & (((bitstream_t)1 << (count)) - 1))
-
+#define CONSUME_BITS(N)             bits >>= (N); nbits -= (N);
 
 #define REFILL_BITS(req)                                                      \
 do {                                                                          \
@@ -149,8 +149,7 @@ infl_block(defl_stream_t      * __restrict stream,
     if ((lsym = huff_decode_lsb(tlit, bits, 15, &used_bits)) < 0)
       return UNZ_ERR; /* invalid symbol */
 
-    bits >>= used_bits;
-    nbits -= used_bits;
+    CONSUME_BITS(used_bits);
 
     if (lsym < 256) {
       /* Literal byte */
@@ -174,9 +173,8 @@ infl_block(defl_stream_t      * __restrict stream,
 
     if (len_info.bits) {
       REFILL_BITS(len_info.bits);
-      len   += EXTRACT_BITS(bits, len_info.bits);
-      bits >>= len_info.bits;
-      nbits -= len_info.bits;
+      len += EXTRACT_BITS(bits, len_info.bits);
+      CONSUME_BITS(len_info.bits);
     }
 
     /* Decode distance symbol */
@@ -184,16 +182,15 @@ infl_block(defl_stream_t      * __restrict stream,
     if ((dsym = huff_decode_lsb(tdist, bits, 15, &used_bits)) < 0)
       return UNZ_ERR; /* invalid symbol */
 
-    hval_t dist_info = dvals[dsym];
-    bits >>= used_bits;
-    nbits -= used_bits;
+    CONSUME_BITS(used_bits);
 
+    hval_t dist_info = dvals[dsym];
+  
     dist = dist_info.base;
     if (dist_info.bits) {
       REFILL_BITS(dist_info.bits);
-      dist  += EXTRACT_BITS(bits, dist_info.bits);
-      bits >>= dist_info.bits;
-      nbits -= dist_info.bits;
+      dist += EXTRACT_BITS(bits, dist_info.bits);
+      CONSUME_BITS(dist_info.bits);
     }
 
     /* Validate distance */
