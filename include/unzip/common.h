@@ -83,14 +83,15 @@ typedef uintmax_t   big_int_t;
 #endif
 
 typedef enum UnzipResult {
-  UNZ_NOOP     =  1,     /* no operation needed */
+  UNZ_NOOP     =  1,       /* no operation needed */
   UNZ_OK       =  0,
-  UNZ_ERR      = -1,     /* UKNOWN ERR */
+  UNZ_ERR      = -1,       /* UKNOWN ERR */
   UNZ_EFOUND   = -1000,
   UNZ_ENOMEM   = -ENOMEM,
   UNZ_EPERM    = -EPERM,
-  UNZ_EBADF    = -EBADF  /* file couldn't parsed / loaded */
-} UnzipResult;
+  UNZ_EBADF    = -EBADF,   /* file couldn't parsed / loaded */
+  UNZ_EFULL    = -ENOBUFS  /* no space ENOBUFS vs ENOSPC    */
+} UnzResult;
 
 #ifdef __cplusplus
 }

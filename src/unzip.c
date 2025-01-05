@@ -40,17 +40,19 @@ unzip_include_fchunk(unzip_t    * __restrict stream,
                      FILE       * __restrict file,
                      uint32_t                off,
                      uint32_t                len) {
-  unzip_chunk_t *chk;
+  unz_chunk_t *chk;
 
-  chk         = calloc(1, sizeof(*chk));
-  chk->file   = file;
-  chk->off    = off;
-  chk->len    = len;
-  chk->ismmap = false;
+  chk          = calloc(1, sizeof(*chk));
+  chk->file    = file;
+  chk->off     = off;
+  chk->len     = len;
+  chk->ismmap  = false;
+  chk->bitlen  = len * 8;
+  chk->hasbits = chk->bitlen > 0;
 
   if (!stream->chunks_first) { stream->chunks_first      = chk; }
   else                       { stream->chunks_last->next = chk; }
-  
+
   stream->chunks_last = chk;
 }
 
@@ -59,12 +61,15 @@ void
 unzip_include_chunk(unzip_t    * __restrict stream,
                     const void * __restrict ptr,
                     uint32_t                len) {
-  unzip_chunk_t *chk;
+  unz_chunk_t *chk;
 
-  chk         = calloc(1, sizeof(*chk));
-  chk->p      = ptr;
-  chk->len    = len;
-  chk->ismmap = true;
+  chk          = calloc(1, sizeof(*chk));
+  chk->p       = ptr;
+  chk->len     = len;
+  chk->end     = ptr + len;
+  chk->ismmap  = true;
+  chk->bitlen  = len * 8;
+  chk->hasbits = chk->bitlen > 0;
 
   if (!stream->chunks_first) { stream->chunks_first      = chk; }
   else                       { stream->chunks_last->next = chk; }
@@ -73,20 +78,20 @@ unzip_include_chunk(unzip_t    * __restrict stream,
 }
 
 UNZ_EXPORT
-UnzipResult
+UnzResult
 unzip(unzip_t * __restrict stream) {
-  unzip_chunk_t *chk;
-  const uint8_t *p;
+  unz_chunk_t *chk;
 
   if (!(chk = stream->chunks_first)) { return UNZ_NOOP; }
 
   /* TODO: currently only zlib is implemented */
 
   do {
-    if (likely(stream->header)) { p = chk->p;                   }
-    else                        { p = zlib_header(stream, chk); }
+    if (unlikely(!stream->header)) {
+      zlib_header(stream, chk);
+    }
 
-    if (infl(stream, p, chk->len) < 0) {
+    if (infl(stream, &chk) < 0) {
       goto err;
     }
   } while ((chk = chk->next));
@@ -100,7 +105,7 @@ err:
 UNZ_EXPORT
 void
 unzip_cleanup(unzip_t * __restrict stream) {
-  unzip_chunk_t *chk, *tofree;
+  unz_chunk_t *chk, *tofree;
 
   if (!stream) return;
 

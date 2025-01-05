@@ -21,6 +21,7 @@
 #include <stdlib.h>
 #include <stdio.h>
 #include <math.h>
+#include <huff/huff.h>
 
 #include "../include/unzip/common.h"
 #include "../include/unzip/unzip.h"
@@ -35,28 +36,42 @@
 
 #define ARRAY_LEN(ARR) (sizeof(ARR) / sizeof(ARR[0]))
 
-typedef struct unzip_chunk_t {
-  struct unzip_chunk_t *next;
-  FILE                 *file;
-  const uint8_t        *p;
-  uint32_t              len;
-  uint32_t              off;
-  bool                  ismmap;
-} unzip_chunk_t;
+typedef struct unz__chunk_t  unz_chunk_t;
+typedef struct unz__chunk_t  defl_chunk_t;
+typedef struct unz__stream_t defl_stream_t;
 
-typedef struct unzip_t {
-  unzip_chunk_t  *chunks_first;
-  unzip_chunk_t  *chunks_last;
-  
-  void           *header;
+struct unz__chunk_t {
+  struct unz__chunk_t *next;
+  FILE                *file;
+  const uint8_t       *p;
+  const uint8_t       *end;
+  uint32_t             len;
+  uint32_t             off;
+  size_t               bitpos;
+  uint64_t             bitlen;
+  bitstream_t          pbits;
+  uint8_t              npbits;
+  bool                 ismmap;
+  bool                 hasbits;
+};
+
+struct unz__stream_t {
+  unz_chunk_t   *chunks_first;
+  unz_chunk_t   *chunks_last;
+  unz_chunk_t   *it;
+
+  void          *header;
 
   void          *(*malloc)(size_t);
   void          *(*realloc)(void *, size_t);
   void           (*free)(void *);
 
+  size_t         bitpos; /* bit position in all */
   uint8_t       *dst;
   uint32_t       dstlen;
-} unzip_t;
+  uintptr_t      dstpos;
+  size_t         srclen; /* sum_of(chunk->len)  */
+};
 
 UNZ_INLINE uint32_t revbits32(uint32_t x) {
 #if defined(__arm__) || defined(__aarch64__)

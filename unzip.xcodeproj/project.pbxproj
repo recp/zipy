@@ -13,8 +13,7 @@
 		1E1066F328A2CD7B008664A6 /* infl.h in Headers */ = {isa = PBXBuildFile; fileRef = 1E1066EE28A2CD7B008664A6 /* infl.h */; };
 		1E1066F428A2CD7B008664A6 /* infl.c in Sources */ = {isa = PBXBuildFile; fileRef = 1E1066EF28A2CD7B008664A6 /* infl.c */; };
 		1E99A4D628A783B000F901D6 /* endian.h in Headers */ = {isa = PBXBuildFile; fileRef = 1E99A4D528A783B000F901D6 /* endian.h */; };
-		1E99A4D928A84A9E00F901D6 /* huff.h in Headers */ = {isa = PBXBuildFile; fileRef = 1E99A4D728A84A9E00F901D6 /* huff.h */; };
-		1E99A4DA28A84A9E00F901D6 /* huff.c in Sources */ = {isa = PBXBuildFile; fileRef = 1E99A4D828A84A9E00F901D6 /* huff.c */; };
+		1E9D6F892D288FAC00101853 /* libhuff.a in Frameworks */ = {isa = PBXBuildFile; fileRef = 1ECE63AA2D1C60E9003E36DF /* libhuff.a */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -26,8 +25,7 @@
 		1E1066FA28A2DF87008664A6 /* common.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = common.h; sourceTree = "<group>"; };
 		1E92188828B173E800D26C8C /* lz77.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = lz77.h; sourceTree = "<group>"; };
 		1E99A4D528A783B000F901D6 /* endian.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; path = endian.h; sourceTree = "<group>"; };
-		1E99A4D728A84A9E00F901D6 /* huff.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = huff.h; sourceTree = "<group>"; };
-		1E99A4D828A84A9E00F901D6 /* huff.c */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.c; path = huff.c; sourceTree = "<group>"; };
+		1ECE63AA2D1C60E9003E36DF /* libhuff.a */ = {isa = PBXFileReference; explicitFileType = archive.ar; path = libhuff.a; sourceTree = BUILT_PRODUCTS_DIR; };
 		1EE5A37E28A1BA670061A48E /* libunzip.dylib */ = {isa = PBXFileReference; explicitFileType = "compiled.mach-o.dylib"; includeInIndex = 0; path = libunzip.dylib; sourceTree = BUILT_PRODUCTS_DIR; };
 		1EE8048B28A4024900ECD6A7 /* zlib.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = zlib.h; sourceTree = "<group>"; };
 /* End PBXFileReference section */
@@ -37,6 +35,7 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				1E9D6F892D288FAC00101853 /* libhuff.a in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -76,12 +75,18 @@
 			isa = PBXGroup;
 			children = (
 				1E92188828B173E800D26C8C /* lz77.h */,
-				1E99A4D728A84A9E00F901D6 /* huff.h */,
-				1E99A4D828A84A9E00F901D6 /* huff.c */,
 				1E1066EE28A2CD7B008664A6 /* infl.h */,
 				1E1066EF28A2CD7B008664A6 /* infl.c */,
 			);
 			path = infl;
+			sourceTree = "<group>";
+		};
+		1ECE63A92D1C60E9003E36DF /* Frameworks */ = {
+			isa = PBXGroup;
+			children = (
+				1ECE63AA2D1C60E9003E36DF /* libhuff.a */,
+			);
+			name = Frameworks;
 			sourceTree = "<group>";
 		};
 		1EE5A37528A1BA660061A48E = {
@@ -89,6 +94,7 @@
 			children = (
 				1E1066E728A2CD7B008664A6 /* include */,
 				1E1066EB28A2CD7B008664A6 /* src */,
+				1ECE63A92D1C60E9003E36DF /* Frameworks */,
 				1EE5A37F28A1BA670061A48E /* Products */,
 			);
 			sourceTree = "<group>";
@@ -116,7 +122,6 @@
 			isa = PBXHeadersBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				1E99A4D928A84A9E00F901D6 /* huff.h in Headers */,
 				1E1066F028A2CD7B008664A6 /* common.h in Headers */,
 				1E99A4D628A783B000F901D6 /* endian.h in Headers */,
 				1E1066F328A2CD7B008664A6 /* infl.h in Headers */,
@@ -151,7 +156,7 @@
 			isa = PBXProject;
 			attributes = {
 				BuildIndependentTargetsInParallel = 1;
-				LastUpgradeCheck = 1400;
+				LastUpgradeCheck = 1620;
 				TargetAttributes = {
 					1EE5A37D28A1BA670061A48E = {
 						CreatedOnToolsVersion = 14.0;
@@ -181,7 +186,6 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				1E99A4DA28A84A9E00F901D6 /* huff.c in Sources */,
 				1E1066F428A2CD7B008664A6 /* infl.c in Sources */,
 				1E1066F228A2CD7B008664A6 /* unzip.c in Sources */,
 			);
@@ -194,6 +198,7 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				ALWAYS_SEARCH_USER_PATHS = NO;
+				ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS = YES;
 				CLANG_ANALYZER_NONNULL = YES;
 				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
 				CLANG_CXX_LANGUAGE_STANDARD = "gnu++20";
@@ -223,9 +228,11 @@
 				CLANG_WARN_UNREACHABLE_CODE = YES;
 				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
 				COPY_PHASE_STRIP = NO;
+				DEAD_CODE_STRIPPING = YES;
 				DEBUG_INFORMATION_FORMAT = dwarf;
 				ENABLE_STRICT_OBJC_MSGSEND = YES;
 				ENABLE_TESTABILITY = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = YES;
 				GCC_C_LANGUAGE_STANDARD = gnu11;
 				GCC_DYNAMIC_NO_PIC = NO;
 				GCC_NO_COMMON_BLOCKS = YES;
@@ -252,6 +259,7 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				ALWAYS_SEARCH_USER_PATHS = NO;
+				ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS = YES;
 				CLANG_ANALYZER_NONNULL = YES;
 				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
 				CLANG_CXX_LANGUAGE_STANDARD = "gnu++20";
@@ -281,9 +289,11 @@
 				CLANG_WARN_UNREACHABLE_CODE = YES;
 				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
 				COPY_PHASE_STRIP = NO;
+				DEAD_CODE_STRIPPING = YES;
 				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
 				ENABLE_NS_ASSERTIONS = NO;
 				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = YES;
 				GCC_C_LANGUAGE_STANDARD = gnu11;
 				GCC_NO_COMMON_BLOCKS = YES;
 				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
@@ -303,12 +313,16 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				CODE_SIGN_STYLE = Automatic;
+				DEAD_CODE_STRIPPING = YES;
 				DEVELOPMENT_TEAM = 43HMQY7T5T;
 				DYLIB_COMPATIBILITY_VERSION = 1;
 				DYLIB_CURRENT_VERSION = 1;
 				EXECUTABLE_PREFIX = lib;
+				LIBRARY_SEARCH_PATHS = "$(PRODUCT_DIR)";
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SKIP_INSTALL = YES;
+				SYSTEM_HEADER_SEARCH_PATHS = "$(PROJECT_DIR)/../../huff/include";
+				USER_HEADER_SEARCH_PATHS = "";
 			};
 			name = Debug;
 		};
@@ -316,12 +330,16 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				CODE_SIGN_STYLE = Automatic;
+				DEAD_CODE_STRIPPING = YES;
 				DEVELOPMENT_TEAM = 43HMQY7T5T;
 				DYLIB_COMPATIBILITY_VERSION = 1;
 				DYLIB_CURRENT_VERSION = 1;
 				EXECUTABLE_PREFIX = lib;
+				LIBRARY_SEARCH_PATHS = "$(PRODUCT_DIR)";
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SKIP_INSTALL = YES;
+				SYSTEM_HEADER_SEARCH_PATHS = "$(PROJECT_DIR)/../../huff/include";
+				USER_HEADER_SEARCH_PATHS = "";
 			};
 			name = Release;
 		};

@@ -15,84 +15,537 @@
  */
 
 #include "infl.h"
-#include "huff.h"
 #include "../endian.h"
 
+#include <math.h>
+
+#define LITLEN_EOB 256
+#define LITLEN_MAX 285
+#define LITLEN_TBL_OFFSET 257
+#define MIN_LEN 3
+#define MAX_LEN 258
+
+#define MIN(a,b) (((a)<(b))?(a):(b))
+#define MAX(a,b) (((a)>(b))?(a):(b))
+
+#define MIN_CODELEN_LENS 4
+#define MAX_CODELEN_LENS 19
+
+#define MIN_LITLEN_LENS 257
+#define MAX_LITLEN_LENS 288
+
+#define MIN_DIST_LENS   1
+#define MAX_DIST_LENS   32
+
+#define CODELEN_MAX_LIT 15
+
+#define CODELEN_COPY 16
+#define CODELEN_COPY_MIN 3
+#define CODELEN_COPY_MAX 6
+
+#define CODELEN_ZEROS 17
+#define CODELEN_ZEROS_MIN 3
+#define CODELEN_ZEROS_MAX 10
+
+#define CODELEN_ZEROS2 18
+#define CODELEN_ZEROS2_MIN 11
+#define CODELEN_ZEROS2_MAX 138
+
+#define MAX_CODELEN_CODES 19   // Maximum number of code length codes
+#define MAX_LITLEN_CODES 288   // Maximum number of literal/length codes
+#define MAX_DIST_CODES 32      // Maximum number of distance codes
+
 static const uint8_t hufxd_len_litl[288] = {
-  8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,
-  8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,
-  8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,
-  8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,
-  9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,
-  9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,
-  9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,
-  9,9,9,9,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,8,8,8,8,8,8,8,8
+  [0   ... 143] = 8,
+  [144 ... 255] = 9,
+  [256 ... 279] = 7,
+  [280 ... 287] = 8
 };
 
-static const uint8_t hufxd_len_dist[32] = {
-  5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5
+static const uint8_t hufxd_len_dist[32] = { [0 ... 31] = 5 };
+
+typedef struct {
+  uint16_t base;  // Base length or distance
+  uint8_t  bits;  // Extra bits
+} hval_t;
+
+static const hval_t lvals[] = {
+  {3,   0}, {4,   0}, {5,   0}, {6,   0}, {7,   0}, {8,  0}, {9,  0}, {10,  0},
+  {11,  1}, {13,  1}, {15,  1}, {17,  1}, {19,  2}, {23, 2}, {27, 2}, {31,  2},
+  {35,  3}, {43,  3}, {51,  3}, {59,  3}, {67,  4}, {83, 4}, {99, 4}, {115, 4},
+  {131, 5}, {163, 5}, {195, 5}, {227, 5}, {258, 0}
 };
+
+static const hval_t dvals[] = {
+  {1, 0}, {2, 0}, {3, 0}, {4, 0}, {5, 1}, {7, 1}, {9, 2}, {13, 2}, {17, 3},
+  {25, 3}, {33, 4}, {49, 4}, {65, 5}, {97, 5}, {129, 6}, {193, 6}, {257, 7},
+  {385, 7}, {513, 8}, {769, 8}, {1025, 9}, {1537, 9}, {2049, 10}, {3073, 10},
+  {4097, 11}, {6145, 11}, {8193, 12}, {12289, 12}, {16385, 13}, {24577, 13}
+};
+
+/* RFC 1951, 3.2.7 */
+static const int codelen_lengths_order[MAX_CODELEN_LENS] =
+{ 16, 17, 18, 0, 8, 7, 9, 6, 10, 5, 11, 4, 12, 3, 13, 2, 14, 1, 15 };
+
+//#define REFILL_BITS(req)                                                      \
+//  do {                                                                        \
+//    while (nbits < (req)) {                                                   \
+//      if (npbits == 0) {                                                      \
+//        if (!chunk->hasbits                                                   \
+//            && (!(chunk = chunk->next) || (!chunk->p || chunk->len == 0))) {  \
+//          printf("REFILL_BITS: No more bits available\n");                    \
+//          return UNZ_ERR;                                                     \
+//        }                                                                     \
+//        /* Read bits from the current chunk */                                \
+//        pbits = huff_read(chunk->p, &chunk->bitpos, &npbits, chunk->len);     \
+//        if (npbits == 0) {                                                    \
+//          chunk->hasbits = false;                                             \
+//          printf("REFILL_BITS: No bits read\n");                              \
+//          return UNZ_ERR;                                                     \
+//        } else {                                                              \
+//          size_t used_bytes = chunk->bitpos / 8;                              \
+//          chunk->bitpos %= 8; /* Keep leftover bits in bitpos */              \
+//          chunk->p += used_bytes;                                             \
+//          printf("used_bytes: %zu, remaining_bits: %zu\n", used_bytes, chunk->bitpos); \
+//        }                                                                     \
+//        chunk->hasbits = (chunk->p < chunk->end); /* Update chunk state */    \
+//      }                                                                       \
+//                                                                              \
+//      size_t max_shift = sizeof(bitstream_t) * 8;                             \
+//      size_t available_space = max_shift - nbits;                             \
+//      size_t transfer = (available_space < npbits) ? available_space : npbits;\
+//                                                                              \
+//      if (transfer > 0 && transfer < max_shift) {                             \
+//        bits |= (pbits & (((bitstream_t)1 << transfer) - 1)) << nbits;        \
+//        pbits >>= transfer;                                                   \
+//      } else if (transfer == max_shift) {                                     \
+//        bits |= pbits << nbits;                                               \
+//        pbits = 0;                                                            \
+//      }                                                                       \
+//                                                                              \
+//      nbits   += transfer;                                                    \
+//      npbits  -= transfer;                                                    \
+//      chunk->npbits = npbits; /* Keep npbits updated */                       \
+//printf("REFILL_BITS: bits=0x%llx, nbits=%d\n", bits, nbits); \
+//    }                                                                         \
+//  } while (0)
+#define REFILL_BITS2(req)                                                      \
+  do {                                                                        \
+    while (nbits < (req)) {                                                   \
+      if (npbits == 0) {                                                      \
+        if (!chunk->hasbits                                                   \
+            && (!(chunk = chunk->next) || (!chunk->p || chunk->len == 0))) {  \
+          return UNZ_ERR;                                                     \
+        }                                                                     \
+        /* Read bits from the current chunk */                                \
+        pbits = huff_read(chunk->p, &chunk->bitpos, &npbits, chunk->len);     \
+        if (npbits == 0) {                                                    \
+          chunk->hasbits = false;                                             \
+          return UNZ_ERR;                                                     \
+        } else {                                                              \
+          size_t used_bytes = chunk->bitpos / 8;                              \
+          chunk->bitpos %= 8; /* Keep leftover bits in bitpos */              \
+          chunk->p += used_bytes;                                             \
+          printf("used_bytes: %zu, remaining_bits: %zu\n", used_bytes, chunk->bitpos); \
+        }                                                                     \
+        chunk->hasbits = (chunk->p < chunk->end); /* Update chunk state */    \
+      }                                                                       \
+                                                                              \
+      size_t max_shift = sizeof(bitstream_t) * 8;                             \
+      size_t available_space = max_shift - nbits;                             \
+      size_t transfer = (available_space < npbits) ? available_space : npbits;\
+                                                                              \
+      if (transfer > 0 && transfer < max_shift) {                             \
+        bits |= (pbits & (((bitstream_t)1 << transfer) - 1)) << nbits;        \
+        pbits >>= transfer;                                                   \
+      } else if (transfer == max_shift) {                                     \
+        bits |= pbits << nbits;                                               \
+        pbits = 0;                                                            \
+      }                                                                       \
+                                                                              \
+      nbits += transfer;                                                      \
+      npbits -= transfer;                                                     \
+    }                                                                         \
+    chunk->npbits = npbits;                                                   \
+  } while (0)
+//#define REFILL_BITS(req)                                                      \
+//  do {                                                                        \
+//    while (nbits < (req)) {                                                   \
+//      if (npbits == 0) {                                                      \
+//        if (!chunk->hasbits                                                   \
+//            && (!(chunk = chunk->next) || (!chunk->p || chunk->len == 0))) {  \
+//          return UNZ_ERR;                                                     \
+//        }                                                                     \
+//        /* Read bits from the current chunk */                                \
+//        pbits = huff_read(chunk->p, &chunk->bitpos, &npbits, chunk->len);     \
+//        if (npbits == 0) {                                                    \
+//          chunk->hasbits = false;                                             \
+//          return UNZ_ERR;                                                     \
+//        } else {                                                                     \
+//        int used_bytes = npbits / 8; \
+//chunk->p += used_bytes; printf("used_bytes: %d\n", used_bytes); \
+//        } \
+//        chunk->hasbits = true;                                                \
+//      }                                                                       \
+//                                                                              \
+//      size_t transfer = sizeof(bitstream_t) * 8 - nbits;                      \
+//      transfer = (transfer < npbits) ? transfer : npbits;                     \
+//                                                                              \
+//      if (transfer < sizeof(bitstream_t) * 8) {                               \
+//        /* Safe shift for smaller transfer sizes */                           \
+//        bits |= (pbits & ((1ULL << transfer) - 1)) << nbits;                  \
+//        pbits >>= transfer;                                                   \
+//      } else {                                                                \
+//        /* Handle full transfer without shifting beyond 64 bits */            \
+//        bits |= pbits << nbits;                                               \
+//        pbits = 0;                                                            \
+//      }                                                                       \
+//                                                                              \
+//      nbits   += transfer;                                                    \
+//      npbits  -= transfer;                                                    \
+//    }                                                                         \
+//  } while (0)
+#define REFILL_BITS(req)                                                      \
+do {                                                                          \
+    while (nbits < (req)) {                                                   \
+        if (npbits == 0) {                                                    \
+            if (!chunk->hasbits                                               \
+                && (!(chunk = chunk->next) || (!chunk->p || chunk->len == 0))) {  \
+                return UNZ_ERR;                                               \
+            }                                                                 \
+            /* Read bits from the current chunk */                            \
+            pbits = huff_read(chunk->p, &chunk->bitpos, &npbits, chunk->len); \
+            if (npbits == 0) {                                                \
+                chunk->hasbits = false;                                       \
+                return UNZ_ERR;                                               \
+            } else {                                                          \
+                size_t used_bytes = chunk->bitpos / 8;                        \
+                chunk->bitpos %= 8;                                           \
+                chunk->p += used_bytes;                                       \
+            }                                                                 \
+            chunk->hasbits = (chunk->p < chunk->end);                         \
+        }                                                                     \
+                                                                              \
+        size_t transfer = MIN((sizeof(bitstream_t) * 8) - nbits, npbits);     \
+                                                                              \
+        if (transfer == sizeof(bitstream_t) * 8) {                            \
+            /* Handle full-width transfer without undefined behavior */       \
+            bits |= pbits << nbits;                                           \
+            pbits = 0;                                                        \
+        } else {                                                              \
+            bits |= (pbits & (((bitstream_t)1 << transfer) - 1)) << nbits;    \
+            pbits >>= transfer;                                               \
+        }                                                                     \
+        nbits += transfer;                                                    \
+        npbits -= transfer;                                                   \
+    }                                                                         \
+    chunk->npbits = npbits;                                                   \
+} while (0)
+
+#define REFILL_BITS33(req)                                                      \
+do {  printf("--bits: %llu nbits: %d %p\n", bits, nbits, chunk->p);                                                                      \
+    while (nbits < (req)) {                                                   \
+      if (npbits == 0) {                                                      \
+        if (!chunk->hasbits                                                   \
+            && (!(chunk = chunk->next) || (!chunk->p || chunk->len == 0))) {  \
+          return UNZ_ERR;                                                     \
+        }                                                                     \
+        /* Read bits from the current chunk */                                \
+        pbits = huff_read(chunk->p, &chunk->bitpos, &npbits, chunk->len);     \
+        if (npbits == 0) {                                                    \
+          chunk->hasbits = false;                                             \
+          return UNZ_ERR;                                                     \
+        } else {                                                              \
+          size_t used_bytes = chunk->bitpos / 8;                              \
+                                                          \
+          chunk->p += used_bytes;                                             \
+        }                                                                     \
+        chunk->hasbits = (chunk->p < chunk->end);                             \
+      }                                                                       \
+                                                                              \
+      size_t transfer = MIN((sizeof(bitstream_t) * 8) - nbits, npbits);       \
+                                                                              \
+if (transfer > 0) {   printf("transfer: %lu\n", transfer);                                                  \
+        if (transfer < sizeof(bitstream_t) * 8) {                             \
+          bits |= (pbits & (((bitstream_t)1 << transfer) - 1)) << nbits;      \
+          pbits >>= transfer;                                                 \
+        } else {                                                              \
+          /* Handle full-width transfer without shifting beyond 64 bits */    \
+          bits |= pbits << nbits;                                             \
+          pbits = 0;                                                          \
+        }                                                                     \
+        nbits += transfer;                                                    \
+        npbits -= transfer;                                                   \
+                                                \
+      }                                                                       \
+    }                                                                         \
+chunk->npbits = npbits; printf("bits: %llu nbits: %d %p\n", bits, nbits, chunk->p);                                                  \
+  } while (0)
+
+static inline
+int refill_bits(int req,
+                bitstream_t *bits,
+                uint8_t *nbits,
+                bitstream_t *pbits,
+                uint8_t *npbits,
+                defl_chunk_t ** __restrict chunk) {
+  while (*nbits < req) {
+    if (*npbits == 0) {
+      if (!(*chunk)->hasbits &&
+          (!(*chunk = (*chunk)->next) || !(*chunk)->p || (*chunk)->len == 0)) {
+        return UNZ_ERR; // No more bits
+      }
+      *pbits = huff_read((*chunk)->p, &(*chunk)->bitpos, npbits, (*chunk)->len);
+      if (*npbits == 0) {
+        return UNZ_ERR; // Failed to read
+      }
+    }
+
+    size_t max_shift = sizeof(bitstream_t) * 8;
+    size_t transfer = MIN(max_shift - *nbits, *npbits);
+
+    if (transfer == max_shift) {
+      *bits |= *pbits << *nbits;
+      *pbits = 0;
+    } else {
+      *bits |= (*pbits & (((bitstream_t)1 << transfer) - 1)) << *nbits;
+      *pbits >>= transfer;
+    }
+
+    *nbits += transfer;
+    *npbits -= transfer;
+  }
+
+  return UNZ_OK;
+}
 
 UNZ_INLINE
-UnzipResult
-infl_block(unzip_t          * __restrict stream,
-           uint8_t          * __restrict dst,
-           size_t                        dst_cap,
-           size_t           * __restrict dst_pos,
-           const huff_dec_t * __restrict litlen_dec,
-           const huff_dec_t * __restrict dist_dec) {
+UnzResult
+infl_block(defl_stream_t      * __restrict stream,
+           defl_chunk_t       * __restrict chunk,
+           uint8_t            * __restrict dst,
+           size_t                          dst_cap,
+           size_t             * __restrict dst_pos,
+           const huff_table_t * __restrict tlit,
+           const huff_table_t * __restrict tdist) {
+  // Initialize bitstream state from chunk
+  bitstream_t bits = 0, pbits = chunk->pbits;
+  size_t      dpos;
+  uint8_t     nbits = 0, npbits = chunk->npbits;
+  int         lsym, dsym;
+  uint32_t    len, dist;
+
+  dpos = *dst_pos;
+
+  while (true) {
+    /* Decode literal/length symbol */
+    REFILL_BITS(15);
+
+    uint8_t used_bits;
+    if ((lsym = huff_decode_lsb(tlit, bits, 15, &used_bits)) < 0)
+      return UNZ_ERR; /* invalid symbol */
+
+    bits >>= used_bits;
+    nbits -= used_bits;
+
+    if (lsym < 256) {
+      /* Literal byte */
+      if (dpos >= dst_cap)
+        return UNZ_EFULL;
+      dst[dpos++] = (uint8_t)lsym;
+      continue;
+    } else if (lsym == 256) {
+      /* End of block */
+      break;
+    }
+
+    /* Back-reference length */
+
+    if (lsym < 257 || lsym > 285) {
+      return UNZ_ERR; // Invalid symbol for lvals
+    }
+
+    hval_t len_info = lvals[lsym - 257];
+    len = len_info.base;
+
+    if (len_info.bits) {
+      REFILL_BITS(len_info.bits);
+      len   += bits & (((bitstream_t)1 << len_info.bits) - 1);
+      bits >>= len_info.bits;
+      nbits -= len_info.bits;
+    }
+
+    /* Decode distance symbol */
+    REFILL_BITS(15);
+    if ((dsym = huff_decode_lsb(tdist, bits, 15, &used_bits)) < 0)
+      return UNZ_ERR; /* invalid symbol */
+
+    hval_t dist_info = dvals[dsym];
+    bits >>= used_bits;
+    nbits -= used_bits;
+
+    dist = dist_info.base;
+    if (dist_info.bits) {
+      REFILL_BITS(dist_info.bits);
+      dist += bits & (((bitstream_t)1 << dist_info.bits) - 1);
+      bits >>= dist_info.bits;
+      nbits -= dist_info.bits;
+    }
+
+    /* Validate distance */
+    if (dist > dpos)  // If dist > dpos, referencing before start of buffer
+      return UNZ_ERR; /* invalid distance */
+
+    /* Output back-reference */
+    while (len--) {
+      if (dpos >= dst_cap)
+        return UNZ_EFULL;
+      dst[dpos] = dst[dpos - dist];
+      dpos++;
+    }
+  }
+
+  *dst_pos = dpos;
+
+  // Update chunk state
+  chunk->pbits   = pbits;
+  chunk->npbits  = npbits;
+  chunk->hasbits = npbits > 0;
+
   return UNZ_OK;
 }
 
 UNZ_HIDE
 int
-infl(unzip_t * __restrict stream, const uint8_t * __restrict p, uint32_t len) {
+infl(defl_stream_t  * __restrict stream,
+     defl_chunk_t  ** __restrict chunkref) {
+  unz_chunk_t   *chunk;
   const uint8_t *end;
   uint8_t        bfinal, btype;
-  huff_dec_t     hufxd_litl, hufxd_dist;
+  huff_table_t   tlitl,  tdist;
+  bitstream_t bits = 0, pbits = 0;
+  uint8_t nbits = 0, npbits = 0;
 
-  end = p + len;
+  chunk = *chunkref;
+  end   = chunk->end;
 
   /* initilize static tables */
-  huff_dec_init(&hufxd_litl, hufxd_len_litl, ARRAY_LEN(hufxd_len_litl));
-  huff_dec_init(&hufxd_dist, hufxd_len_dist, ARRAY_LEN(hufxd_len_dist));
+  huff_init_lsb(&tlitl, hufxd_len_litl, NULL, ARRAY_LEN(hufxd_len_litl));
+  huff_init_lsb(&tdist, hufxd_len_dist, NULL, ARRAY_LEN(hufxd_len_dist));
 
-  /* TODO: option to check enough input / output memory */
-  do {
-    bfinal  = *p++;
-    btype   = bfinal & 0x6;
-    bfinal &= 0x1;
+  while (chunk->p < end) {
+    REFILL_BITS(3);
+    bfinal = bits & 0x1;
+    btype  = (bits >> 1) & 0x3;
+    bits >>= 3;
+    nbits -= 3;
+
+    chunk->npbits = nbits;
+    chunk->pbits  = bits;
+  
+    printf("bfinal: %d, btype: %d\n\n\n\n", (int)bfinal, (int)btype);
 
     switch (btype) {
-      case 0x0: {
-        /* no compression */
+      case 0: {
         uint16_t len, nlen;
 
-        be_16(len,  p);
-        be_16(nlen, p);
+        be_16(len,  chunk->p);
+        be_16(nlen, chunk->p);
 
-        /* TODO: option to skip this or different error code? */
         if (unlikely(len != ~nlen)) { goto err; }
 
-        memcpy(stream->dst, p, len);
-        continue;
-      }
-      case 0x2: {
-        /* static huffman */
-      
+        memcpy(stream->dst, chunk->p, len);
+        stream->dstpos += len;
+      } continue;
+      case 1:
+        if (infl_block(stream, chunk, stream->dst, stream->dstlen,
+                       &stream->dstpos, &tlitl, &tdist) != UNZ_OK) {
+          goto err;
+        }
         break;
-      }
-      case 0x4:
-        /* dynamic huffman */
-        break;
+      case 2: {
+        uint8_t hclen, hlit, hdist;
+        uint8_t code_lengths[MAX_CODELEN_CODES] = {0};
+        uint8_t lens[MAX_LITLEN_CODES + MAX_DIST_CODES] = {0};
+        huff_table_t litlen_table, dist_table, codelen_table;
+        size_t i = 0;
+        bitstream_t bits = 0, pbits = 0;
+        uint8_t nbits = 0, npbits = 0;
+
+        REFILL_BITS(14);
+        hlit  = (bits & 0x1F) + 257;
+        hdist = ((bits >> 5) & 0x1F) + 1;
+        hclen = ((bits >> 10) & 0xF) + 4;
+        bits >>= 14;
+        nbits -= 14;
+
+        if (hlit + hdist > MAX_LITLEN_CODES + MAX_DIST_CODES) return UNZ_ERR;
+
+        for (i = 0; i < hclen; i++) {
+          REFILL_BITS(3);
+          code_lengths[codelen_lengths_order[i]] = bits & 0x7;
+          bits >>= 3;
+          nbits -= 3;
+        }
+
+        huff_init_lsb(&codelen_table, code_lengths, NULL, MAX_CODELEN_CODES);
+
+        i = 0;
+        while (i < (hlit + hdist)) {
+          uint8_t used_bits;
+          REFILL_BITS(15);
+          int symbol = huff_decode_lsb(&codelen_table, bits, 15, &used_bits);
+          if (symbol < 0) return UNZ_ERR;
+
+          bits >>= used_bits;
+          nbits -= used_bits;
+
+          if (symbol <= 15) {
+            lens[i++] = symbol;
+          } else if (symbol == 16) {
+            REFILL_BITS(2);
+            uint8_t repeat = 3 + (bits & 0x3);
+            bits >>= 2;
+            nbits -= 2;
+
+            uint8_t prev = (i > 0) ? lens[i - 1] : 0;
+            if (i + repeat > (hlit + hdist)) return UNZ_ERR;
+            while (repeat--) lens[i++] = prev;
+          } else if (symbol == 17) {
+            REFILL_BITS(3);
+            uint8_t repeat = 3 + (bits & 0x7);
+            bits >>= 3;
+            nbits -= 3;
+
+            if (i + repeat > (hlit + hdist)) return UNZ_ERR;
+            while (repeat--) lens[i++] = 0;
+          } else if (symbol == 18) {
+            REFILL_BITS(7);
+            uint8_t repeat = 11 + (bits & 0x7F);
+            bits >>= 7;
+            nbits -= 7;
+
+            if (i + repeat > (hlit + hdist)) return UNZ_ERR;
+            while (repeat--) lens[i++] = 0;
+          } else {
+            return UNZ_ERR;
+          }
+        }
+
+        huff_init_lsb(&litlen_table, lens,        NULL, hlit);
+        huff_init_lsb(&dist_table,   lens + hlit, NULL, hdist);
+
+        if (infl_block(stream, chunk, stream->dst, stream->dstlen,
+                       &stream->dstpos, &litlen_table, &dist_table) != UNZ_OK) {
+          return UNZ_ERR;
+        }
+      } break;
       default:
-        /* unkown btype */
         goto err;
     }
-  } while (p < end);
+  }
 
-  return 0;
-
+  return UNZ_OK;
 err:
-  return -1;
+  return UNZ_ERR;
 }

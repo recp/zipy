@@ -22,7 +22,7 @@ extern "C" {
 
 #include "common.h"
 
-typedef struct unzip_t unzip_t;
+typedef struct unz__stream_t unzip_t;
 
 /*!
  * @brief initialize zip for memory, the destination must be a known-size memory addr
@@ -79,7 +79,7 @@ unzip_include_fchunk(unzip_t    * __restrict stream,
  * @param[in,out] stream  zip stream: NULL to get created one, stream to continue unzipping.
  */
 UNZ_EXPORT
-UnzipResult
+UnzResult
 unzip(unzip_t * __restrict stream);
 
 /*!

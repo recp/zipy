@@ -21,6 +21,7 @@
 
 UNZ_HIDE
 int
-infl(unzip_t * __restrict stream, const uint8_t * __restrict p, uint32_t len);
+infl(defl_stream_t  * __restrict stream,
+     defl_chunk_t  ** __restrict chunkref);
 
 #endif /* infl_h */
