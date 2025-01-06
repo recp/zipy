@@ -93,35 +93,36 @@ static const int codelen_lengths_order[MAX_CODELEN_LENS] =
 
 #define REFILL_BITS(req)                                                      \
 do {                                                                          \
-    while (nbits < (req)) {                                                   \
-        if (npbits == 0) {                                                    \
-            if (!chunk->hasbits                                               \
-                && (!(chunk = chunk->next) || (!chunk->p || chunk->len == 0))) {  \
-                return UNZ_ERR;                                               \
-            }                                                                 \
-            /* Read bits from the current chunk */                            \
-            pbits = huff_read(&chunk->p, &chunk->bitpos, &npbits, chunk->end); \
-            if (npbits == 0) {                                                \
-                chunk->hasbits = false;                                       \
-                return UNZ_ERR;                                               \
-            }                                                              \
-            chunk->hasbits = (chunk->p < chunk->end);                         \
-        }                                                                     \
-                                                                              \
-        size_t transfer = MIN((sizeof(bitstream_t) * 8) - nbits, npbits);     \
-                                                                              \
-        if (transfer >= sizeof(bitstream_t) * 8) {                            \
-            /* Handle full-width transfer without undefined behavior */       \
-            bits |= pbits << nbits;                                           \
-            pbits = 0;                                                        \
-        } else {                                                              \
-            bits |= (pbits & (((bitstream_t)1 << transfer) - 1)) << nbits;    \
-            pbits >>= transfer;                                               \
-        }                                                                     \
-        nbits += transfer;                                                    \
-        npbits -= transfer;                                                   \
+  while (nbits < (req)) {                                                     \
+    if (npbits == 0) {                                                        \
+      if (!chunk->hasbits                                                     \
+          && (!(chunk = chunk->next) || (!chunk->p || chunk->len == 0))) {    \
+        return UNZ_ERR;                                                       \
+      }                                                                       \
+      /* Read bits from the current chunk */                                  \
+      pbits = huff_read(&chunk->p, &chunk->bitpos, &npbits, chunk->end);      \
+      if (npbits == 0) {                                                      \
+        chunk->hasbits = false;                                               \
+        return UNZ_ERR;                                                       \
+      }                                                                       \
+      chunk->hasbits = (chunk->p < chunk->end);                               \
     }                                                                         \
-    chunk->npbits = npbits;                                                   \
+                                                                              \
+    size_t transfer = MIN((sizeof(bitstream_t) * 8) - nbits, npbits);         \
+                                                                              \
+    if (transfer >= sizeof(bitstream_t) * 8) {                                \
+      /* Handle full-width transfer without undefined behavior */             \
+      bits |= pbits << nbits;                                                 \
+      pbits = 0;                                                              \
+    } else {                                                                  \
+      bits |= (pbits & (((bitstream_t)1 << transfer) - 1)) << nbits;          \
+      pbits >>= transfer;                                                     \
+    }                                                                         \
+    nbits  += transfer;                                                       \
+    npbits -= transfer;                                                       \
+  }                                                                           \
+  chunk->npbits = npbits;                                                     \
+  chunk->pbits  = pbits;                                                      \
 } while (0)
 
 UNZ_INLINE
