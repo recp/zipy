@@ -89,6 +89,7 @@ static const int codelen_lengths_order[MAX_CODELEN_LENS] =
 
 #define EXTRACT_BITS(buffer, count) ((buffer) & (((bitstream_t)1 << (count)) - 1))
 #define CONSUME_BITS(N)             bits >>= (N); nbits -= (N);
+#define DONATE_BITS()               chunk->npbits = nbits; chunk->pbits = bits;
 
 #define REFILL_BITS(req)                                                      \
 do {                                                                          \
@@ -185,7 +186,7 @@ infl_block(defl_stream_t      * __restrict stream,
     CONSUME_BITS(used_bits);
 
     hval_t dist_info = dvals[dsym];
-  
+
     dist = dist_info.base;
     if (dist_info.bits) {
       REFILL_BITS(dist_info.bits);
@@ -194,7 +195,7 @@ infl_block(defl_stream_t      * __restrict stream,
     }
 
     /* Validate distance */
-    if (dist > dpos)  // If dist > dpos, referencing before start of buffer
+    if (dist > dpos)
       return UNZ_ERR; /* invalid distance */
 
     /* Output back-reference */
@@ -238,12 +239,9 @@ infl(defl_stream_t  * __restrict stream,
     REFILL_BITS(3);
     bfinal = bits & 0x1;
     btype  = (bits >> 1) & 0x3;
-    bits >>= 3;
-    nbits -= 3;
+    CONSUME_BITS(3);
+    DONATE_BITS();
 
-    chunk->npbits = nbits;
-    chunk->pbits  = bits;
-  
     printf("bfinal: %d, btype: %d\n\n\n\n", (int)bfinal, (int)btype);
 
     switch (btype) {
