@@ -89,7 +89,8 @@ static const int codelen_lengths_order[MAX_CODELEN_LENS] =
 
 #define EXTRACT_BITS(buffer, count) ((buffer) & (((bitstream_t)1 << (count)) - 1))
 #define CONSUME_BITS(N)             bits >>= (N); nbits -= (N);
-#define DONATE_BITS()               chunk->npbits = nbits; chunk->pbits = bits;
+#define DONATE_BITS()               chunk->npbits = nbits; chunk->pbits = bits; \
+                                    bits = 0; nbits = 0;
 
 #define REFILL_BITS(req)                                                      \
 do {                                                                          \
