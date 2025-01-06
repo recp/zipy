@@ -226,7 +226,8 @@ infl(defl_stream_t  * __restrict stream,
   unz_chunk_t   *chunk;
   const uint8_t *end;
   uint8_t        bfinal, btype;
-  huff_table_t   tlitl,  tdist;
+  static huff_table_t tlitl = {0}, tdist = {0};
+
   bitstream_t bits = 0, pbits = 0;
   uint8_t nbits = 0, npbits = 0;
 
@@ -234,8 +235,10 @@ infl(defl_stream_t  * __restrict stream,
   end   = chunk->end;
 
   /* initilize static tables */
-  huff_init_lsb(&tlitl, hufxd_len_litl, NULL, ARRAY_LEN(hufxd_len_litl));
-  huff_init_lsb(&tdist, hufxd_len_dist, NULL, ARRAY_LEN(hufxd_len_dist));
+  if (!tlitl.syms) {
+    huff_init_lsb(&tlitl, hufxd_len_litl, NULL, ARRAY_LEN(hufxd_len_litl));
+    huff_init_lsb(&tdist, hufxd_len_dist, NULL, ARRAY_LEN(hufxd_len_dist));
+  }
 
   while (chunk->p < end) {
     REFILL_BITS(3);
