@@ -87,10 +87,10 @@ static const hval_t dvals[] = {
 static const int codelen_lengths_order[MAX_CODELEN_LENS] =
 { 16, 17, 18, 0, 8, 7, 9, 6, 10, 5, 11, 4, 12, 3, 13, 2, 14, 1, 15 };
 
-#define EXTRACT_BITS(buffer, count) ((buffer) & (((bitstream_t)1 << (count)) - 1))
-#define CONSUME_BITS(N)             bits >>= (N); nbits -= (N);
-#define DONATE_BITS()               chunk->npbits = nbits; chunk->pbits = bits; \
-                                    bits = 0; nbits = 0;
+#define EXTRACT_BITS(B, C) ((B) & (((bitstream_t)1 << (C)) - 1))
+#define CONSUME_BITS(N)    bits >>= (N); nbits -= (N);
+#define DONATE_BITS()      chunk->npbits = nbits; chunk->pbits = bits;        \
+                           bits = 0; nbits = 0;
 
 #define REFILL_BITS(req)                                                      \
 do {                                                                          \
