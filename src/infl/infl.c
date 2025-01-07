@@ -113,9 +113,9 @@ do {                                                                          \
       bits    = pbits;                                                        \
       nbits   = npbits; pbits = 0; npbits = 0;                                \
     } else {                                                                  \
-      size_t transfer = MIN(sizeof(bits) * 8 - nbits, npbits);                \
-      bits   |= (pbits & (((bitstream_t)1 << transfer) - 1)) << nbits;        \
-      pbits >>= transfer; nbits += transfer; npbits -= transfer;              \
+      uint8_t nt = MIN(sizeof(bits) * 8 - nbits, npbits);                     \
+      bits      |= (pbits & (((bitstream_t)1 << nt) - 1)) << nbits;           \
+      pbits    >>= nt; nbits += nt; npbits -= nt;                             \
     }                                                                         \
     chunk->npbits = npbits;                                                   \
     chunk->pbits  = pbits;                                                    \
