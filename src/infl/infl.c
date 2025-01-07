@@ -231,8 +231,9 @@ infl(defl_stream_t  * __restrict stream,
   bitstream_t bits = 0, pbits = 0;
   uint8_t nbits = 0, npbits = 0;
 
-  chunk = *chunkref;
-  end   = chunk->end;
+  bfinal = 0;
+  chunk  = *chunkref;
+  end    = chunk->end;
 
   /* initilize static tables */
   if (!tlitl.syms) {
@@ -245,16 +246,27 @@ infl(defl_stream_t  * __restrict stream,
     bfinal = bits & 0x1;
     btype  = (bits >> 1) & 0x3;
     CONSUME_BITS(3);
-    DONATE_BITS();
 
-    printf("bfinal: %d, btype: %d\n\n\n\n", (int)bfinal, (int)btype);
+#if DEBUG
+    printf("defl: bfinal: %d, btype: %d\n\n\n\n", (int)bfinal, (int)btype);
+#endif
+
+    if (btype) {
+      DONATE_BITS();
+    }
 
     switch (btype) {
       case 0: {
-        uint16_t len, nlen;
+        uint16_t len, nlen, leftover_bits;
 
-        be_16(len,  chunk->p);
-        be_16(nlen, chunk->p);
+        leftover_bits = nbits % 8;
+        if (leftover_bits > 0)
+          CONSUME_BITS(leftover_bits);
+
+        REFILL_BITS(32);
+
+        len  = EXTRACT_BITS(bits, 16); CONSUME_BITS(16);
+        nlen = EXTRACT_BITS(bits, 16); CONSUME_BITS(16);
 
         if (unlikely(len != ~nlen)) { goto err; }
 
@@ -273,23 +285,22 @@ infl(defl_stream_t  * __restrict stream,
         uint8_t lens[MAX_LITLEN_CODES + MAX_DIST_CODES] = {0};
         huff_table_t litlen_table, dist_table, codelen_table;
         size_t i = 0;
-        bitstream_t bits = 0, pbits = 0;
-        uint8_t nbits = 0, npbits = 0;
+        bitstream_t bits = 0, pbits = chunk->pbits;
+        uint8_t nbits = 0, npbits = chunk->npbits;
 
         REFILL_BITS(14);
         hlit  = (bits & 0x1F) + 257;
         hdist = ((bits >> 5) & 0x1F) + 1;
         hclen = ((bits >> 10) & 0xF) + 4;
-        bits >>= 14;
-        nbits -= 14;
+        CONSUME_BITS(14);
 
-        if (hlit + hdist > MAX_LITLEN_CODES + MAX_DIST_CODES) return UNZ_ERR;
+        if (hlit + hdist > MAX_LITLEN_CODES + MAX_DIST_CODES)
+          return UNZ_ERR;
 
         for (i = 0; i < hclen; i++) {
           REFILL_BITS(3);
           code_lengths[codelen_lengths_order[i]] = bits & 0x7;
-          bits >>= 3;
-          nbits -= 3;
+          CONSUME_BITS(3);
         }
 
         huff_init_lsb(&codelen_table, code_lengths, NULL, MAX_CODELEN_CODES);
@@ -299,37 +310,36 @@ infl(defl_stream_t  * __restrict stream,
           uint8_t used_bits;
           REFILL_BITS(15);
           int symbol = huff_decode_lsb(&codelen_table, bits, 15, &used_bits);
-          if (symbol < 0) return UNZ_ERR;
-
-          bits >>= used_bits;
-          nbits -= used_bits;
+          if (symbol < 0)
+            return UNZ_ERR;
+          CONSUME_BITS(used_bits);
 
           if (symbol <= 15) {
             lens[i++] = symbol;
           } else if (symbol == 16) {
             REFILL_BITS(2);
             uint8_t repeat = 3 + (bits & 0x3);
-            bits >>= 2;
-            nbits -= 2;
+            CONSUME_BITS(2);
 
             uint8_t prev = (i > 0) ? lens[i - 1] : 0;
-            if (i + repeat > (hlit + hdist)) return UNZ_ERR;
+            if (i + repeat > (hlit + hdist))
+              return UNZ_ERR;
             while (repeat--) lens[i++] = prev;
           } else if (symbol == 17) {
             REFILL_BITS(3);
             uint8_t repeat = 3 + (bits & 0x7);
-            bits >>= 3;
-            nbits -= 3;
+            CONSUME_BITS(3);
 
-            if (i + repeat > (hlit + hdist)) return UNZ_ERR;
+            if (i + repeat > (hlit + hdist))
+              return UNZ_ERR;
             while (repeat--) lens[i++] = 0;
           } else if (symbol == 18) {
             REFILL_BITS(7);
             uint8_t repeat = 11 + (bits & 0x7F);
-            bits >>= 7;
-            nbits -= 7;
+            CONSUME_BITS(7);
 
-            if (i + repeat > (hlit + hdist)) return UNZ_ERR;
+            if (i + repeat > (hlit + hdist))
+              return UNZ_ERR;
             while (repeat--) lens[i++] = 0;
           } else {
             return UNZ_ERR;
