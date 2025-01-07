@@ -88,7 +88,7 @@ unzip(unzip_t * __restrict stream) {
 
   do {
     if (unlikely(!stream->header)) {
-      zlib_header(stream, chk);
+      zlib_header(stream, chk, true);
     }
 
     if (infl(stream, &chk) < 0) {
