@@ -21,22 +21,60 @@
 
 UNZ_INLINE
 const uint8_t*
-zlib_header(unzip_t * __restrict stream, unz_chunk_t * __restrict ch) {
+zlib_header(unzip_t *__restrict stream, unz_chunk_t *__restrict ch, bool nodict) {
   const uint8_t *p;
-  uint8_t        cm, cinfo, fcheck, fdict, flevel;
+  uint8_t       cm, cinfo, fcheck, fdict, flevel, flags;
 
-  p       = ch->p;
-  cinfo   = *p++;
-  cm      = cinfo & 0xf;
-  cinfo >>= 4;
+  /**
+   * nodict: PNG spec doesnt allow dict so give a chance to skip fdict and fdict
+   *         errors.
+   */
 
-  flevel  = *p++;
-  fcheck  = flevel & 0xf;
-  fdict   = (flevel & 0x10) >> 4;
-  flevel  = (flevel & 0xe0) >> 5;
+  p = ch->p;
+  cinfo = *p++;                 // Read CMF
+  cm = cinfo & 0xf;             // Bits 0-3: CM
+  cinfo >>= 4;                  // Bits 4-7: CINFO
 
-  if (fdict) { p += 4; }
+  flags = *p++;                 // Read FLG
+  fcheck = flags & 0xf;         // Bits 0-3: FCHECK
+  fdict = (flags & 0x10) >> 4;  // Bit 4: FDICT
+  flevel = (flags & 0xe0) >> 5; // Bits 5-7: FLEVEL
 
+  // Debugging output
+#if DEBUG
+  printf("CMF: 0x%x, FLG: 0x%x\n", cinfo, flags);
+  printf("Checksum validation: ((CMF << 8) + FLG) %% 31 = %d\n",
+         ((cinfo << 8) + flags) % 31);
+#endif
+
+  /* validate compression method, 8: DEFLATE */
+  if (cm != 8) {
+#if DEBUG
+    printf("Error: Unsupported compression method (CM = %d)\n", cm);
+#endif
+    return NULL;
+  }
+
+  /* validate header checksum (CMF + FLG) % 31 == 0 */
+  if (((cinfo << 8) + flags) % 31 != 0) {
+#if DEBUG
+    printf("Error: Invalid header checksum\n");
+#endif
+
+    if (!nodict)
+      return NULL;
+  }
+
+  /* Handle preset dictionaries */
+  if (!nodict && fdict) {
+    uint32_t dict_id = (p[0] << 24) | (p[1] << 16) | (p[2] << 8) | p[3];
+#if DEBUG
+    printf("FDICT set. Dictionary ID: 0x%x\n", dict_id);
+#endif
+    p += 4;  // Skip dictionary ID
+  }
+
+  /* update chunk state */
   ch->p       = p;
   ch->bitpos  = 0;
   ch->pbits   = 0;
