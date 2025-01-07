@@ -283,7 +283,7 @@ infl(defl_stream_t  * __restrict stream,
         uint16_t hclen, hlit, hdist;
         uint8_t code_lengths[MAX_CODELEN_CODES] = {0};
         uint8_t lens[MAX_LITLEN_CODES + MAX_DIST_CODES] = {0};
-        huff_table_t litlen_table, dist_table, codelen_table;
+        huff_table_t litlen_table, dist_table, codelen_table = {0};
         size_t i = 0;
         bitstream_t bits = 0, pbits = chunk->pbits;
         uint8_t nbits = 0, npbits = chunk->npbits;
@@ -297,20 +297,23 @@ infl(defl_stream_t  * __restrict stream,
         if (hlit + hdist > MAX_LITLEN_CODES + MAX_DIST_CODES)
           return UNZ_ERR;
 
+        memset(code_lengths, 0, sizeof(code_lengths));
+
         for (i = 0; i < hclen; i++) {
           REFILL_BITS(3);
           code_lengths[codelen_lengths_order[i]] = bits & 0x7;
           CONSUME_BITS(3);
         }
 
-        huff_init_lsb(&codelen_table, code_lengths, NULL, MAX_CODELEN_CODES);
+        if (!huff_init_lsb(&codelen_table, code_lengths, NULL, MAX_CODELEN_CODES))
+          return UNZ_ERR;
 
         i = 0;
         while (i < (hlit + hdist)) {
           uint8_t used_bits;
           REFILL_BITS(15);
           int symbol = huff_decode_lsb(&codelen_table, bits, 15, &used_bits);
-          if (symbol < 0)
+          if (symbol < 0 || used_bits == 0)
             return UNZ_ERR;
           CONSUME_BITS(used_bits);
 
@@ -321,9 +324,14 @@ infl(defl_stream_t  * __restrict stream,
             uint8_t repeat = 3 + (bits & 0x3);
             CONSUME_BITS(2);
 
-            uint8_t prev = (i > 0) ? lens[i - 1] : 0;
+            if (i == 0)
+              return UNZ_ERR;
+
+            uint8_t prev = lens[i - 1];
+
             if (i + repeat > (hlit + hdist))
               return UNZ_ERR;
+
             while (repeat--) lens[i++] = prev;
           } else if (symbol == 17) {
             REFILL_BITS(3);
@@ -332,7 +340,9 @@ infl(defl_stream_t  * __restrict stream,
 
             if (i + repeat > (hlit + hdist))
               return UNZ_ERR;
-            while (repeat--) lens[i++] = 0;
+
+            memset(&lens[i], 0, repeat);
+            i += repeat;
           } else if (symbol == 18) {
             REFILL_BITS(7);
             uint8_t repeat = 11 + (bits & 0x7F);
@@ -340,21 +350,21 @@ infl(defl_stream_t  * __restrict stream,
 
             if (i + repeat > (hlit + hdist))
               return UNZ_ERR;
-            while (repeat--) lens[i++] = 0;
+
+            memset(&lens[i], 0, repeat);
+            i += repeat;
           } else {
             return UNZ_ERR;
           }
         }
 
-        huff_init_lsb(&litlen_table, lens,        NULL, hlit);
-        huff_init_lsb(&dist_table,   lens + hlit, NULL, hdist);
+        if (!huff_init_lsb(&litlen_table, lens, NULL, hlit))       return UNZ_ERR;
+        if (!huff_init_lsb(&dist_table, lens + hlit, NULL, hdist)) return UNZ_ERR;
 
         DONATE_BITS();
 
-        if (infl_block(stream, chunk, stream->dst, stream->dstlen,
-                       &stream->dstpos, &litlen_table, &dist_table) != UNZ_OK) {
-          return UNZ_ERR;
-        }
+        return infl_block(stream, chunk, stream->dst, stream->dstlen,
+                          &stream->dstpos, &litlen_table, &dist_table);
       } break;
       default:
         goto err;
