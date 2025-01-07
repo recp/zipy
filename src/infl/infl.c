@@ -280,7 +280,7 @@ infl(defl_stream_t  * __restrict stream,
         }
         break;
       case 2: {
-        uint8_t hclen, hlit, hdist;
+        uint16_t hclen, hlit, hdist;
         uint8_t code_lengths[MAX_CODELEN_CODES] = {0};
         uint8_t lens[MAX_LITLEN_CODES + MAX_DIST_CODES] = {0};
         huff_table_t litlen_table, dist_table, codelen_table;
@@ -348,6 +348,8 @@ infl(defl_stream_t  * __restrict stream,
 
         huff_init_lsb(&litlen_table, lens,        NULL, hlit);
         huff_init_lsb(&dist_table,   lens + hlit, NULL, hdist);
+
+        DONATE_BITS();
 
         if (infl_block(stream, chunk, stream->dst, stream->dstlen,
                        &stream->dstpos, &litlen_table, &dist_table) != UNZ_OK) {
