@@ -279,7 +279,7 @@ infl(defl_stream_t  * __restrict stream,
         uint16_t hclen, hlit, hdist;
         uint8_t code_lengths[MAX_CODELEN_CODES] = {0};
         uint8_t lens[MAX_LITLEN_CODES + MAX_DIST_CODES] = {0};
-        huff_table_t litlen_table, dist_table, codelen_table = {0};
+        huff_table_t dyn_tlitl = {0}, dyn_dist = {0}, codelen_table = {0};
         size_t i = 0;
         bitstream_t bits = 0, pbits = chunk->pbits;
         uint8_t nbits = 0, npbits = chunk->npbits;
@@ -354,13 +354,13 @@ infl(defl_stream_t  * __restrict stream,
           }
         }
 
-        if (!huff_init_lsb(&litlen_table, lens, NULL, hlit))       return UNZ_ERR;
-        if (!huff_init_lsb(&dist_table, lens + hlit, NULL, hdist)) return UNZ_ERR;
+        if (!huff_init_lsb(&dyn_tlitl, lens,        NULL, hlit))  return UNZ_ERR;
+        if (!huff_init_lsb(&dyn_dist,  lens + hlit, NULL, hdist)) return UNZ_ERR;
 
         DONATE_BITS();
 
         return infl_block(stream, chunk, stream->dst, stream->dstlen,
-                          &stream->dstpos, &litlen_table, &dist_table);
+                          &stream->dstpos, &dyn_tlitl, &dyn_dist);
       } break;
       default:
         goto err;
