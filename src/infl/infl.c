@@ -240,7 +240,7 @@ infl(defl_stream_t  * __restrict stream,
     huff_init_lsb(&tdist, hufxd_len_dist, NULL, ARRAY_LEN(hufxd_len_dist));
   }
 
-  while (chunk->p < end) {
+  while (bfinal || chunk->p < end) {
     REFILL_BITS(3);
     bfinal = bits & 0x1;
     btype  = (bits >> 1) & 0x3;
