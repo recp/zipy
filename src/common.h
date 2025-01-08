@@ -52,7 +52,6 @@ struct unz__chunk_t {
   bitstream_t          pbits;
   uint8_t              npbits;
   bool                 ismmap;
-  bool                 hasbits;
 };
 
 struct unz__stream_t {

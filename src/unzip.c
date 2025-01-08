@@ -48,7 +48,6 @@ unzip_include_fchunk(unzip_t    * __restrict stream,
   chk->len     = len;
   chk->ismmap  = false;
   chk->bitlen  = len * 8;
-  chk->hasbits = chk->bitlen > 0;
 
   if (!stream->chunks_first) { stream->chunks_first      = chk; }
   else                       { stream->chunks_last->next = chk; }
@@ -69,7 +68,6 @@ unzip_include_chunk(unzip_t    * __restrict stream,
   chk->end     = ptr + len;
   chk->ismmap  = true;
   chk->bitlen  = len * 8;
-  chk->hasbits = chk->bitlen > 0;
 
   if (!stream->chunks_first) { stream->chunks_first      = chk; }
   else                       { stream->chunks_last->next = chk; }

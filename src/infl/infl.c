@@ -83,31 +83,24 @@ static const uint_fast8_t
 
 #define REFILL_BITS(req)                                                      \
 do {                                                                          \
-  if (nbits < (req)) {                                                     \
-    if (!npbits) {                                                        \
-      if (!chunk->hasbits                                                     \
+  if (nbits < (req)) {                                                        \
+    if (!npbits) {                                                            \
+      if ((chunk->p >= chunk->end && !chunk->npbits)                          \
           && (!(chunk = chunk->next) || (!chunk->p || chunk->len == 0))) {    \
         return UNZ_ERR;                                                       \
       }                                                                       \
-      /* Read bits from the current chunk */                                  \
       pbits = huff_read(&chunk->p, &chunk->bitpos, &npbits, chunk->end);      \
-      if (!npbits) {                                                          \
-        chunk->hasbits = false;                                               \
-        return UNZ_ERR;                                                       \
-      }                                                                       \
-      chunk->hasbits = (chunk->p < chunk->end);                               \
+      if (!npbits) { return UNZ_ERR;  }                                       \
     }                                                                         \
                                                                               \
     if (!nbits) {                                                             \
-      bits    = pbits;                                                        \
-      nbits   = npbits; pbits = 0; npbits = 0;                                \
+      bits       = pbits;                                                     \
+      nbits      = npbits; pbits = 0; npbits = 0;                             \
     } else {                                                                  \
       uint8_t nt = MIN(sizeof(bits) * 8 - nbits, npbits);                     \
       bits      |= (pbits & (((bitstream_t)1 << nt) - 1)) << nbits;           \
       pbits    >>= nt; nbits += nt; npbits -= nt;                             \
     }                                                                         \
-    chunk->npbits = npbits;                                                   \
-    chunk->pbits  = pbits;                                                    \
   }                                                                           \
 } while (0)
 
