@@ -145,9 +145,8 @@ infl_block(defl_stream_t      * __restrict stream,
   npbits = chunk->npbits;
 
   while (true) {
-    /* Decode literal/length symbol */
+    /* decode literal/length symbol */
     REFILL_BITS(15);
-
     lsym = huff_decode_lsb(tlit, bits, 15, &used);
     if (!used || lsym > 285)
       return UNZ_ERR; /* invalid symbol */
@@ -155,17 +154,17 @@ infl_block(defl_stream_t      * __restrict stream,
     CONSUME_BITS(used);
 
     if (lsym < 256) {
-      /* Literal byte */
+      /* literal byte */
       if (dpos >= dst_cap)
         return UNZ_EFULL;
       dst[dpos++] = (uint8_t)lsym;
       continue;
     } else if (lsym == 256) {
-      /* End of block */
+      /* eof */
       break;
     }
 
-    /* Back-reference length */
+    /* back-reference length */
     val = lvals[lsym - 257];
     len = val.base;
 
@@ -175,16 +174,14 @@ infl_block(defl_stream_t      * __restrict stream,
       CONSUME_BITS(val.bits);
     }
 
-    /* Decode distance symbol */
+    /* decode distance symbol */
     REFILL_BITS(15);
     dsym = huff_decode_lsb(tdist, bits, 15, &used);
     if (!used)
       return UNZ_ERR; /* invalid symbol */
-
     CONSUME_BITS(used);
 
-    val = dvals[dsym];
-
+    val  = dvals[dsym];
     dist = val.base;
     if (val.bits) {
       REFILL_BITS(val.bits);
@@ -192,14 +189,15 @@ infl_block(defl_stream_t      * __restrict stream,
       CONSUME_BITS(val.bits);
     }
 
-    /* Validate distance */
+    /* validate distance */
     if (dist > dpos)
       return UNZ_ERR; /* invalid distance */
 
-    /* Output back-reference */
+    if ((dpos + len) >= dst_cap)
+      return UNZ_EFULL;
+
+    /* output back-reference */
     while (len--) {
-      if (dpos >= dst_cap)
-        return UNZ_EFULL;
       dst[dpos] = dst[dpos - dist];
       dpos++;
     }
