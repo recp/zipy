@@ -76,13 +76,14 @@ static const uint_fast8_t
   f_llitl[288] = {[0 ...143]=8,[144 ...255]=9,[256 ...279]=7,[280 ...287]=8
 };
 
+static inline uint_fast8_t min8(uint_fast8_t a, uint_fast8_t b) { return a < b ? a : b; }
+
 #define EXTRACT_BITS(B, C) ((B) & (((bitstream_t)1 << (C)) - 1))
 #define CONSUME_BITS(N)    bits >>= (N); nbits -= (N);
 #define RESTORE_BITS()     npbits=chunk->npbits;pbits=chunk->pbits;bits=0;nbits=0;
 #define DONATE_BITS()      chunk->pbits=(chunk->pbits<<nbits)|bits;chunk->npbits+=nbits;bits=0;nbits=0;
 
 #define REFILL_BITS(req)                                                      \
-do {                                                                          \
   if (nbits < (req)) {                                                        \
     if (!npbits) {                                                            \
       if ((chunk->p >= chunk->end && !chunk->npbits)                          \
@@ -95,14 +96,15 @@ do {                                                                          \
                                                                               \
     if (!nbits) {                                                             \
       bits       = pbits;                                                     \
-      nbits      = npbits; pbits = 0; npbits = 0;                             \
+      nbits      = min8(sizeof(bits)*8, npbits);                              \
+      npbits    -= nbits;                                                     \
+      pbits      = npbits ? (pbits >> nbits) : 0;                             \
     } else {                                                                  \
-      uint8_t nt = MIN(sizeof(bits) * 8 - nbits, npbits);                     \
+      uint8_t nt = min8(sizeof(bits)*8 - nbits, npbits);                      \
       bits      |= (pbits & (((bitstream_t)1 << nt) - 1)) << nbits;           \
       pbits    >>= nt; nbits += nt; npbits -= nt;                             \
     }                                                                         \
   }                                                                           \
-} while (0)
 
 UNZ_INLINE
 UnzResult
