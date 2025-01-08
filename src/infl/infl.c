@@ -135,7 +135,7 @@ infl_block(defl_stream_t      * __restrict stream,
   bitstream_t bits = 0, pbits = chunk->pbits;
   size_t      dpos;
   uint8_t     nbits = 0, npbits = chunk->npbits;
-  int         lsym, dsym;
+  uint16_t    lsym, dsym;
   uint32_t    len, dist;
 
   dpos = *dst_pos;
@@ -145,7 +145,8 @@ infl_block(defl_stream_t      * __restrict stream,
     REFILL_BITS(15);
 
     uint8_t used_bits;
-    if ((lsym = huff_decode_lsb(tlit, bits, 15, &used_bits)) < 0)
+    lsym = huff_decode_lsb(tlit, bits, 15, &used_bits);
+    if (!used_bits)
       return UNZ_ERR; /* invalid symbol */
 
     CONSUME_BITS(used_bits);
@@ -178,7 +179,8 @@ infl_block(defl_stream_t      * __restrict stream,
 
     /* Decode distance symbol */
     REFILL_BITS(15);
-    if ((dsym = huff_decode_lsb(tdist, bits, 15, &used_bits)) < 0)
+    dsym = huff_decode_lsb(tdist, bits, 15, &used_bits);
+    if (!used_bits)
       return UNZ_ERR; /* invalid symbol */
 
     CONSUME_BITS(used_bits);
