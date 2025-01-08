@@ -83,8 +83,8 @@ static const uint_fast8_t
 
 #define REFILL_BITS(req)                                                      \
 do {                                                                          \
-  while (nbits < (req)) {                                                     \
-    if (npbits == 0) {                                                        \
+  if (nbits < (req)) {                                                     \
+    if (!npbits) {                                                        \
       if (!chunk->hasbits                                                     \
           && (!(chunk = chunk->next) || (!chunk->p || chunk->len == 0))) {    \
         return UNZ_ERR;                                                       \
