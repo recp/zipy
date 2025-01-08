@@ -78,8 +78,8 @@ static const uint_fast8_t
 
 #define EXTRACT_BITS(B, C) ((B) & (((bitstream_t)1 << (C)) - 1))
 #define CONSUME_BITS(N)    bits >>= (N); nbits -= (N);
-#define DONATE_BITS()      chunk->npbits = nbits; chunk->pbits = bits;        \
-                           bits = 0; nbits = 0;
+#define RESTORE_BITS()     npbits=chunk->npbits;pbits=chunk->pbits;bits=0;nbits=0;
+#define DONATE_BITS()      chunk->pbits=(chunk->pbits<<nbits)|bits;chunk->npbits+=nbits;bits=0;nbits=0;
 
 #define REFILL_BITS(req)                                                      \
 do {                                                                          \
@@ -130,8 +130,8 @@ infl_block(defl_stream_t      * __restrict stream,
   bits   = 0;
   nbits  = 0;
   dpos   = *dst_pos;
-  pbits  = chunk->pbits;
-  npbits = chunk->npbits;
+
+  RESTORE_BITS()
 
   while (true) {
     /* decode literal/length symbol */
@@ -194,7 +194,7 @@ infl_block(defl_stream_t      * __restrict stream,
 
   *dst_pos = dpos;
 
-  DONATE_BITS()
+  DONATE_BITS();
 
   return UNZ_OK;
 }
@@ -265,9 +265,10 @@ infl(defl_stream_t  * __restrict stream,
         uint8_t lens[MAX_LITLEN_CODES + MAX_DIST_CODES] = {0};
         huff_table_t dyn_tlitl = {0}, dyn_dist = {0}, codelen_table = {0};
         size_t i = 0;
-        bitstream_t bits = 0, pbits = chunk->pbits;
-        uint8_t nbits = 0, npbits = chunk->npbits;
+        bitstream_t bits, pbits;
+        uint8_t nbits, npbits;
 
+        RESTORE_BITS()
         REFILL_BITS(14);
         hlit  = (bits & 0x1F) + 257;
         hdist = ((bits >> 5) & 0x1F) + 1;
