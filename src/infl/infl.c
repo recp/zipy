@@ -90,7 +90,7 @@ static const int codelen_lengths_order[MAX_CODELEN_LENS] =
 #define EXTRACT_BITS(B, C) ((B) & (((bitstream_t)1 << (C)) - 1))
 #define CONSUME_BITS(N)    bits >>= (N); nbits -= (N);
 #define DONATE_BITS()      chunk->npbits = nbits; chunk->pbits = bits;        \
-                           bits = 0; nbits = 0;
+                           bits = 0; nbits = 0; chunk->hasbits = npbits > 0;
 
 #define REFILL_BITS(req)                                                      \
 do {                                                                          \
@@ -131,25 +131,28 @@ infl_block(defl_stream_t      * __restrict stream,
            size_t             * __restrict dst_pos,
            const huff_table_t * __restrict tlit,
            const huff_table_t * __restrict tdist) {
-  // Initialize bitstream state from chunk
-  bitstream_t bits = 0, pbits = chunk->pbits;
+  bitstream_t bits, pbits;
   size_t      dpos;
-  uint8_t     nbits = 0, npbits = chunk->npbits;
+  uint32_t    len,  dist;
   uint16_t    lsym, dsym;
-  uint32_t    len, dist;
+  uint8_t     nbits, npbits, used;
+  hval_t      val;
 
-  dpos = *dst_pos;
+  bits   = 0;
+  nbits  = 0;
+  dpos   = *dst_pos;
+  pbits  = chunk->pbits;
+  npbits = chunk->npbits;
 
   while (true) {
     /* Decode literal/length symbol */
     REFILL_BITS(15);
 
-    uint8_t used_bits;
-    lsym = huff_decode_lsb(tlit, bits, 15, &used_bits);
-    if (!used_bits)
+    lsym = huff_decode_lsb(tlit, bits, 15, &used);
+    if (!used || lsym > 285)
       return UNZ_ERR; /* invalid symbol */
 
-    CONSUME_BITS(used_bits);
+    CONSUME_BITS(used);
 
     if (lsym < 256) {
       /* Literal byte */
@@ -163,35 +166,30 @@ infl_block(defl_stream_t      * __restrict stream,
     }
 
     /* Back-reference length */
+    val = lvals[lsym - 257];
+    len = val.base;
 
-    if (lsym > 285) {
-      return UNZ_ERR; // Invalid symbol for lvals
-    }
-
-    hval_t len_info = lvals[lsym - 257];
-    len = len_info.base;
-
-    if (len_info.bits) {
-      REFILL_BITS(len_info.bits);
-      len += EXTRACT_BITS(bits, len_info.bits);
-      CONSUME_BITS(len_info.bits);
+    if (val.bits) {
+      REFILL_BITS(val.bits);
+      len += EXTRACT_BITS(bits, val.bits);
+      CONSUME_BITS(val.bits);
     }
 
     /* Decode distance symbol */
     REFILL_BITS(15);
-    dsym = huff_decode_lsb(tdist, bits, 15, &used_bits);
-    if (!used_bits)
+    dsym = huff_decode_lsb(tdist, bits, 15, &used);
+    if (!used)
       return UNZ_ERR; /* invalid symbol */
 
-    CONSUME_BITS(used_bits);
+    CONSUME_BITS(used);
 
-    hval_t dist_info = dvals[dsym];
+    val = dvals[dsym];
 
-    dist = dist_info.base;
-    if (dist_info.bits) {
-      REFILL_BITS(dist_info.bits);
-      dist += EXTRACT_BITS(bits, dist_info.bits);
-      CONSUME_BITS(dist_info.bits);
+    dist = val.base;
+    if (val.bits) {
+      REFILL_BITS(val.bits);
+      dist += EXTRACT_BITS(bits, val.bits);
+      CONSUME_BITS(val.bits);
     }
 
     /* Validate distance */
@@ -209,10 +207,7 @@ infl_block(defl_stream_t      * __restrict stream,
 
   *dst_pos = dpos;
 
-  // Update chunk state
-  chunk->pbits   = pbits;
-  chunk->npbits  = npbits;
-  chunk->hasbits = npbits > 0;
+  DONATE_BITS()
 
   return UNZ_OK;
 }
