@@ -222,6 +222,8 @@ infl(defl_stream_t  * __restrict stream,
   }
 
   while (!bfinal && chunk->p < end) {
+    RESTORE_BITS();
+
     REFILL_BITS(3);
     bfinal = bits & 0x1;
     btype  = (bits >> 1) & 0x3;
