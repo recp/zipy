@@ -55,37 +55,26 @@
 #define MAX_LITLEN_CODES 288   // Maximum number of literal/length codes
 #define MAX_DIST_CODES 32      // Maximum number of distance codes
 
-static const uint8_t hufxd_len_litl[288] = {
-  [0   ... 143] = 8,
-  [144 ... 255] = 9,
-  [256 ... 279] = 7,
-  [280 ... 287] = 8
-};
-
-static const uint8_t hufxd_len_dist[32] = { [0 ... 31] = 5 };
-
-typedef struct {
-  uint16_t base;  // Base length or distance
-  uint8_t  bits;  // Extra bits
-} hval_t;
+typedef struct {uint_fast16_t base;uint_fast8_t bits;} hval_t;
 
 static const hval_t lvals[] = {
-  {3,   0}, {4,   0}, {5,   0}, {6,   0}, {7,   0}, {8,  0}, {9,  0}, {10,  0},
-  {11,  1}, {13,  1}, {15,  1}, {17,  1}, {19,  2}, {23, 2}, {27, 2}, {31,  2},
-  {35,  3}, {43,  3}, {51,  3}, {59,  3}, {67,  4}, {83, 4}, {99, 4}, {115, 4},
-  {131, 5}, {163, 5}, {195, 5}, {227, 5}, {258, 0}
+  {3, 0},{4, 0},{5, 0},{6,  0},{7,  0},{8,  0},{9,  0},{10, 0},{11, 1},{13, 1},
+  {15,1},{17,1},{19,2},{23, 2},{27, 2},{31, 2},{35, 3},{43, 3},{51, 3},{59, 3},
+  {67,4},{83,4},{99,4},{115,4},{131,5},{163,5},{195,5},{227,5},{258,0}
 };
 
 static const hval_t dvals[] = {
-  {1, 0}, {2, 0}, {3, 0}, {4, 0}, {5, 1}, {7, 1}, {9, 2}, {13, 2}, {17, 3},
-  {25, 3}, {33, 4}, {49, 4}, {65, 5}, {97, 5}, {129, 6}, {193, 6}, {257, 7},
-  {385, 7}, {513, 8}, {769, 8}, {1025, 9}, {1537, 9}, {2049, 10}, {3073, 10},
-  {4097, 11}, {6145, 11}, {8193, 12}, {12289, 12}, {16385, 13}, {24577, 13}
+  {1,0},{2,0},{3,0},{4,0},{5,1},{7,1},{9, 2},{13,  2},{17,    3},
+  {25,3},{33,4},{49,4},{65,5},{97,5},{129,6},{193, 6},{257,   7},
+  {385,7},{513,8},{769,8},{1025,9},{1537,9},{2049,10},{3073, 10},
+  {4097,11},{6145,11},{8193,12},{12289,12},{16385,13},{24577,13}
 };
 
-/* RFC 1951, 3.2.7 */
-static const int codelen_lengths_order[MAX_CODELEN_LENS] =
-{ 16, 17, 18, 0, 8, 7, 9, 6, 10, 5, 11, 4, 12, 3, 13, 2, 14, 1, 15 };
+static const uint_fast8_t
+  l_orders[19] = {16,17,18,0,8,7,9,6,10,5,11,4,12,3,13,2,14,1,15},
+  f_ldist[32]  = {[0 ...31]=5},
+  f_llitl[288] = {[0 ...143]=8,[144 ...255]=9,[256 ...279]=7,[280 ...287]=8
+};
 
 #define EXTRACT_BITS(B, C) ((B) & (((bitstream_t)1 << (C)) - 1))
 #define CONSUME_BITS(N)    bits >>= (N); nbits -= (N);
@@ -228,8 +217,8 @@ infl(defl_stream_t  * __restrict stream,
 
   /* initilize static tables */
   if (!tlitl.syms) {
-    huff_init_lsb(&tlitl, hufxd_len_litl, NULL, ARRAY_LEN(hufxd_len_litl));
-    huff_init_lsb(&tdist, hufxd_len_dist, NULL, ARRAY_LEN(hufxd_len_dist));
+    huff_init_lsb(&tlitl, f_llitl, NULL, ARRAY_LEN(f_llitl));
+    huff_init_lsb(&tdist, f_ldist, NULL, ARRAY_LEN(f_ldist));
   }
 
   while (!bfinal && chunk->p < end) {
@@ -292,7 +281,7 @@ infl(defl_stream_t  * __restrict stream,
 
         for (i = 0; i < hclen; i++) {
           REFILL_BITS(3);
-          code_lengths[codelen_lengths_order[i]] = bits & 0x7;
+          code_lengths[l_orders[i]] = bits & 0x7;
           CONSUME_BITS(3);
         }
 
