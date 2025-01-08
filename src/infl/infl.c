@@ -101,7 +101,7 @@ static inline uint_fast8_t min8(uint_fast8_t a, uint_fast8_t b) { return a < b ?
       pbits      = npbits ? (pbits >> nbits) : 0;                             \
     } else {                                                                  \
       uint8_t nt = min8(sizeof(bits)*8 - nbits, npbits);                      \
-      bits      |= (pbits & (((bitstream_t)1 << nt) - 1)) << nbits;           \
+      bits      |= EXTRACT_BITS(pbits, nt) << nbits;                          \
       pbits    >>= nt; nbits += nt; npbits -= nt;                             \
     }                                                                         \
   }                                                                           \
