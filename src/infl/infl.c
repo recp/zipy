@@ -193,7 +193,7 @@ infl_block(defl_stream_t      * __restrict stream,
     if (dist > dpos)
       return UNZ_ERR; /* invalid distance */
 
-    if ((dpos + len) >= dst_cap)
+    if ((dpos + len) > dst_cap)
       return UNZ_EFULL;
 
     /* output back-reference */
