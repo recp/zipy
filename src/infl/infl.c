@@ -354,8 +354,10 @@ infl(defl_stream_t  * __restrict stream,
 
         DONATE_BITS();
 
-        return infl_block(stream, chunk, stream->dst, stream->dstlen,
-                          &stream->dstpos, &dyn_tlitl, &dyn_dist);
+        if (infl_block(stream, chunk, stream->dst, stream->dstlen,
+                       &stream->dstpos, &dyn_tlitl, &dyn_dist) != UNZ_OK) {
+          goto err;
+        }
       } break;
       default:
         goto err;
