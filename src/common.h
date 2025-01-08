@@ -68,7 +68,7 @@ struct unz__stream_t {
   size_t         bitpos; /* bit position in all */
   uint8_t       *dst;
   uint32_t       dstlen;
-  uintptr_t      dstpos;
+  size_t         dstpos;
   size_t         srclen; /* sum_of(chunk->len)  */
 };
 

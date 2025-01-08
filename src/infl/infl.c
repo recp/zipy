@@ -110,21 +110,21 @@ UNZ_INLINE
 UnzResult
 infl_block(defl_stream_t      * __restrict stream,
            defl_chunk_t       * __restrict chunk,
-           uint8_t            * __restrict dst,
-           size_t                          dst_cap,
-           size_t             * __restrict dst_pos,
            const huff_table_t * __restrict tlit,
            const huff_table_t * __restrict tdist) {
+  uint8_t * __restrict dst;
+  size_t  * __restrict dst_pos;
+  size_t      dst_cap, dpos;
   bitstream_t bits, pbits;
-  size_t      dpos;
   uint32_t    len,  dist;
   uint16_t    lsym, dsym;
   uint8_t     nbits, npbits, used;
   hval_t      val;
 
-  bits   = 0;
-  nbits  = 0;
-  dpos   = *dst_pos;
+  dst     = stream->dst;
+  dst_cap = stream->dstlen;
+  dst_pos = &stream->dstpos;
+  dpos    = *dst_pos;
 
   RESTORE_BITS()
 
@@ -198,13 +198,12 @@ UNZ_HIDE
 int
 infl(defl_stream_t  * __restrict stream,
      defl_chunk_t  ** __restrict chunkref) {
-  unz_chunk_t   *chunk;
-  const uint8_t *end;
-  uint8_t        bfinal, btype;
   static huff_table_t tlitl = {0}, tdist = {0};
 
-  bitstream_t bits = 0, pbits = 0;
-  uint8_t nbits = 0, npbits = 0;
+  unz_chunk_t   *chunk;
+  const uint8_t *end;
+  bitstream_t    bits, pbits;
+  uint8_t        bfinal, btype, nbits, npbits;
 
   bfinal = 0;
   chunk  = *chunkref;
@@ -251,8 +250,7 @@ infl(defl_stream_t  * __restrict stream,
         stream->dstpos += len;
       } continue;
       case 1:
-        if (infl_block(stream, chunk, stream->dst, stream->dstlen,
-                       &stream->dstpos, &tlitl, &tdist) != UNZ_OK) {
+        if (infl_block(stream, chunk, &tlitl, &tdist) != UNZ_OK) {
           goto err;
         }
         break;
@@ -341,8 +339,7 @@ infl(defl_stream_t  * __restrict stream,
 
         DONATE_BITS();
 
-        if (infl_block(stream, chunk, stream->dst, stream->dstlen,
-                       &stream->dstpos, &dyn_tlitl, &dyn_dist) != UNZ_OK) {
+        if (infl_block(stream, chunk, &dyn_tlitl, &dyn_dist) != UNZ_OK) {
           goto err;
         }
       } break;
