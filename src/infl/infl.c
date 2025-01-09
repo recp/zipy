@@ -191,8 +191,9 @@ infl(defl_stream_t * __restrict stream,
 
     switch (btype) {
       case 0: {
-        size_t   remlen, chunkrem;
-        uint16_t len, nlen, padbits, to_copy;
+        size_t        remlen, chunkrem;
+        uint_fast16_t len, nlen, padbits, to_copy;
+        uint_fast8_t  cached;
 
         padbits = bst.nbits % 8;
         if (padbits > 0)
@@ -203,15 +204,26 @@ infl(defl_stream_t * __restrict stream,
         len  = EXTRACT_BITS(bst.bits, 16); CONSUME_BITS(16);
         nlen = EXTRACT_BITS(bst.bits, 16); CONSUME_BITS(16);
 
-        if (unlikely(len != (uint16_t)~nlen)) {
-          goto err; /* invalid block */
+        if (unlikely(len != (uint16_t)~nlen)) { goto err; } /* invalid block */
+
+        /* flush cached bits (bst.bits) to the output buffer */
+        while (bst.nbits >= 8) {
+          cached = EXTRACT_BITS(bst.bits, 8);
+          /* output buffer overflow */
+          if (stream->dstpos >= stream->dstlen) { goto err; }
+          stream->dst[stream->dstpos++] = cached;
+          CONSUME_BITS(8);
         }
 
-        /* reset bit state */
-        bst.pbits  = 0;
-        bst.bits   = 0;
-        bst.nbits  = 0;
-        bst.npbits = 0;
+        /* flush remaining bits in bst.pbits to the output buffer */
+        while (bst.npbits >= 8) {
+          cached = EXTRACT_BITS(bst.pbits, 8);
+          /* output buffer overflow */
+          if (stream->dstpos >= stream->dstlen) { goto err; }
+          stream->dst[stream->dstpos++] = cached;
+          bst.pbits >>= 8;
+          bst.npbits -= 8;
+        }
 
         /* copy LEN bytes of literal data, handling multiple chunks */
         remlen = len;
@@ -233,7 +245,7 @@ infl(defl_stream_t * __restrict stream,
           remlen         -= to_copy;
         }
 
-        DONATE_BITS() /* TODO: reduce donate / restore */
+        // DONATE_BITS() /* TODO: reduce donate / restore */
       } continue;
       case 1:
         DONATE_BITS();
