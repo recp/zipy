@@ -217,24 +217,19 @@ infl(defl_stream_t * __restrict stream,
         remlen = len;
         while (remlen > 0) {
           if ((chunkrem = bst.chunk->end - bst.chunk->p) == 0) {
-            /* move to the next chunk */
-            if (!(bst.chunk = bst.chunk->next)|| !bst.chunk->p) {
-              goto err; /* invalid stream or insufficient data */
-            }
+            /* invalid stream or insufficient data */
+            if (!(bst.chunk = bst.chunk->next)|| !bst.chunk->p) { goto err; }
             continue;
           }
 
+          /* validate output buffer overflow */
           to_copy = min16(chunkrem, remlen);
-
-          /* validate output buffer */
-          if (stream->dstpos + to_copy > stream->dstlen) {
-            goto err; /* output buffer overflow */
-          }
+          if (stream->dstpos + to_copy > stream->dstlen) { goto err; }
 
           /* copy data */
           memcpy(stream->dst + stream->dstpos, bst.chunk->p, to_copy);
           stream->dstpos += to_copy;
-          bst.chunk->p += to_copy;
+          bst.chunk->p   += to_copy;
           remlen         -= to_copy;
         }
 
