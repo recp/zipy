@@ -20,31 +20,55 @@
 #include "../common.h"
 
 UNZ_INLINE
-const uint8_t*
-zlib_header(unzip_t *__restrict stream, unz_chunk_t *__restrict ch, bool nodict) {
-  const uint8_t *p;
-  uint8_t       cm, cinfo, fcheck, fdict, flevel, flags;
+UnzResult
+getbyt(defl_chunk_t ** __restrict chunkref,
+       uint8_t       * __restrict dst) {
+  unz_chunk_t *ch;
+
+  ch = *chunkref;
+
+  /* empty chnuk is not allowed */
+  if (ch->p == ch->end) {
+    ch        = ch->next;
+    *chunkref = ch;
+  }
+
+  if (ch->p) {
+    *dst        = *ch->p++;
+    ch->bitpos += 8;
+    return UNZ_OK;
+  } else {
+    return UNZ_ERR;
+  }
+}
+
+UNZ_INLINE
+UnzResult
+zlib_header(unzip_t       * __restrict stream,
+            defl_chunk_t ** __restrict chunkref,
+            bool                       nodict) {
+  UnzResult res;
+  uint8_t   cmf, cm, cinfo, fcheck, fdict, flevel, flags;
 
   /**
    * nodict: PNG spec doesnt allow dict so give a chance to skip fdict and fdict
    *         errors.
    */
+  if ((res = getbyt(chunkref, &cmf)) != UNZ_OK) { return res; }
 
-  p = ch->p;
-  cinfo = *p++;                 // Read CMF
-  cm = cinfo & 0xf;             // Bits 0-3: CM
-  cinfo >>= 4;                  // Bits 4-7: CINFO
+  cm    = cmf & 0xf;
+  cinfo = cmf >> 4;
 
-  flags = *p++;                 // Read FLG
-  fcheck = flags & 0xf;         // Bits 0-3: FCHECK
-  fdict = (flags & 0x10) >> 4;  // Bit 4: FDICT
-  flevel = (flags & 0xe0) >> 5; // Bits 5-7: FLEVEL
+  if ((res = getbyt(chunkref, &flags)) != UNZ_OK) { return res; }
 
-  // Debugging output
+  fcheck = flags & 0xf;
+  fdict  = (flags & 0x10) >> 4;
+  flevel = (flags & 0xe0) >> 5;
+
 #if DEBUG
-  printf("CMF: 0x%x, FLG: 0x%x\n", cinfo, flags);
+  printf("CMF: 0x%x, FLG: 0x%x\n", cmf, flags);            // Use cmf
   printf("Checksum validation: ((CMF << 8) + FLG) %% 31 = %d\n",
-         ((cinfo << 8) + flags) % 31);
+         ((cmf << 8) + flags) % 31);                        // Use cmf
 #endif
 
   /* validate compression method, 8: DEFLATE */
@@ -52,33 +76,36 @@ zlib_header(unzip_t *__restrict stream, unz_chunk_t *__restrict ch, bool nodict)
 #if DEBUG
     printf("Error: Unsupported compression method (CM = %d)\n", cm);
 #endif
-    return NULL;
+    return UNZ_ERR;
   }
 
   /* validate header checksum (CMF + FLG) % 31 == 0 */
-  if (((cinfo << 8) + flags) % 31 != 0) {
+  if ((((uint16_t)cmf << 8) + flags) % 31 != 0) {
 #if DEBUG
     printf("Error: Invalid header checksum\n");
 #endif
 
     if (!nodict)
-      return NULL;
+      return UNZ_ERR;
   }
 
   /* Handle preset dictionaries */
   if (!nodict && fdict) {
-    uint32_t dict_id = (p[0] << 24) | (p[1] << 16) | (p[2] << 8) | p[3];
+    uint8_t  dictbyt[4];
+    uint32_t dictid;
+
+    if ((res = getbyt(chunkref, &dictbyt[0])) != UNZ_OK) { return res; }
+    if ((res = getbyt(chunkref, &dictbyt[1])) != UNZ_OK) { return res; }
+    if ((res = getbyt(chunkref, &dictbyt[2])) != UNZ_OK) { return res; }
+    if ((res = getbyt(chunkref, &dictbyt[3])) != UNZ_OK) { return res; }
+
+    dictid = (dictbyt[0]<<24)|(dictbyt[1]<<16)|(dictbyt[2]<<8)|dictbyt[3];
 #if DEBUG
-    printf("FDICT set. Dictionary ID: 0x%x\n", dict_id);
+    printf("FDICT set. Dictionary ID: 0x%x\n", dictid);
 #endif
-    p += 4;  // Skip dictionary ID
   }
 
-  /* update chunk state */
-  ch->bitpos = (p - ch->p) * 8;
-  ch->p      = p;
-
-  return p;
+  return UNZ_OK;
 }
 
 #endif /* unz_zlib_h */
