@@ -65,12 +65,6 @@ zlib_header(unzip_t       * __restrict stream,
   fdict  = (flags & 0x10) >> 4;
   flevel = (flags & 0xe0) >> 5;
 
-#if DEBUG
-  printf("CMF: 0x%x, FLG: 0x%x\n", cmf, flags);            // Use cmf
-  printf("Checksum validation: ((CMF << 8) + FLG) %% 31 = %d\n",
-         ((cmf << 8) + flags) % 31);                        // Use cmf
-#endif
-
   /* validate compression method, 8: DEFLATE */
   if (cm != 8) {
 #if DEBUG
@@ -83,6 +77,9 @@ zlib_header(unzip_t       * __restrict stream,
   if ((((uint16_t)cmf << 8) + flags) % 31 != 0) {
 #if DEBUG
     printf("Error: Invalid header checksum\n");
+    printf("CMF: 0x%x, FLG: 0x%x\n", cmf, flags);
+    printf("Checksum validation: ((CMF << 8) + FLG) %% 31 = %d\n",
+           ((cmf << 8) + flags) % 31);
 #endif
 
     if (!nodict)
