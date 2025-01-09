@@ -85,8 +85,11 @@ static inline uint_fast8_t min8(uint_fast8_t a, uint_fast8_t b) { return a < b ?
 
 #define EXTRACT_BITS(B,C) ((B) & (((bitstream_t)1 << (C)) - 1))
 #define CONSUME_BITS(N)   bits >>= (N); nbits -= (N);
-#define RESTORE_BITS()    npbits=chunk->npbits;pbits=chunk->pbits;INITBITS();
-#define DONATE_BITS()     chunk->pbits=(pbits<<nbits)|bits;chunk->npbits=npbits+nbits;bits=0;nbits=0;
+#define RESTORE_BITS()    bits=stream->bits;nbits=stream->nbits;              \
+                          npbits=stream->npbits;pbits=stream->pbits;
+#define DONATE_BITS()     stream->pbits=pbits;stream->bits=bits;              \
+                          stream->npbits=npbits;stream->nbits=nbits;          \
+                          bits=0;nbits=0;pbits=0;npbits=0;
 
 #define REFILL_BITS(req)                                                      \
   while (nbits < (req)) {                                                     \
@@ -112,14 +115,14 @@ infl_block(defl_stream_t      * __restrict stream,
            defl_chunk_t       * __restrict chunk,
            const huff_table_t * __restrict tlit,
            const huff_table_t * __restrict tdist) {
-  uint8_t * __restrict dst;
-  size_t  * __restrict dst_pos;
-  size_t      dst_cap, dpos;
-  bitstream_t bits, pbits;
-  uint32_t    len,  dist;
-  uint16_t    lsym, dsym;
-  uint8_t     nbits, npbits, used;
-  hval_t      val;
+  uint8_t   * __restrict dst;
+  size_t    * __restrict dst_pos;
+  size_t        dst_cap, dpos;
+  bitstream_t   bits, pbits;
+  uint_fast32_t len,  dist;
+  uint_fast16_t nbits, npbits, lsym, dsym;
+  uint_fast8_t  used;
+  hval_t        val;
 
   dst     = stream->dst;
   dst_cap = stream->dstlen;
@@ -202,7 +205,8 @@ infl(defl_stream_t  * __restrict stream,
 
   unz_chunk_t   *chunk;
   bitstream_t    bits, pbits;
-  uint8_t        bfinal, btype, nbits, npbits;
+  uint_fast8_t   used, bfinal, btype;
+  uint_fast16_t  nbits, npbits;
 
   bfinal = 0;
   chunk  = *chunkref;
@@ -278,12 +282,11 @@ infl(defl_stream_t  * __restrict stream,
 
         i = 0;
         while (i < (hlit + hdist)) {
-          uint8_t used_bits;
           REFILL_BITS(15);
-          int symbol = huff_decode_lsb(&codelen_table, bits, 15, &used_bits);
-          if (symbol < 0 || used_bits == 0)
+          int symbol = huff_decode_lsb(&codelen_table, bits, 15, &used);
+          if (symbol < 0 || !used)
             return UNZ_ERR;
-          CONSUME_BITS(used_bits);
+          CONSUME_BITS(used);
 
           if (symbol <= 15) {
             lens[i++] = symbol;

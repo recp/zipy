@@ -49,8 +49,6 @@ struct unz__chunk_t {
   uint32_t             off;
   size_t               bitpos;
   uint64_t             bitlen;
-  bitstream_t          pbits;
-  uint8_t              npbits;
   bool                 ismmap;
 };
 
@@ -70,6 +68,11 @@ struct unz__stream_t {
   uint32_t       dstlen;
   size_t         dstpos;
   size_t         srclen; /* sum_of(chunk->len)  */
+
+  bitstream_t    bits;
+  bitstream_t    pbits;
+  uint_fast16_t  npbits;
+  uint_fast16_t  nbits;
 };
 
 UNZ_INLINE uint32_t revbits32(uint32_t x) {
