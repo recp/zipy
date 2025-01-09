@@ -76,8 +76,8 @@ static const uint_fast8_t
   f_llitl[288] = {[0 ...143]=8,[144 ...255]=9,[256 ...279]=7,[280 ...287]=8
 };
 
-static inline uint_fast8_t min8(uint_fast8_t a, uint_fast8_t b) { return a < b ? a : b; }
-// static inline uint_fast8_t max8(uint_fast8_t a, uint_fast8_t b) { return a > b ? a : b; }
+static inline uint_fast8_t   min8(uint_fast8_t  a, uint_fast8_t  b) { return a < b ? a : b; }
+static inline uint_fast16_t min16(uint_fast16_t a, uint_fast16_t b) { return a < b ? a : b; }
 
 #define EXTRACT_BITS(B,C) ((B) & (((bitstream_t)1 << (C)) - 1))
 #define CONSUME_BITS(N)   bitst.bits >>= (N);bitst.nbits -= (N);
@@ -227,21 +227,54 @@ infl(defl_stream_t * __restrict stream,
 
     switch (btype) {
       case 0: {
-        uint16_t len, nlen, leftover_bits;
+        size_t   remlen, chunkrem;
+        uint16_t len, nlen, padbits, to_copy;
 
-        leftover_bits = bitst.nbits % 8;
-        if (leftover_bits > 0)
-          CONSUME_BITS(leftover_bits);
+        padbits = bitst.nbits % 8;
+        if (padbits > 0)
+          CONSUME_BITS(padbits);
 
         REFILL_BITS(32);
 
         len  = EXTRACT_BITS(bitst.bits, 16); CONSUME_BITS(16);
         nlen = EXTRACT_BITS(bitst.bits, 16); CONSUME_BITS(16);
 
-        if (unlikely(len != ~nlen)) { goto err; }
+        if (unlikely(len != (uint16_t)~nlen)) {
+          goto err; /* invalid block */
+        }
 
-        memcpy(stream->dst, bitst.chunk->p, len);
-        stream->dstpos += len;
+        /* reset bit state */
+        bitst.pbits  = 0;
+        bitst.bits   = 0;
+        bitst.nbits  = 0;
+        bitst.npbits = 0;
+
+        /* copy LEN bytes of literal data, handling multiple chunks */
+        remlen = len;
+        while (remlen > 0) {
+          if ((chunkrem = bitst.chunk->end - bitst.chunk->p) == 0) {
+            /* move to the next chunk */
+            if (!(bitst.chunk = bitst.chunk->next)|| !bitst.chunk->p) {
+              goto err; /* invalid stream or insufficient data */
+            }
+            continue;
+          }
+
+          to_copy = min16(chunkrem, remlen);
+
+          /* validate output buffer */
+          if (stream->dstpos + to_copy > stream->dstlen) {
+            goto err; /* output buffer overflow */
+          }
+
+          /* copy data */
+          memcpy(stream->dst + stream->dstpos, bitst.chunk->p, to_copy);
+          stream->dstpos += to_copy;
+          bitst.chunk->p += to_copy;
+          remlen         -= to_copy;
+        }
+
+        DONATE_BITS() /* TODO: reduce donate / restore */
       } continue;
       case 1:
         DONATE_BITS();
