@@ -77,11 +77,12 @@ static const uint_fast8_t
 };
 
 static inline uint_fast8_t min8(uint_fast8_t a, uint_fast8_t b) { return a < b ? a : b; }
+// static inline uint_fast8_t max8(uint_fast8_t a, uint_fast8_t b) { return a > b ? a : b; }
 
 #define INITBITS() bits    = pbits;                                           \
                    nbits   = min8(sizeof(bits)*8, npbits);                    \
                    pbits   = nbits < npbits ? pbits >> nbits : 0;             \
-                   npbits -= nbits;                                           \
+                   npbits  = nbits < npbits ? npbits - nbits : 0;             \
 
 #define EXTRACT_BITS(B,C) ((B) & (((bitstream_t)1 << (C)) - 1))
 #define CONSUME_BITS(N)   bits >>= (N); nbits -= (N);
