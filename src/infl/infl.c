@@ -19,41 +19,9 @@
 
 #include <math.h>
 
-#define LITLEN_EOB 256
-#define LITLEN_MAX 285
-#define LITLEN_TBL_OFFSET 257
-#define MIN_LEN 3
-#define MAX_LEN 258
-
-#define MIN(a,b) (((a)<(b))?(a):(b))
-#define MAX(a,b) (((a)>(b))?(a):(b))
-
-#define MIN_CODELEN_LENS 4
-#define MAX_CODELEN_LENS 19
-
-#define MIN_LITLEN_LENS 257
-#define MAX_LITLEN_LENS 288
-
-#define MIN_DIST_LENS   1
-#define MAX_DIST_LENS   32
-
-#define CODELEN_MAX_LIT 15
-
-#define CODELEN_COPY 16
-#define CODELEN_COPY_MIN 3
-#define CODELEN_COPY_MAX 6
-
-#define CODELEN_ZEROS 17
-#define CODELEN_ZEROS_MIN 3
-#define CODELEN_ZEROS_MAX 10
-
-#define CODELEN_ZEROS2 18
-#define CODELEN_ZEROS2_MIN 11
-#define CODELEN_ZEROS2_MAX 138
-
-#define MAX_CODELEN_CODES 19   // Maximum number of code length codes
-#define MAX_LITLEN_CODES 288   // Maximum number of literal/length codes
-#define MAX_DIST_CODES 32      // Maximum number of distance codes
+#define MAX_CODELEN_CODES 19
+#define MAX_LITLEN_CODES  288
+#define MAX_DIST_CODES    32
 
 typedef struct {uint_fast16_t base;uint_fast8_t bits;} hval_t;
 
@@ -72,9 +40,9 @@ static const hval_t dvals[] = {
 
 static const uint_fast8_t
   l_orders[19] = {16,17,18,0,8,7,9,6,10,5,11,4,12,3,13,2,14,1,15},
-  f_ldist[32]  = {[0 ...31]=5},
-  f_llitl[288] = {[0 ...143]=8,[144 ...255]=9,[256 ...279]=7,[280 ...287]=8
-};
+  f_llitl[288] = {[0 ...143]=8,[144 ...255]=9,[256 ...279]=7,[280 ...287]=8},
+  f_ldist[32]  = {[0 ...31]=5}
+;
 
 static inline uint_fast8_t   min8(uint_fast8_t  a, uint_fast8_t  b) { return a < b ? a : b; }
 static inline uint_fast16_t min16(uint_fast16_t a, uint_fast16_t b) { return a < b ? a : b; }
@@ -221,10 +189,6 @@ infl(defl_stream_t * __restrict stream,
     btype  = (bitst.bits >> 1) & 0x3;
     CONSUME_BITS(3);
 
-#if DEBUG
-    printf("defl: bfinal: %d, btype: %d\n\n\n\n", (int)bfinal, (int)btype);
-#endif
-
     switch (btype) {
       case 0: {
         size_t   remlen, chunkrem;
@@ -288,6 +252,7 @@ infl(defl_stream_t * __restrict stream,
         uint_fast8_t  lens[MAX_LITLEN_CODES + MAX_DIST_CODES]={0};
         huff_table_t  dyn_tlitl={0}, dyn_tdist={0}, tcodelen={0};
         size_t        i;
+        uint_fast32_t n;
         uint_fast16_t sym, hclen, hlit, hdist;
         uint_fast8_t  repeat, prev;
 
@@ -295,13 +260,13 @@ infl(defl_stream_t * __restrict stream,
         hlit  = (bitst.bits & 0x1F) + 257;
         hdist = ((bitst.bits >> 5) & 0x1F) + 1;
         hclen = ((bitst.bits >> 10) & 0xF) + 4;
+        n     = hlit + hdist;
         CONSUME_BITS(14);
 
         if (hlit + hdist > MAX_LITLEN_CODES + MAX_DIST_CODES)
-          return UNZ_ERR;
+          goto err;
 
         memset(codelens, 0, sizeof(codelens));
-
         for (i = 0; i < hclen; i++) {
           REFILL_BITS(3);
           codelens[l_orders[i]] = bitst.bits & 0x7;
@@ -309,13 +274,13 @@ infl(defl_stream_t * __restrict stream,
         }
 
         if (!huff_init_lsb(&tcodelen, codelens, NULL, MAX_CODELEN_CODES))
-          return UNZ_ERR;
+          goto err;
 
         i = 0;
-        while (i < (hlit + hdist)) {
+        while (i < n) {
           REFILL_BITS(15);
           sym = huff_decode_lsb(&tcodelen, bitst.bits, 15, &used);
-          if (!used) return UNZ_ERR;
+          if (!used) goto err;
           CONSUME_BITS(used);
 
           if (sym <= 15) {
@@ -326,7 +291,7 @@ infl(defl_stream_t * __restrict stream,
             CONSUME_BITS(2);
 
             if (i == 0 || i + repeat > (hlit + hdist))
-              return UNZ_ERR;
+              goto err;
 
             prev = lens[i - 1];
             while (repeat--) lens[i++] = prev;
@@ -336,7 +301,7 @@ infl(defl_stream_t * __restrict stream,
             CONSUME_BITS(3);
 
             if (i + repeat > (hlit + hdist))
-              return UNZ_ERR;
+              goto err;
 
             memset(&lens[i], 0, repeat);
             i += repeat;
@@ -346,17 +311,17 @@ infl(defl_stream_t * __restrict stream,
             CONSUME_BITS(7);
 
             if (i + repeat > (hlit + hdist))
-              return UNZ_ERR;
+              goto err;
 
             memset(&lens[i], 0, repeat);
             i += repeat;
           } else {
-            return UNZ_ERR;
+            goto err;
           }
         }
 
-        if (!huff_init_lsb(&dyn_tlitl, lens,      NULL, hlit))  return UNZ_ERR;
-        if (!huff_init_lsb(&dyn_tdist,  lens+hlit, NULL, hdist)) return UNZ_ERR;
+        if (!huff_init_lsb(&dyn_tlitl, lens,      NULL, hlit))  goto err;
+        if (!huff_init_lsb(&dyn_tdist, lens+hlit, NULL, hdist)) goto err;
 
         DONATE_BITS();
         if (infl_block(stream, &dyn_tlitl, &dyn_tdist) != UNZ_OK) {
