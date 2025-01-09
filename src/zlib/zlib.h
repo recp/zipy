@@ -75,10 +75,8 @@ zlib_header(unzip_t *__restrict stream, unz_chunk_t *__restrict ch, bool nodict)
   }
 
   /* update chunk state */
-  ch->p       = p;
-  ch->bitpos  = 0;
-  ch->pbits   = 0;
-  ch->npbits  = 0;
+  ch->bitpos = (p - ch->p) * 8;
+  ch->p      = p;
 
   return p;
 }

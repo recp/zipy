@@ -73,6 +73,7 @@ unzip_include_chunk(unzip_t    * __restrict stream,
   else                       { stream->chunks_last->next = chk; }
 
   stream->chunks_last = chk;
+  stream->srclen     += len;
 }
 
 UNZ_EXPORT
