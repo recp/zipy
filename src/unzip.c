@@ -85,15 +85,14 @@ unzip(unzip_t * __restrict stream) {
 
   /* TODO: currently only zlib is implemented */
 
-  do {
-    if (unlikely(!stream->header)) {
-      zlib_header(stream, chk, true);
-    }
+  if (unlikely(!stream->header)) {
+    zlib_header(stream, &chk, true);
+    stream->it = chk;
+  }
 
-    if (infl(stream, &chk) < 0) {
-      goto err;
-    }
-  } while ((chk = chk->next));
+  if (infl(stream, &chk) < 0) {
+    goto err;
+  }
 
   return UNZ_OK;
 

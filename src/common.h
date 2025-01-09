@@ -52,6 +52,14 @@ struct unz__chunk_t {
   bool                 ismmap;
 };
 
+typedef struct unz__bitstate_t {
+  struct unz__chunk_t *chunk;
+  bitstream_t          pbits;
+  bitstream_t          bits;
+  uint16_t              nbits;
+  uint16_t              npbits;
+} unz__bitstate_t;
+
 struct unz__stream_t {
   unz_chunk_t   *chunks_first;
   unz_chunk_t   *chunks_last;
@@ -69,10 +77,7 @@ struct unz__stream_t {
   size_t         dstpos;
   size_t         srclen; /* sum_of(chunk->len)  */
 
-  bitstream_t    bits;
-  bitstream_t    pbits;
-  uint_fast16_t  npbits;
-  uint_fast16_t  nbits;
+  unz__bitstate_t bitst;
 };
 
 UNZ_INLINE uint32_t revbits32(uint32_t x) {
