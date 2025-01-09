@@ -89,7 +89,7 @@ static inline uint_fast8_t min8(uint_fast8_t a, uint_fast8_t b) { return a < b ?
 #define DONATE_BITS()     chunk->pbits=(pbits<<nbits)|bits;chunk->npbits=npbits+nbits;bits=0;nbits=0;
 
 #define REFILL_BITS(req)                                                      \
-  if (nbits < (req)) {                                                        \
+  while (nbits < (req)) {                                                     \
     if (!npbits) {                                                            \
       if ((chunk->p >= chunk->end)                                            \
           && (!(chunk = chunk->next) || (!chunk->p || chunk->len == 0))) {    \
