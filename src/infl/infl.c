@@ -48,31 +48,31 @@ static inline uint_fast8_t   min8(uint_fast8_t  a, uint_fast8_t  b) { return a <
 static inline uint_fast16_t min16(uint_fast16_t a, uint_fast16_t b) { return a < b ? a : b; }
 
 #define EXTRACT_BITS(B,C) ((B) & (((bitstream_t)1 << (C)) - 1))
-#define CONSUME_BITS(N)   bitst.bits >>= (N);bitst.nbits -= (N);
-#define RESTORE_BITS()    bitst=stream->bitst;
-#define DONATE_BITS()     stream->bitst=bitst;memset(&bitst,0,sizeof(bitst));
+#define CONSUME_BITS(N)   bst.bits >>= (N);bst.nbits -= (N);
+#define RESTORE_BITS()    bst=stream->bst;
+#define DONATE_BITS()     stream->bst=bst;memset(&bst,0,sizeof(bst));
 
 #define REFILL_BITS(req)                                                      \
-  while (bitst.nbits < (req)) {                                               \
-    if (!bitst.npbits) {                                                      \
-      if ((bitst.chunk->p >= bitst.chunk->end)                                \
-          && (!(bitst.chunk = bitst.chunk->next) || !bitst.chunk->p)) {       \
+  while (bst.nbits < (req)) {                                                 \
+    if (!bst.npbits) {                                                        \
+      if ((bst.chunk->p >= bst.chunk->end)                                    \
+          && (!(bst.chunk = bst.chunk->next) || !bst.chunk->p)) {             \
         return UNZ_ERR;                                                       \
       }                                                                       \
-      bitst.pbits = huff_read(&bitst.chunk->p, &bitst.chunk->bitpos,          \
-                              &bitst.npbits, bitst.chunk->end);               \
-      if (!bitst.npbits) { return UNZ_ERR;  }                                 \
+      bst.pbits = huff_read(&bst.chunk->p, &bst.chunk->bitpos,                \
+                            &bst.npbits, bst.chunk->end);                     \
+      if (!bst.npbits) { return UNZ_ERR;  }                                   \
     }                                                                         \
                                                                               \
-    if (!bitst.nbits) {                                                       \
-      bitst.bits   = bitst.pbits;                                             \
-      bitst.nbits  = min8(sizeof(bitst.bits)*8, bitst.npbits);                \
-      bitst.pbits  = bitst.nbits<bitst.npbits?bitst.pbits>>bitst.nbits:0;     \
-      bitst.npbits = bitst.nbits<bitst.npbits?bitst.npbits-bitst.nbits:0;     \
+    if (!bst.nbits) {                                                         \
+      bst.bits   = bst.pbits;                                                 \
+      bst.nbits  = min8(sizeof(bst.bits)*8,bst.npbits);                       \
+      bst.pbits  = bst.nbits<bst.npbits?bst.pbits>>bst.nbits:0;               \
+      bst.npbits = bst.nbits<bst.npbits?bst.npbits-bst.nbits:0;               \
    } else {                                                                   \
-      uint16_t   nt = min8(sizeof(bitst.bits)*8 - bitst.nbits, bitst.npbits); \
-      bitst.bits   |= EXTRACT_BITS(bitst.pbits, nt) << bitst.nbits;           \
-      bitst.pbits >>= nt; bitst.nbits += nt; bitst.npbits -= nt;              \
+      uint16_t nt = min8(sizeof(bst.bits)*8-bst.nbits,bst.npbits);            \
+      bst.bits   |= EXTRACT_BITS(bst.pbits,nt) << bst.nbits;                  \
+      bst.pbits >>= nt; bst.nbits += nt; bst.npbits -= nt;                    \
     }                                                                         \
   }                                                                           \
 
@@ -83,7 +83,7 @@ infl_block(defl_stream_t      * __restrict stream,
            const huff_table_t * __restrict tdist) {
   uint8_t   * __restrict dst;
   size_t    * __restrict dst_pos;
-  unz__bitstate_t bitst;
+  unz__bitstate_t bst;
   size_t          dst_cap, dpos;
   uint_fast32_t   len,  dist;
   uint_fast16_t   lsym, dsym;
@@ -100,7 +100,7 @@ infl_block(defl_stream_t      * __restrict stream,
   while (true) {
     /* decode literal/length symbol */
     REFILL_BITS(15);
-    lsym = huff_decode_lsb(tlit, bitst.bits, 15, &used);
+    lsym = huff_decode_lsb(tlit, bst.bits, 15, &used);
     if (!used || lsym > 285)
       return UNZ_ERR; /* invalid symbol */
 
@@ -123,13 +123,13 @@ infl_block(defl_stream_t      * __restrict stream,
 
     if (val.bits) {
       REFILL_BITS(val.bits);
-      len += EXTRACT_BITS(bitst.bits, val.bits);
+      len += EXTRACT_BITS(bst.bits, val.bits);
       CONSUME_BITS(val.bits);
     }
 
     /* decode distance symbol */
     REFILL_BITS(15);
-    dsym = huff_decode_lsb(tdist, bitst.bits, 15, &used);
+    dsym = huff_decode_lsb(tdist, bst.bits, 15, &used);
     if (!used)
       return UNZ_ERR; /* invalid symbol */
     CONSUME_BITS(used);
@@ -138,7 +138,7 @@ infl_block(defl_stream_t      * __restrict stream,
     dist = val.base;
     if (val.bits) {
       REFILL_BITS(val.bits);
-      dist += EXTRACT_BITS(bitst.bits, val.bits);
+      dist += EXTRACT_BITS(bst.bits, val.bits);
       CONSUME_BITS(val.bits);
     }
 
@@ -169,11 +169,11 @@ infl(defl_stream_t * __restrict stream,
      defl_chunk_t ** __restrict chunkref) {
   static huff_table_t tlitl={0}, tdist={0};
 
-  unz__bitstate_t bitst;
+  unz__bitstate_t bst;
   uint_fast8_t    used, btype, bfinal = 0;
 
-  if (!stream->bitst.chunk)
-    stream->bitst.chunk = *chunkref;
+  if (!stream->bst.chunk)
+    stream->bst.chunk = *chunkref;
 
   /* initilize static tables */
   if (!tlitl.syms) {
@@ -183,10 +183,10 @@ infl(defl_stream_t * __restrict stream,
 
   RESTORE_BITS();
 
-  while (!bfinal && bitst.chunk) {
+  while (!bfinal && bst.chunk) {
     REFILL_BITS(3);
-    bfinal = bitst.bits & 0x1;
-    btype  = (bitst.bits >> 1) & 0x3;
+    bfinal = bst.bits & 0x1;
+    btype  = (bst.bits >> 1) & 0x3;
     CONSUME_BITS(3);
 
     switch (btype) {
@@ -194,31 +194,31 @@ infl(defl_stream_t * __restrict stream,
         size_t   remlen, chunkrem;
         uint16_t len, nlen, padbits, to_copy;
 
-        padbits = bitst.nbits % 8;
+        padbits = bst.nbits % 8;
         if (padbits > 0)
           CONSUME_BITS(padbits);
 
         REFILL_BITS(32);
 
-        len  = EXTRACT_BITS(bitst.bits, 16); CONSUME_BITS(16);
-        nlen = EXTRACT_BITS(bitst.bits, 16); CONSUME_BITS(16);
+        len  = EXTRACT_BITS(bst.bits, 16); CONSUME_BITS(16);
+        nlen = EXTRACT_BITS(bst.bits, 16); CONSUME_BITS(16);
 
         if (unlikely(len != (uint16_t)~nlen)) {
           goto err; /* invalid block */
         }
 
         /* reset bit state */
-        bitst.pbits  = 0;
-        bitst.bits   = 0;
-        bitst.nbits  = 0;
-        bitst.npbits = 0;
+        bst.pbits  = 0;
+        bst.bits   = 0;
+        bst.nbits  = 0;
+        bst.npbits = 0;
 
         /* copy LEN bytes of literal data, handling multiple chunks */
         remlen = len;
         while (remlen > 0) {
-          if ((chunkrem = bitst.chunk->end - bitst.chunk->p) == 0) {
+          if ((chunkrem = bst.chunk->end - bst.chunk->p) == 0) {
             /* move to the next chunk */
-            if (!(bitst.chunk = bitst.chunk->next)|| !bitst.chunk->p) {
+            if (!(bst.chunk = bst.chunk->next)|| !bst.chunk->p) {
               goto err; /* invalid stream or insufficient data */
             }
             continue;
@@ -232,9 +232,9 @@ infl(defl_stream_t * __restrict stream,
           }
 
           /* copy data */
-          memcpy(stream->dst + stream->dstpos, bitst.chunk->p, to_copy);
+          memcpy(stream->dst + stream->dstpos, bst.chunk->p, to_copy);
           stream->dstpos += to_copy;
-          bitst.chunk->p += to_copy;
+          bst.chunk->p += to_copy;
           remlen         -= to_copy;
         }
 
@@ -257,9 +257,9 @@ infl(defl_stream_t * __restrict stream,
         uint_fast8_t  repeat, prev;
 
         REFILL_BITS(14);
-        hlit  = (bitst.bits & 0x1F) + 257;
-        hdist = ((bitst.bits >> 5) & 0x1F) + 1;
-        hclen = ((bitst.bits >> 10) & 0xF) + 4;
+        hlit  = (bst.bits & 0x1F) + 257;
+        hdist = ((bst.bits >> 5) & 0x1F) + 1;
+        hclen = ((bst.bits >> 10) & 0xF) + 4;
         n     = hlit + hdist;
         CONSUME_BITS(14);
 
@@ -269,7 +269,7 @@ infl(defl_stream_t * __restrict stream,
         memset(codelens, 0, sizeof(codelens));
         for (i = 0; i < hclen; i++) {
           REFILL_BITS(3);
-          codelens[l_orders[i]] = bitst.bits & 0x7;
+          codelens[l_orders[i]] = bst.bits & 0x7;
           CONSUME_BITS(3);
         }
 
@@ -279,7 +279,7 @@ infl(defl_stream_t * __restrict stream,
         i = 0;
         while (i < n) {
           REFILL_BITS(15);
-          sym = huff_decode_lsb(&tcodelen, bitst.bits, 15, &used);
+          sym = huff_decode_lsb(&tcodelen, bst.bits, 15, &used);
           if (!used) goto err;
           CONSUME_BITS(used);
 
@@ -287,7 +287,7 @@ infl(defl_stream_t * __restrict stream,
             lens[i++] = sym;
           } else if (sym == 16) {
             REFILL_BITS(2);
-            repeat = 3 + (bitst.bits & 0x3);
+            repeat = 3 + (bst.bits & 0x3);
             CONSUME_BITS(2);
 
             if (i == 0 || i + repeat > (hlit + hdist))
@@ -297,7 +297,7 @@ infl(defl_stream_t * __restrict stream,
             while (repeat--) lens[i++] = prev;
           } else if (sym == 17) {
             REFILL_BITS(3);
-            repeat = 3 + (bitst.bits & 0x7);
+            repeat = 3 + (bst.bits & 0x7);
             CONSUME_BITS(3);
 
             if (i + repeat > (hlit + hdist))
@@ -307,7 +307,7 @@ infl(defl_stream_t * __restrict stream,
             i += repeat;
           } else if (sym == 18) {
             REFILL_BITS(7);
-            repeat = 11 + (bitst.bits & 0x7F);
+            repeat = 11 + (bst.bits & 0x7F);
             CONSUME_BITS(7);
 
             if (i + repeat > (hlit + hdist))
@@ -334,7 +334,7 @@ infl(defl_stream_t * __restrict stream,
     }
   }
 
-  *chunkref = bitst.chunk;
+  *chunkref = bst.chunk;
   DONATE_BITS();
   return UNZ_OK;
 err:
