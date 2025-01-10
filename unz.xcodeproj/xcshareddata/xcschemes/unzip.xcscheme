@@ -15,8 +15,8 @@
             buildForAnalyzing = "YES">
             <BuildableReference
                BuildableIdentifier = "primary"
-               BlueprintIdentifier = "1EE5A37D28A1BA670061A48E"
-               BuildableName = "libunz.dylib"
+               BlueprintIdentifier = "1E9338562D31691900A39B9B"
+               BuildableName = "libunz.a"
                BlueprintName = "unz"
                ReferencedContainer = "container:unz.xcodeproj">
             </BuildableReference>
@@ -64,8 +64,8 @@
       <MacroExpansion>
          <BuildableReference
             BuildableIdentifier = "primary"
-            BlueprintIdentifier = "1EE5A37D28A1BA670061A48E"
-            BuildableName = "libunz.dylib"
+            BlueprintIdentifier = "1E9338562D31691900A39B9B"
+            BuildableName = "libunz.a"
             BlueprintName = "unz"
             ReferencedContainer = "container:unz.xcodeproj">
          </BuildableReference>
