@@ -16,7 +16,7 @@
 
 #include "infl.h"
 #include "../endian.h"
-
+#include "../zlib/zlib.h"
 #include <math.h>
 
 #define MAX_CODELEN_CODES 19
@@ -163,22 +163,28 @@ infl_block(defl_stream_t      * __restrict stream,
   return UNZ_OK;
 }
 
-UNZ_HIDE
+UNZ_EXPORT
 int
-infl(defl_stream_t * __restrict stream,
-     defl_chunk_t ** __restrict chunkref) {
-  static huff_table_t tlitl={0}, tdist={0};
+infl(defl_stream_t * __restrict stream) {
+  static huff_table_t _tlitl={0}, _tdist={0};
+  static bool         _init=false;
 
   unz__bitstate_t bs;
   uint_fast8_t    used, btype, bfinal = 0;
 
-  if (!stream->bs.chunk)
-    stream->bs.chunk = *chunkref;
+  if (!stream->bs.chunk && !(stream->bs.chunk = stream->start)) {
+    return UNZ_NOOP;
+  }
 
   /* initilize static tables */
-  if (!tlitl.syms) {
-    huff_init_lsb(&tlitl, f_llitl, NULL, ARRAY_LEN(f_llitl));
-    huff_init_lsb(&tdist, f_ldist, NULL, ARRAY_LEN(f_ldist));
+  if (!_init) {
+    huff_init_lsb(&_tlitl, f_llitl, NULL, ARRAY_LEN(f_llitl));
+    huff_init_lsb(&_tdist, f_ldist, NULL, ARRAY_LEN(f_ldist));
+    _init = true;
+  }
+
+  if (unlikely(!stream->header)) {
+    zlib_header(stream, &stream->bs.chunk, true);
   }
 
   RESTORE_BITS();
@@ -249,7 +255,7 @@ infl(defl_stream_t * __restrict stream,
       } continue;
       case 1:
         DONATE_BITS();
-        if (infl_block(stream, &tlitl, &tdist) != UNZ_OK) {
+        if (infl_block(stream, &_tlitl, &_tdist) != UNZ_OK) {
           goto err;
         }
         RESTORE_BITS();
@@ -341,7 +347,7 @@ infl(defl_stream_t * __restrict stream,
     }
   }
 
-  *chunkref = bs.chunk;
+  /* stream->it = bs.chunk; */
   DONATE_BITS();
   return UNZ_OK;
 err:

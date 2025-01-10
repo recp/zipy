@@ -19,9 +19,8 @@
 
 #include "../common.h"
 
-UNZ_HIDE
+UNZ_EXPORT
 int
-infl(defl_stream_t  * __restrict stream,
-     defl_chunk_t  ** __restrict chunkref);
+infl(defl_stream_t * __restrict stream);
 
 #endif /* infl_h */

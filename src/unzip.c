@@ -19,9 +19,9 @@
 #include "infl/infl.h"
 
 UNZ_EXPORT
-unzip_t *
-unzip_init_mem(const void * __restrict dst, uint32_t dstlen) {
-  unzip_t *zip;
+unz_t *
+unz_init_mem(const void * __restrict dst, uint32_t dstlen) {
+  unz_t *zip;
   
   zip          = calloc(1, sizeof(*zip));
   zip->dst     = (uint8_t *)dst;
@@ -36,10 +36,10 @@ unzip_init_mem(const void * __restrict dst, uint32_t dstlen) {
 
 UNZ_EXPORT
 void
-unzip_include_fchunk(unzip_t    * __restrict stream,
-                     FILE       * __restrict file,
-                     uint32_t                off,
-                     uint32_t                len) {
+unz_include_fchunk(unz_t    * __restrict stream,
+                   FILE       * __restrict file,
+                   uint32_t                off,
+                   uint32_t                len) {
   unz_chunk_t *chk;
 
   chk          = calloc(1, sizeof(*chk));
@@ -48,17 +48,17 @@ unzip_include_fchunk(unzip_t    * __restrict stream,
   chk->len     = len;
   chk->ismmap  = false;
 
-  if (!stream->chunks_first) { stream->chunks_first      = chk; }
-  else                       { stream->chunks_last->next = chk; }
+  if (!stream->start) { stream->start     = chk; }
+  else                { stream->end->next = chk; }
 
-  stream->chunks_last = chk;
+  stream->end = chk;
 }
 
 UNZ_EXPORT
 void
-unzip_include_chunk(unzip_t    * __restrict stream,
-                    const void * __restrict ptr,
-                    uint32_t                len) {
+defl_include(unz_t    * __restrict stream,
+             const void * __restrict ptr,
+             uint32_t                len) {
   unz_chunk_t *chk;
 
   chk          = calloc(1, sizeof(*chk));
@@ -67,19 +67,19 @@ unzip_include_chunk(unzip_t    * __restrict stream,
   chk->end     = ptr + len;
   chk->ismmap  = true;
 
-  if (!stream->chunks_first) { stream->chunks_first      = chk; }
-  else                       { stream->chunks_last->next = chk; }
+  if (!stream->start) { stream->start     = chk; }
+  else                { stream->end->next = chk; }
 
-  stream->chunks_last = chk;
-  stream->srclen     += len;
+  stream->end     = chk;
+  stream->srclen += len;
 }
 
 UNZ_EXPORT
 UnzResult
-unzip(unzip_t * __restrict stream) {
+unzip(unz_t * __restrict stream) {
   unz_chunk_t *chk;
 
-  if (!(chk = stream->chunks_first)) { return UNZ_NOOP; }
+  if (!(chk = stream->start)) { return UNZ_NOOP; }
 
   /* TODO: currently only zlib is implemented */
 
@@ -88,11 +88,9 @@ unzip(unzip_t * __restrict stream) {
     stream->it = chk;
   }
 
-  if (infl(stream, &chk) < 0) {
+  if (infl(stream) < 0) {
     goto err;
   }
-
-  return UNZ_OK;
 
 err:
   return UNZ_ERR;
@@ -100,12 +98,12 @@ err:
 
 UNZ_EXPORT
 void
-unzip_cleanup(unzip_t * __restrict stream) {
+unz_cleanup(unz_t * __restrict stream) {
   unz_chunk_t *chk, *tofree;
 
   if (!stream) return;
 
-  if ((chk = stream->chunks_first)) {
+  if ((chk = stream->start)) {
     do {
       tofree = chk;
       chk    = chk->next;

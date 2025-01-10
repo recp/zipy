@@ -17,14 +17,18 @@
 #ifndef src_common_h
 #define src_common_h
 
+#define IM__in__UNZ
+
 #include <string.h>
 #include <stdlib.h>
 #include <stdio.h>
 #include <math.h>
-#include <huff/huff.h>
 
-#include "../include/unzip/common.h"
-#include "../include/unzip/unzip.h"
+#include "../include/unz/common.h"
+#include "../include/unz/unz.h"
+
+#include <huff/huff.h>
+#include <defl/infl.h>
 
 #ifdef __GNUC__
 #  define unlikely(expr) __builtin_expect(!!(expr), 0)
@@ -37,8 +41,6 @@
 #define ARRAY_LEN(ARR) (sizeof(ARR) / sizeof(ARR[0]))
 
 typedef struct unz__chunk_t  unz_chunk_t;
-typedef struct unz__chunk_t  defl_chunk_t;
-typedef struct unz__stream_t defl_stream_t;
 
 struct unz__chunk_t {
   struct unz__chunk_t *next;
@@ -60,8 +62,8 @@ typedef struct unz__bitstate_t {
 } unz__bitstate_t;
 
 struct unz__stream_t {
-  unz_chunk_t   *chunks_first;
-  unz_chunk_t   *chunks_last;
+  unz_chunk_t   *start;
+  unz_chunk_t   *end;
   unz_chunk_t   *it;
 
   void          *header;

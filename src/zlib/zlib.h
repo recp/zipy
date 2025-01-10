@@ -44,7 +44,7 @@ getbyt(defl_chunk_t ** __restrict chunkref,
 
 UNZ_INLINE
 UnzResult
-zlib_header(unzip_t       * __restrict stream,
+zlib_header(unz_t         * __restrict stream,
             defl_chunk_t ** __restrict chunkref,
             bool                       nodict) {
   UnzResult res;

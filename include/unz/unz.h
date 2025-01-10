@@ -14,15 +14,15 @@
  * limitations under the License.
  */
 
-#ifndef unzip_h
-#define unzip_h
+#ifndef unz_h
+#define unz_h
 #ifdef __cplusplus
 extern "C" {
 #endif
 
 #include "common.h"
 
-typedef struct unz__stream_t unzip_t;
+typedef struct unz__stream_t unz_t;
 
 /*!
  * @brief initialize zip for memory, the destination must be a known-size memory addr
@@ -33,8 +33,8 @@ typedef struct unz__stream_t unzip_t;
  * @returns zip stream to use later
  */
 UNZ_EXPORT
-unzip_t *
-unzip_init_mem(const void * __restrict dst, uint32_t dstlen);
+unz_t *
+unz_init_mem(const void * __restrict dst, uint32_t dstlen);
 
 /*!
  * @brief appends a chunk to unzip stream to uncompress, the chunks may be separated from each other
@@ -49,9 +49,30 @@ unzip_init_mem(const void * __restrict dst, uint32_t dstlen);
  */
 UNZ_EXPORT
 void
-unzip_include_chunk(unzip_t    * __restrict stream,
-                    const void * __restrict ptr,
-                    uint32_t                len);
+defl_include(unz_t      * __restrict stream,
+             const void * __restrict ptr,
+             uint32_t                len);
+
+/*!
+ * @brief appends a chunk to unzip stream to uncompress, the chunks may be separated from each other
+ *        but can be uncompressed together
+ *
+ *  this appends uncopressed data into src which specified with unzip_init(), the subsequent calls
+ *  will assume that the chunk that include  zip header already included
+ *
+ * @param[in,out] stream    zip stream: NULL to get created one, stream to continue unzipping.
+ * @param[in]     ptr           compressed data (memory addr to unzip)
+ * @param[in]     len           size of chunk
+ */
+UNZ_EXPORT
+void
+infl_include(unz_t      * __restrict stream,
+             const void * __restrict ptr,
+             uint32_t                len);
+
+UNZ_EXPORT
+int
+infl(struct unz__stream_t * __restrict stream);
 
 /*!
  * @brief appends a chunk to unzip stream to uncompress, the chunks may be separated from each other
@@ -67,10 +88,10 @@ unzip_include_chunk(unzip_t    * __restrict stream,
  */
 UNZ_EXPORT
 void
-unzip_include_fchunk(unzip_t    * __restrict stream,
-                     FILE       * __restrict file,
-                     uint32_t                off,
-                     uint32_t                len);
+unz_include_fchunk(unz_t   * __restrict stream,
+                   FILE    * __restrict file,
+                   uint32_t             off,
+                   uint32_t             len);
 
 /*!
  * @brief unzip the contents memory addr, for files they must be open and passed to as memory addr
@@ -80,16 +101,16 @@ unzip_include_fchunk(unzip_t    * __restrict stream,
  */
 UNZ_EXPORT
 UnzResult
-unzip(unzip_t * __restrict stream);
+unzip(unz_t * __restrict stream);
 
 /*!
  * @brief cleanup
  */
 UNZ_EXPORT
 void
-unzip_cleanup(unzip_t * __restrict stream);
+unz_cleanup(unz_t * __restrict stream);
 
 #ifdef __cplusplus
 }
 #endif
-#endif /* unzip_h */
+#endif /* unz_h */

@@ -14,8 +14,8 @@
  * limitations under the License.
  */
 
-#ifndef unzip_common_h
-#define unzip_common_h
+#ifndef unz_common_h
+#define unz_common_h
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -76,13 +76,9 @@ extern "C" {
 #  define __has_builtin(x) 0
 #endif
 
-#if defined(__SIZEOF_INT128__)
-typedef __uint128_t big_int_t;
-#else
-typedef uintmax_t   big_int_t;
-#endif
 
-typedef enum UnzipResult {
+
+typedef enum UnzResult {
   UNZ_NOOP     =  1,       /* no operation needed */
   UNZ_OK       =  0,
   UNZ_ERR      = -1,       /* UKNOWN ERR */
@@ -96,4 +92,4 @@ typedef enum UnzipResult {
 #ifdef __cplusplus
 }
 #endif
-#endif /* unzip_common_h */
+#endif /* unz_common_h */
