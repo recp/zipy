@@ -44,13 +44,9 @@ typedef struct unz__chunk_t  unz_chunk_t;
 
 struct unz__chunk_t {
   struct unz__chunk_t *next;
-  FILE                *file;
   const uint8_t       *p;
   const uint8_t       *end;
-  uint32_t             len;
-  uint32_t             off; /* file offset */
   size_t               bitpos;
-  bool                 ismmap;
 };
 
 typedef struct unz__bitstate_t {
