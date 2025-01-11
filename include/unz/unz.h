@@ -86,12 +86,12 @@ infl(struct unz__stream_t * __restrict stream);
  * @param[in]     off          offset of chunk
  * @param[in]     len          size of chunk
  */
-UNZ_EXPORT
-void
-unz_include_fchunk(unz_t   * __restrict stream,
-                   FILE    * __restrict file,
-                   uint32_t             off,
-                   uint32_t             len);
+//UNZ_EXPORT
+//void
+//unz_include_fchunk(unz_t   * __restrict stream,
+//                   FILE    * __restrict file,
+//                   uint32_t             off,
+//                   uint32_t             len);
 
 /*!
  * @brief unzip the contents memory addr, for files they must be open and passed to as memory addr
