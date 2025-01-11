@@ -34,25 +34,25 @@ unz_init_mem(const void * __restrict dst, uint32_t dstlen) {
   return zip;
 }
 
-UNZ_EXPORT
-void
-unz_include_fchunk(unz_t    * __restrict stream,
-                   FILE       * __restrict file,
-                   uint32_t                off,
-                   uint32_t                len) {
-  unz_chunk_t *chk;
-
-  chk          = calloc(1, sizeof(*chk));
-  chk->file    = file;
-  chk->off     = off;
-  chk->len     = len;
-  chk->ismmap  = false;
-
-  if (!stream->start) { stream->start     = chk; }
-  else                { stream->end->next = chk; }
-
-  stream->end = chk;
-}
+//UNZ_EXPORT
+//void
+//unz_include_fchunk(unz_t    * __restrict stream,
+//                   FILE       * __restrict file,
+//                   uint32_t                off,
+//                   uint32_t                len) {
+//  unz_chunk_t *chk;
+//
+//  chk          = calloc(1, sizeof(*chk));
+//  chk->file    = file;
+//  chk->off     = off;
+//  chk->len     = len;
+//  chk->ismmap  = false;
+//
+//  if (!stream->start) { stream->start     = chk; }
+//  else                { stream->end->next = chk; }
+//
+//  stream->end = chk;
+//}
 
 UNZ_EXPORT
 void
@@ -63,9 +63,9 @@ defl_include(unz_t    * __restrict stream,
 
   chk          = calloc(1, sizeof(*chk));
   chk->p       = ptr;
-  chk->len     = len;
+
   chk->end     = ptr + len;
-  chk->ismmap  = true;
+  
 
   if (!stream->start) { stream->start     = chk; }
   else                { stream->end->next = chk; }

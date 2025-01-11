@@ -76,8 +76,6 @@ extern "C" {
 #  define __has_builtin(x) 0
 #endif
 
-
-
 typedef enum UnzResult {
   UNZ_NOOP     =  1,       /* no operation needed */
   UNZ_OK       =  0,
