@@ -20,6 +20,7 @@ The build creates `libzipy.a` and the `zipy` command line tool.
 zipy archive.zip -d target
 zipy archive.zip -d target -j auto
 zipy archive.zip -d target -j 1
+zipy archive.zip -d target -p password
 zipy archive.zip -d target --no-crc
 ```
 
@@ -116,7 +117,8 @@ zipy_extract_options_t options = {
   .on_conflict = ZIPY_CONFLICT_SAVE,
   .save_to = ZIPY_SAVE_TARGET,
   .save_dir = NULL,
-  .flags = ZIPY_EXTRACT_DEFAULT
+  .flags = ZIPY_EXTRACT_DEFAULT,
+  .password = NULL
 };
 
 zipy_archive_t *zip = zipy_open("archive.zip");
@@ -137,6 +139,7 @@ lower latency matters more than detecting corrupted archive data.
 - [x] extract deflated entries
 - [x] CRC32 validation
 - [x] basic ZIP64 central directory parsing
-- [ ] encrypted ZIP entries
+- [x] legacy ZipCrypto decryption
+- [ ] WinZip AES decryption
 - [ ] Deflate64
 - [ ] symlinks, attributes, and timestamps

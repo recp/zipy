@@ -26,7 +26,8 @@ typedef enum zipy_zip_result_t {
   ZIPY_ZIP_ECRC     = -4,
   ZIPY_ZIP_EFILE    = -5,
   ZIPY_ZIP_EUNSUP   = -6,
-  ZIPY_ZIP_EEXIST   = -7
+  ZIPY_ZIP_EEXIST   = -7,
+  ZIPY_ZIP_EPASS    = -8
 } zipy_zip_result_t;
 
 typedef enum zipy_zip_method_t {
@@ -57,6 +58,7 @@ typedef struct zipy_extract_options_t {
   zipy_save_location_t save_to;
   const char       *save_dir;
   uint32_t          flags;
+  const char       *password;
 } zipy_extract_options_t;
 
 typedef struct zipy_entry_t {
@@ -66,6 +68,7 @@ typedef struct zipy_entry_t {
   uint32_t    crc32;
   uint16_t    method;
   bool        is_directory;
+  bool        encrypted;
 } zipy_entry_t;
 
 ZIPY_EXPORT zipy_archive_t *

@@ -73,6 +73,7 @@ print_usage(void) {
   printf("  -j <jobs>   Extract with jobs workers (default: cpu count)\n");
   printf("  --on-conflict <ask|save|overwrite|skip|fail>\n");
   printf("  --save-to <target|home|trash>\n");
+  printf("  -p, --password <password>\n");
   printf("  --no-crc    Skip CRC32 validation\n");
   printf("  --config [key=value ...]  Show or update ~/.zipy/config\n");
 }
@@ -218,6 +219,7 @@ config_default(zipy_config_t *config) {
   config->options.save_to = ZIPY_SAVE_TARGET;
   config->options.save_dir = NULL;
   config->options.flags = ZIPY_EXTRACT_DEFAULT;
+  config->options.password = NULL;
 }
 
 static const char *
@@ -1246,7 +1248,10 @@ extract_one(ExtractContext *ctx, zipy_archive_t *zip, size_t index) {
       ctx->saved++;
   } else {
     progress_clear(ctx->progress);
-    fprintf(stderr, "  Error: Failed to extract '%s' (%d)\n", name, ret);
+    if (ret == ZIPY_ZIP_EPASS)
+      fprintf(stderr, "  Error: Missing or incorrect password for '%s'\n", name);
+    else
+      fprintf(stderr, "  Error: Failed to extract '%s' (%d)\n", name, ret);
     ctx->failed = 1;
   }
   progress_update(ctx->progress, ctx->done, name);
@@ -1422,6 +1427,9 @@ main(int argc, char *argv[]) {
         print_usage();
         return 1;
       }
+    } else if ((strcmp(argv[i], "-p") == 0 || strcmp(argv[i], "--password") == 0)
+               && i + 1 < argc) {
+      config.options.password = argv[++i];
     } else if (strcmp(argv[i], "--no-crc") == 0) {
       config.options.flags |= ZIPY_EXTRACT_NO_CRC;
     } else if (!zipfile) {
