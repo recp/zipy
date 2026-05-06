@@ -79,6 +79,14 @@
 #  define ZIPY_PATH_SEP '/'
 #endif
 
+#if defined(_MSC_VER)
+#  define ZIPY_RESTRICT __restrict
+#elif defined(__GNUC__) || defined(__clang__)
+#  define ZIPY_RESTRICT __restrict__
+#else
+#  define ZIPY_RESTRICT
+#endif
+
 typedef struct zipy_file_t {
   zipy_entry_t entry;
   uint64_t local_header_offset;
@@ -93,6 +101,11 @@ typedef struct zipy_file_t {
   uint8_t  has_mtime;
 } zipy_file_t;
 
+typedef struct zipy_path_buf_t {
+  char  *data;
+  size_t cap;
+} zipy_path_buf_t;
+
 struct zipy_archive_t {
   FILE    *fp;
   char    *path;
@@ -101,6 +114,15 @@ struct zipy_archive_t {
   uint64_t file_size;
   const uint8_t *map;
   size_t   map_size;
+  zipy_path_buf_t path_buf;
+  zipy_path_buf_t parent_buf;
+  uint8_t *copy_buf;
+  uint8_t *inflate_in;
+  uint8_t *inflate_out;
+  size_t   copy_cap;
+  size_t   inflate_in_cap;
+  size_t   inflate_out_cap;
+  infl_stream_t *inflate_stream;
 #if defined(_WIN32)
   HANDLE   map_handle;
 #endif
@@ -115,12 +137,12 @@ typedef struct zipy_dir_info_t {
 } zipy_dir_info_t;
 
 static uint16_t
-zipy_le16(const uint8_t *p) {
+zipy_le16(const uint8_t * ZIPY_RESTRICT p) {
   return (uint16_t)((uint16_t)p[0] | ((uint16_t)p[1] << 8));
 }
 
 static uint32_t
-zipy_le32(const uint8_t *p) {
+zipy_le32(const uint8_t * ZIPY_RESTRICT p) {
   return ((uint32_t)p[0])
        | ((uint32_t)p[1] << 8)
        | ((uint32_t)p[2] << 16)
@@ -128,17 +150,85 @@ zipy_le32(const uint8_t *p) {
 }
 
 static uint64_t
-zipy_le64(const uint8_t *p) {
+zipy_le64(const uint8_t * ZIPY_RESTRICT p) {
   return ((uint64_t)zipy_le32(p)) | ((uint64_t)zipy_le32(p + 4) << 32);
 }
 
+static void
+zipy_path_buf_free(zipy_path_buf_t *buf) {
+  if (!buf)
+    return;
+
+  free(buf->data);
+  buf->data = NULL;
+  buf->cap = 0;
+}
+
 static int
-zipy_read(FILE *fp, void *buf, size_t len) {
+zipy_path_buf_reserve(zipy_path_buf_t *buf, size_t len) {
+  char *data;
+  size_t cap;
+
+  if (!buf || len == SIZE_MAX)
+    return 0;
+  if (len <= buf->cap)
+    return 1;
+
+  cap = buf->cap ? buf->cap : 256u;
+  while (cap < len) {
+    if (cap > SIZE_MAX / 2u) {
+      cap = len;
+      break;
+    }
+    cap *= 2u;
+  }
+
+  data = realloc(buf->data, cap);
+  if (!data)
+    return 0;
+
+  buf->data = data;
+  buf->cap = cap;
+  return 1;
+}
+
+static int
+zipy_reserve_bytes(uint8_t **buf, size_t *cap, size_t len) {
+  uint8_t *data;
+  size_t next;
+
+  if (!buf || !cap)
+    return 0;
+  if (len == 0)
+    len = 1;
+  if (len <= *cap)
+    return 1;
+
+  next = *cap ? *cap : ZIP_IO_CHUNK;
+  while (next < len) {
+    if (next > SIZE_MAX / 2u) {
+      next = len;
+      break;
+    }
+    next *= 2u;
+  }
+
+  data = realloc(*buf, next);
+  if (!data)
+    return 0;
+
+  *buf = data;
+  *cap = next;
+  return 1;
+}
+
+static int
+zipy_read(FILE * ZIPY_RESTRICT fp, void * ZIPY_RESTRICT buf, size_t len) {
   return len == 0 || fread(buf, 1, len, fp) == len;
 }
 
 static int
-zipy_seek_set(FILE *fp, uint64_t off) {
+zipy_seek_set(FILE * ZIPY_RESTRICT fp, uint64_t off) {
 #if defined(_WIN32)
   if (off > (uint64_t)INT64_MAX)
     return -1;
@@ -151,7 +241,7 @@ zipy_seek_set(FILE *fp, uint64_t off) {
 }
 
 static int
-zipy_tell(FILE *fp, uint64_t *pos) {
+zipy_tell(FILE * ZIPY_RESTRICT fp, uint64_t * ZIPY_RESTRICT pos) {
 #if defined(_WIN32)
   __int64 p = _ftelli64(fp);
   if (p < 0)
@@ -288,22 +378,6 @@ zipy_strdup(const char *src) {
     return NULL;
 
   memcpy(dst, src, len + 1);
-  return dst;
-}
-
-static char *
-zipy_strndup(const uint8_t *src, size_t len) {
-  char *dst;
-
-  if (memchr(src, '\0', len))
-    return NULL;
-
-  dst = malloc(len + 1);
-  if (!dst)
-    return NULL;
-
-  memcpy(dst, src, len);
-  dst[len] = '\0';
   return dst;
 }
 
@@ -575,33 +649,47 @@ zipy_parse_ext_time_extra(zipy_file_t *info, const uint8_t *extra, size_t len) {
 }
 
 static int
-zipy_verify_local_aes_extra(FILE *fp,
-                            const zipy_file_t *info,
+zipy_verify_local_aes_extra(zipy_archive_t * ZIPY_RESTRICT zipy,
+                            const zipy_file_t * ZIPY_RESTRICT info,
                             uint64_t extra_offset,
                             uint16_t extra_len) {
-  uint8_t *extra;
+  uint8_t stack_extra[512];
+  uint8_t *heap_extra = NULL;
+  const uint8_t *extra;
   zipy_file_t local;
   int ok;
 
-  if (!fp || !info || extra_len == 0)
+  if (!zipy || !zipy->fp || !info || extra_len == 0)
     return 0;
 
-  extra = malloc(extra_len);
-  if (!extra)
-    return 0;
+  extra = zipy_mapped_range(zipy, extra_offset, extra_len);
+  if (!extra) {
+    if (extra_len <= sizeof(stack_extra)) {
+      extra = stack_extra;
+    } else {
+      heap_extra = malloc(extra_len);
+      if (!heap_extra)
+        return 0;
+      extra = heap_extra;
+    }
+
+    if (zipy_seek_set(zipy->fp, extra_offset) != 0
+        || !zipy_read(zipy->fp, (void *)extra, extra_len)) {
+      free(heap_extra);
+      return 0;
+    }
+  }
 
   memset(&local, 0, sizeof(local));
   local.entry.method = ZIP_METHOD_AES;
   local.zip_method = ZIP_METHOD_AES;
 
-  ok = zipy_seek_set(fp, extra_offset) == 0
-    && zipy_read(fp, extra, extra_len)
-    && zipy_parse_aes_extra(&local, extra, extra_len)
+  ok = zipy_parse_aes_extra(&local, extra, extra_len)
     && local.aes_vendor_version == info->aes_vendor_version
     && local.aes_strength == info->aes_strength
     && local.entry.method == info->entry.method;
 
-  free(extra);
+  free(heap_extra);
   return ok;
 }
 
@@ -721,17 +809,12 @@ zipy_mkdir_one(const char *path) {
 }
 
 static int
-zipy_mkdirs(const char *path) {
-  char *tmp, *p;
+zipy_mkdirs_mut(char *tmp) {
+  char *p;
   int ok = 1;
 
-  if (!path || !*path)
+  if (!tmp || !*tmp)
     return 1;
-
-  tmp = malloc(strlen(path) + 1);
-  if (!tmp)
-    return 0;
-  strcpy(tmp, path);
 
   p = tmp;
 #if defined(_WIN32)
@@ -758,8 +841,39 @@ zipy_mkdirs(const char *path) {
   if (ok)
     ok = zipy_mkdir_one(tmp);
 
+  return ok;
+}
+
+static int
+zipy_mkdirs(const char *path) {
+  char *tmp;
+  int ok;
+
+  if (!path || !*path)
+    return 1;
+
+  tmp = malloc(strlen(path) + 1);
+  if (!tmp)
+    return 0;
+  strcpy(tmp, path);
+
+  ok = zipy_mkdirs_mut(tmp);
   free(tmp);
   return ok;
+}
+
+static int
+zipy_mkdirs_buf(const char *path, zipy_path_buf_t *buf) {
+  size_t len;
+
+  if (!path || !*path)
+    return 1;
+
+  len = strlen(path);
+  if (!zipy_path_buf_reserve(buf, len + 1u))
+    return 0;
+  memcpy(buf->data, path, len + 1u);
+  return zipy_mkdirs_mut(buf->data);
 }
 
 static uint32_t
@@ -850,6 +964,69 @@ zipy_parent_has_symlink(const char *path) {
     found = zipy_path_is_symlink(tmp);
 
   free(tmp);
+  return found;
+#endif
+}
+
+static int
+zipy_parent_has_symlink_buf(const char *path, zipy_path_buf_t *buf) {
+#if defined(_WIN32)
+  (void)path;
+  (void)buf;
+  return 0;
+#else
+  char *p, *last = NULL;
+  size_t len;
+  int found = 0;
+
+  if (!path || !*path)
+    return 0;
+
+  len = strlen(path);
+  if (!zipy_path_buf_reserve(buf, len + 1u))
+    return 1;
+
+  memcpy(buf->data, path, len + 1u);
+
+  for (p = buf->data; *p; p++) {
+    if (zipy_is_fs_sep(*p))
+      last = p;
+  }
+
+  if (!last)
+    return 0;
+
+  if (last == buf->data && zipy_is_fs_sep(buf->data[0])) {
+    buf->data[1] = '\0';
+  } else {
+    *last = '\0';
+  }
+
+  p = buf->data;
+  while (zipy_is_fs_sep(*p))
+    p++;
+
+  for (; *p; p++) {
+    if (!zipy_is_fs_sep(*p))
+      continue;
+
+    *p = '\0';
+    if (*buf->data && zipy_path_is_symlink(buf->data)) {
+      found = 1;
+      *p = '/';
+      break;
+    }
+    *p = '/';
+
+    while (zipy_is_fs_sep(p[1]))
+      p++;
+  }
+
+  if (!found
+      && *buf->data
+      && !(strlen(buf->data) == 1 && zipy_is_fs_sep(buf->data[0])))
+    found = zipy_path_is_symlink(buf->data);
+
   return found;
 #endif
 }
@@ -955,6 +1132,36 @@ zipy_mkdir_parent(const char *path) {
   return ok;
 }
 
+static int
+zipy_mkdir_parent_buf(const char *path, zipy_path_buf_t *buf) {
+  char *p, *last = NULL;
+  size_t len;
+
+  if (!path || !*path)
+    return 0;
+
+  len = strlen(path);
+  if (!zipy_path_buf_reserve(buf, len + 1u))
+    return 0;
+  memcpy(buf->data, path, len + 1u);
+
+  for (p = buf->data; *p; p++) {
+    if (zipy_is_fs_sep(*p))
+      last = p;
+  }
+
+  if (!last)
+    return 1;
+
+  if (last == buf->data && zipy_is_fs_sep(buf->data[0])) {
+    buf->data[1] = '\0';
+  } else {
+    *last = '\0';
+  }
+
+  return zipy_mkdirs_mut(buf->data);
+}
+
 static zipy_file_t *
 zipy_find_file(zipy_archive_t *zipy, const char *filename) {
   size_t i;
@@ -987,7 +1194,9 @@ zipy_chunk_size(uint64_t remaining) {
 }
 
 static uint32_t
-zipy_crc32_update(uint32_t crc, const uint8_t *buf, size_t len) {
+zipy_crc32_update(uint32_t crc,
+                  const uint8_t * ZIPY_RESTRICT buf,
+                  size_t len) {
   static const uint32_t table[16] = {
     0x00000000u, 0x1DB71064u, 0x3B6E20C8u, 0x26D930ACu,
     0x76DC4190u, 0x6B6B51F4u, 0x4DB26158u, 0x5005713Cu,
@@ -1005,13 +1214,13 @@ zipy_crc32_update(uint32_t crc, const uint8_t *buf, size_t len) {
 }
 
 static int
-zipy_write_chunk(FILE *out,
-                uint8_t *buf,
-                size_t len,
-                uint32_t *crc,
-                int check_crc,
-                dec_t *dec,
-                uint64_t *written) {
+zipy_write_chunk(FILE * ZIPY_RESTRICT out,
+                 uint8_t * ZIPY_RESTRICT buf,
+                 size_t len,
+                 uint32_t * ZIPY_RESTRICT crc,
+                 int check_crc,
+                 dec_t * ZIPY_RESTRICT dec,
+                 uint64_t * ZIPY_RESTRICT written) {
   if (len == 0)
     return ZIPY_ZIP_OK;
 
@@ -1028,91 +1237,93 @@ zipy_write_chunk(FILE *out,
 }
 
 static int
-zipy_copy_store(FILE *fp,
-                FILE *out,
+zipy_copy_store(zipy_archive_t * ZIPY_RESTRICT zipy,
+                FILE * ZIPY_RESTRICT out,
                 uint64_t len,
                 uint32_t expectedCrc,
                 int check_crc,
-                dec_t *dec) {
+                dec_t * ZIPY_RESTRICT dec) {
+  FILE *fp;
   uint8_t *buf;
   uint64_t remaining = len, written = 0;
   uint32_t crc;
   int ret = ZIPY_ZIP_OK;
 
-  buf = malloc(ZIP_IO_CHUNK);
-  if (!buf)
+  if (!zipy || !zipy->fp)
+    return ZIPY_ZIP_EFILE;
+  if (!zipy_reserve_bytes(&zipy->copy_buf, &zipy->copy_cap, ZIP_IO_CHUNK))
     return ZIPY_ZIP_ERR;
 
+  fp = zipy->fp;
+  buf = zipy->copy_buf;
   crc = 0;
   while (remaining > 0) {
     size_t n = zipy_chunk_size(remaining);
 
     if (fread(buf, 1, n, fp) != n) {
       ret = ZIPY_ZIP_EFILE;
-      goto done;
+      return ret;
     }
 
     ret = zipy_write_chunk(out, buf, n, &crc, check_crc, dec, &written);
     if (ret != ZIPY_ZIP_OK)
-      goto done;
+      return ret;
 
     remaining -= n;
   }
 
   ret = dec_finish(dec, fp);
   if (ret != ZIPY_ZIP_OK)
-    goto done;
+    return ret;
 
   if (written != len)
     ret = ZIPY_ZIP_ESIZE;
   else if (check_crc && (uint32_t)crc != expectedCrc)
     ret = ZIPY_ZIP_ECRC;
 
-done:
-  free(buf);
   return ret;
 }
 
 static int
-zipy_inflate_raw(FILE *fp,
-                FILE *out,
-                const uint8_t *mapped,
-                uint64_t compressed_size,
-                uint64_t uncompressed_size,
-                uint32_t expectedCrc,
-                int check_crc,
-                dec_t *dec) {
+zipy_inflate_raw(zipy_archive_t * ZIPY_RESTRICT zipy,
+                 FILE * ZIPY_RESTRICT out,
+                 const uint8_t * ZIPY_RESTRICT mapped,
+                 uint64_t compressed_size,
+                 uint64_t uncompressed_size,
+                 uint32_t expectedCrc,
+                 int check_crc,
+                 dec_t * ZIPY_RESTRICT dec) {
+  FILE *fp;
   uint8_t *inbuf = NULL;
-  uint8_t *outbuf = NULL;
+  uint8_t *outbuf;
   const uint8_t *src;
   size_t inlen, outlen;
   uint32_t crc;
   int ret;
 
+  if (!zipy || !zipy->fp)
+    return ZIPY_ZIP_EFILE;
   if (compressed_size > UINT32_MAX || uncompressed_size > UINT32_MAX)
     return ZIPY_ZIP_EUNSUP;
 
   inlen = compressed_size > 0 ? (size_t)compressed_size : 1;
   outlen = uncompressed_size > 0 ? (size_t)uncompressed_size : 1;
 
-  outbuf = malloc(outlen);
-  if (!outbuf) {
-    ret = ZIPY_ZIP_ERR;
-    goto done;
-  }
+  if (!zipy_reserve_bytes(&zipy->inflate_out, &zipy->inflate_out_cap, outlen))
+    return ZIPY_ZIP_ERR;
 
+  fp = zipy->fp;
+  outbuf = zipy->inflate_out;
   src = mapped;
   if (!src) {
-    inbuf = malloc(inlen);
-    if (!inbuf) {
-      ret = ZIPY_ZIP_ERR;
-      goto done;
-    }
+    if (!zipy_reserve_bytes(&zipy->inflate_in, &zipy->inflate_in_cap, inlen))
+      return ZIPY_ZIP_ERR;
+    inbuf = zipy->inflate_in;
 
     if (compressed_size > 0
         && fread(inbuf, 1, (size_t)compressed_size, fp) != (size_t)compressed_size) {
       ret = ZIPY_ZIP_EFILE;
-      goto done;
+      return ret;
     }
     if (dec && compressed_size > 0)
       dec_decrypt(dec, inbuf, (size_t)compressed_size);
@@ -1121,37 +1332,37 @@ zipy_inflate_raw(FILE *fp,
 
   ret = dec_finish(dec, fp);
   if (ret != ZIPY_ZIP_OK)
-    goto done;
+    return ret;
 
-  if (infl_buf(src,
-               (uint32_t)compressed_size,
-               outbuf,
-               (uint32_t)uncompressed_size,
-               0) != UNZ_OK) {
+  if (!zipy->inflate_stream) {
+    zipy->inflate_stream = infl_init(outbuf, (uint32_t)uncompressed_size, 0);
+    if (!zipy->inflate_stream)
+      return ZIPY_ZIP_ERR;
+  } else {
+    infl_reset(zipy->inflate_stream, outbuf, (uint32_t)uncompressed_size, 0);
+  }
+
+  infl_include(zipy->inflate_stream, src, (uint32_t)compressed_size);
+  if (infl(zipy->inflate_stream) != UNZ_OK) {
     ret = ZIPY_ZIP_EINFLATE;
-    goto done;
+    return ret;
   }
 
   if (check_crc) {
     crc = zipy_crc32_update(0, outbuf, (size_t)uncompressed_size);
     if (crc != expectedCrc) {
       ret = ZIPY_ZIP_ECRC;
-      goto done;
+      return ret;
     }
   }
 
   if (uncompressed_size > 0
       && fwrite(outbuf, 1, (size_t)uncompressed_size, out) != (size_t)uncompressed_size) {
     ret = ZIPY_ZIP_EFILE;
-    goto done;
+    return ret;
   }
 
-  ret = ZIPY_ZIP_OK;
-
-done:
-  free(outbuf);
-  free(inbuf);
-  return ret;
+  return ZIPY_ZIP_OK;
 }
 
 static int
@@ -1322,6 +1533,33 @@ zipy_extract_path(const char *dir, const char *name) {
   path[dirLen + nameLen] = '\0';
 
   return path;
+}
+
+static const char *
+zipy_path_buf_extract(zipy_path_buf_t * ZIPY_RESTRICT buf,
+                      const char * ZIPY_RESTRICT dir,
+                      const char * ZIPY_RESTRICT name) {
+  size_t dirLen, nameLen, i;
+
+  if (!buf || !dir || !name)
+    return NULL;
+
+  dirLen = strlen(dir);
+  nameLen = strlen(name);
+  if (dirLen > SIZE_MAX - nameLen - 2u)
+    return NULL;
+  if (!zipy_path_buf_reserve(buf, dirLen + nameLen + 2u))
+    return NULL;
+
+  memcpy(buf->data, dir, dirLen);
+  if (dirLen > 0 && !zipy_is_fs_sep(dir[dirLen - 1]))
+    buf->data[dirLen++] = '/';
+
+  for (i = 0; i < nameLen; i++)
+    buf->data[dirLen + i] = zipy_is_zip_sep(name[i]) ? '/' : name[i];
+  buf->data[dirLen + nameLen] = '\0';
+
+  return buf->data;
 }
 
 static char *
@@ -1752,6 +1990,10 @@ zipy_open(const char *path) {
   zipy_archive_t *zipy = NULL;
   zipy_dir_info_t dir;
   FILE *fp;
+  uint8_t extra_stack[512];
+  uint8_t *extra_buf = NULL;
+  size_t extra_cap = 0;
+  char *name = NULL;
   size_t i, count;
 
   if (!path || !(fp = fopen(path, "rb")))
@@ -1787,7 +2029,7 @@ zipy_open(const char *path) {
 
   for (i = 0; i < count; i++) {
     uint8_t hdr[ZIP_CENTRAL_FIXED];
-    uint8_t *name = NULL, *extra = NULL;
+    uint8_t *extra = NULL;
     zipy_file_t *info = &zipy->files[i];
     uint16_t nameLen, extraLen, commentLen, diskStart;
     uint32_t comp32, uncomp32, offset32;
@@ -1813,15 +2055,14 @@ zipy_open(const char *path) {
         || (diskStart != 0 && diskStart != ZIP64_MAGIC_UINT16))
       goto err;
 
-    name = malloc(nameLen);
+    name = malloc((size_t)nameLen + 1u);
     if (!name || !zipy_read(fp, name, nameLen))
       goto err;
-
-    info->entry.name = zipy_strndup(name, nameLen);
-    free(name);
-    name = NULL;
-    if (!info->entry.name)
+    if (memchr(name, '\0', nameLen))
       goto err;
+    name[nameLen] = '\0';
+    info->entry.name = name;
+    name = NULL;
 
     info->zip_method = info->entry.method;
     info->entry.compressed_size = comp32;
@@ -1833,7 +2074,19 @@ zipy_open(const char *path) {
     info->has_mtime = info->mtime != (time_t)0;
 
     if (extraLen > 0) {
-      extra = malloc(extraLen);
+      if (extraLen <= sizeof(extra_stack)) {
+        extra = extra_stack;
+      } else {
+        if (extraLen > extra_cap) {
+          uint8_t *new_extra = realloc(extra_buf, extraLen);
+          if (!new_extra)
+            goto err;
+          extra_buf = new_extra;
+          extra_cap = extraLen;
+        }
+        extra = extra_buf;
+      }
+
       if (!extra || !zipy_read(fp, extra, extraLen))
         goto err;
 
@@ -1844,8 +2097,6 @@ zipy_open(const char *path) {
         goto err;
       if (!zipy_parse_ext_time_extra(info, extra, extraLen))
         goto err;
-      free(extra);
-      extra = NULL;
     } else if (comp32 == ZIP64_MAGIC_UINT32
                || uncomp32 == ZIP64_MAGIC_UINT32
                || offset32 == ZIP64_MAGIC_UINT32) {
@@ -1868,13 +2119,23 @@ zipy_open(const char *path) {
       goto err;
   }
 
+  free(extra_buf);
   return zipy;
 
 err:
+  free(name);
+  free(extra_buf);
   if (zipy) {
     zipy_unmap_archive(zipy);
     zipy_free_files(zipy);
     free(zipy->path);
+    zipy_path_buf_free(&zipy->path_buf);
+    zipy_path_buf_free(&zipy->parent_buf);
+    free(zipy->copy_buf);
+    free(zipy->inflate_in);
+    free(zipy->inflate_out);
+    if (zipy->inflate_stream)
+      infl_destroy(zipy->inflate_stream);
     free(zipy);
   }
   fclose(fp);
@@ -1882,11 +2143,11 @@ err:
 }
 
 static int
-zipy_extract_entry(zipy_archive_t *zipy,
-                   zipy_file_t *info,
-                   const char *destpath,
+zipy_extract_entry(zipy_archive_t * ZIPY_RESTRICT zipy,
+                   zipy_file_t * ZIPY_RESTRICT info,
+                   const char * ZIPY_RESTRICT destpath,
                    uint32_t extract_flags,
-                   const char *password) {
+                   const char * ZIPY_RESTRICT password) {
   uint8_t local[ZIP_LOCAL_FIXED];
   uint16_t flags, method, nameLen, extraLen;
   uint64_t dataOffset;
@@ -1907,7 +2168,7 @@ zipy_extract_entry(zipy_archive_t *zipy,
     return ZIPY_ZIP_EUNSUP;
 
   if (info->entry.is_directory) {
-    if (!zipy_mkdirs(destpath))
+    if (!zipy_mkdirs_buf(destpath, &zipy->parent_buf))
       return ZIPY_ZIP_EFILE;
     if (extract_flags & ZIPY_EXTRACT_DELAY_DIR_METADATA)
       return ZIPY_ZIP_OK;
@@ -1939,7 +2200,7 @@ zipy_extract_entry(zipy_archive_t *zipy,
     return ZIPY_ZIP_ESIZE;
 
   if (method == ZIP_METHOD_AES
-      && !zipy_verify_local_aes_extra(zipy->fp,
+      && !zipy_verify_local_aes_extra(zipy,
                                       info,
                                       info->local_header_offset + ZIP_LOCAL_FIXED + nameLen,
                                       extraLen))
@@ -2012,30 +2273,29 @@ zipy_extract_entry(zipy_archive_t *zipy,
     return ret;
   }
 
-  if (!zipy_mkdir_parent(destpath)) {
+  if (!zipy_mkdir_parent_buf(destpath, &zipy->parent_buf)) {
     ret = ZIPY_ZIP_EFILE;
     return ret;
   }
-  if (zipy_parent_has_symlink(destpath) || !zipy_unlink_symlink(destpath))
+  if (zipy_parent_has_symlink_buf(destpath, &zipy->parent_buf)
+      || !zipy_unlink_symlink(destpath))
     return ZIPY_ZIP_EFILE;
 
   outfp = fopen(destpath, "wb");
-  if (!outfp) {
-    ret = ZIPY_ZIP_EFILE;
-    return ret;
-  }
+  if (!outfp)
+    return ZIPY_ZIP_EFILE;
 
   if (info->entry.method == ZIPY_ZIP_STORE) {
     if (compressed_size != info->entry.uncompressed_size)
       ret = ZIPY_ZIP_ESIZE;
     else
-      ret = zipy_copy_store(zipy->fp, outfp,
+      ret = zipy_copy_store(zipy, outfp,
                            info->entry.uncompressed_size,
                            info->entry.crc32,
                            check_crc,
                            dec_ptr);
   } else {
-    ret = zipy_inflate_raw(zipy->fp,
+    ret = zipy_inflate_raw(zipy,
                           outfp,
                           dec_ptr ? NULL : zipy_mapped_range(zipy, dataOffset, compressed_size),
                           compressed_size,
@@ -2074,7 +2334,11 @@ zipy_extract(zipy_archive_t *zipy, size_t index, const char *destpath) {
   if (!zipy || index >= zipy->file_count)
     return ZIPY_ZIP_EFILE;
 
-  return zipy_extract_entry(zipy, &zipy->files[index], destpath, ZIPY_EXTRACT_DEFAULT, NULL);
+  return zipy_extract_entry(zipy,
+                            &zipy->files[index],
+                            destpath,
+                            ZIPY_EXTRACT_DEFAULT,
+                            NULL);
 }
 
 ZIPY_EXPORT
@@ -2084,7 +2348,7 @@ zipy_extract_to(zipy_archive_t *zipy,
                 const char *destdir,
                 const zipy_extract_options_t *options) {
   zipy_extract_options_t opts;
-  char *destpath;
+  const char *destpath;
   char *save_dir = NULL;
   int ret, conflictRet;
 
@@ -2092,7 +2356,9 @@ zipy_extract_to(zipy_archive_t *zipy,
     return ZIPY_ZIP_EFILE;
 
   opts = zipy_default_extract_options(options);
-  destpath = zipy_extract_path(destdir, zipy->files[index].entry.name);
+  destpath = zipy_path_buf_extract(&zipy->path_buf,
+                                   destdir,
+                                   zipy->files[index].entry.name);
   if (!destpath)
     return ZIPY_ZIP_ERR;
 
@@ -2110,13 +2376,16 @@ zipy_extract_to(zipy_archive_t *zipy,
     goto done;
   }
 
-  ret = zipy_extract_entry(zipy, &zipy->files[index], destpath, opts.flags, opts.password);
+  ret = zipy_extract_entry(zipy,
+                           &zipy->files[index],
+                           destpath,
+                           opts.flags,
+                           opts.password);
   if (ret == ZIPY_ZIP_OK && conflictRet == ZIPY_ZIP_SAVED)
     ret = ZIPY_ZIP_SAVED;
 
 done:
   free(save_dir);
-  free(destpath);
   return ret;
 }
 
@@ -2132,7 +2401,11 @@ zipy_extract_named(zipy_archive_t *zipy, const char *name, const char *destpath)
   if (!info)
     return ZIPY_ZIP_EFILE;
 
-  return zipy_extract_entry(zipy, info, destpath, ZIPY_EXTRACT_DEFAULT, NULL);
+  return zipy_extract_entry(zipy,
+                            info,
+                            destpath,
+                            ZIPY_EXTRACT_DEFAULT,
+                            NULL);
 }
 
 typedef struct zipy_extract_all_context_t {
@@ -2172,13 +2445,15 @@ zipy_extract_all_serial(zipy_archive_t *zipy,
   size_t i;
 
   for (i = 0; i < zipy->file_count; i++) {
-    char *path;
+    const char *path;
     int ret;
 
     if (skip && skip[i])
       continue;
 
-    path = zipy_extract_path(destdir, zipy->files[i].entry.name);
+    path = zipy_path_buf_extract(&zipy->path_buf,
+                                 destdir,
+                                 zipy->files[i].entry.name);
     if (!path)
       return ZIPY_ZIP_ERR;
 
@@ -2187,7 +2462,6 @@ zipy_extract_all_serial(zipy_archive_t *zipy,
                              path,
                              flags | ZIPY_EXTRACT_DELAY_DIR_METADATA,
                              password);
-    free(path);
     if (ret < ZIPY_ZIP_OK)
       return ret;
   }
@@ -2213,7 +2487,7 @@ zipy_extract_all_worker(void *arg) {
 
   for (;;) {
     const zipy_entry_t *entry;
-    char *path;
+    const char *path;
     int ret;
 
     zipy_lock(&ctx->lock);
@@ -2233,7 +2507,7 @@ zipy_extract_all_worker(void *arg) {
       goto fail;
     }
 
-    path = zipy_extract_path(ctx->destdir, entry->name);
+    path = zipy_path_buf_extract(&zipy->path_buf, ctx->destdir, entry->name);
     if (!path) {
       ret = ZIPY_ZIP_ERR;
       goto fail;
@@ -2244,7 +2518,6 @@ zipy_extract_all_worker(void *arg) {
                              path,
                              ctx->flags | ZIPY_EXTRACT_DELAY_DIR_METADATA,
                              ctx->password);
-    free(path);
     if (ret >= ZIPY_ZIP_OK)
       continue;
 
@@ -2318,18 +2591,17 @@ zipy_apply_directory_metadata(zipy_archive_t *zipy,
 
   for (i = zipy->file_count; i > 0; i--) {
     zipy_file_t *info = &zipy->files[i - 1u];
-    char *path;
+    const char *path;
     int ok;
 
     if (!info->entry.is_directory || (skip && skip[i - 1u]))
       continue;
 
-    path = zipy_extract_path(destdir, info->entry.name);
+    path = zipy_path_buf_extract(&zipy->path_buf, destdir, info->entry.name);
     if (!path)
       return ZIPY_ZIP_ERR;
 
     ok = zipy_apply_metadata(path, info);
-    free(path);
     if (!ok)
       return ZIPY_ZIP_EFILE;
   }
@@ -2352,10 +2624,12 @@ zipy_prepare_extract_all(zipy_archive_t *zipy,
     return ZIPY_ZIP_OK;
 
   for (i = 0; i < zipy->file_count; i++) {
-    char *path;
+    const char *path;
     int ret;
 
-    path = zipy_extract_path(destdir, zipy->files[i].entry.name);
+    path = zipy_path_buf_extract(&zipy->path_buf,
+                                 destdir,
+                                 zipy->files[i].entry.name);
     if (!path) {
       result = ZIPY_ZIP_ERR;
       break;
@@ -2366,7 +2640,6 @@ zipy_prepare_extract_all(zipy_archive_t *zipy,
                                       path,
                                       options,
                                       &save_dir);
-    free(path);
 
     if (ret == ZIPY_ZIP_SKIPPED) {
       if (!*skipOut) {
@@ -2432,6 +2705,13 @@ zipy_close(zipy_archive_t *zipy) {
 
   zipy_free_files(zipy);
   free(zipy->path);
+  zipy_path_buf_free(&zipy->path_buf);
+  zipy_path_buf_free(&zipy->parent_buf);
+  free(zipy->copy_buf);
+  free(zipy->inflate_in);
+  free(zipy->inflate_out);
+  if (zipy->inflate_stream)
+    infl_destroy(zipy->inflate_stream);
   zipy_unmap_archive(zipy);
   if (zipy->fp)
     fclose(zipy->fp);
