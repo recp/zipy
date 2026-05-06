@@ -1326,6 +1326,37 @@ zipy_copy_store(zipy_archive_t * ZIPY_RESTRICT zipy,
 }
 
 static int
+zipy_copy_store_mapped(FILE * ZIPY_RESTRICT out,
+                       const uint8_t * ZIPY_RESTRICT src,
+                       uint64_t len,
+                       uint32_t expectedCrc,
+                       int check_crc) {
+  uint64_t remaining = len;
+  uint32_t crc = 0;
+
+  if (!src)
+    return ZIPY_ZIP_EFILE;
+
+  while (remaining > 0) {
+    size_t n = zipy_chunk_size(remaining);
+
+    if (fwrite(src, 1, n, out) != n)
+      return ZIPY_ZIP_EFILE;
+
+    if (check_crc)
+      crc = zipy_crc32_update(crc, src, n);
+
+    src += n;
+    remaining -= n;
+  }
+
+  if (check_crc && crc != expectedCrc)
+    return ZIPY_ZIP_ECRC;
+
+  return ZIPY_ZIP_OK;
+}
+
+static int
 zipy_inflate_raw(zipy_archive_t * ZIPY_RESTRICT zipy,
                  FILE * ZIPY_RESTRICT out,
                  const uint8_t * ZIPY_RESTRICT mapped,
@@ -2231,6 +2262,8 @@ zipy_extract_entry(zipy_archive_t * ZIPY_RESTRICT zipy,
                    uint32_t extract_flags,
                    const char * ZIPY_RESTRICT password) {
   uint8_t local[ZIP_LOCAL_FIXED];
+  const uint8_t *localp;
+  const uint8_t *mapped_data = NULL;
   uint16_t flags, method, nameLen, extraLen;
   uint64_t dataOffset;
   uint64_t compressed_size;
@@ -2238,6 +2271,7 @@ zipy_extract_entry(zipy_archive_t * ZIPY_RESTRICT zipy,
   dec_t *dec_ptr = NULL;
   FILE *outfp;
   int check_crc = (extract_flags & ZIPY_EXTRACT_NO_CRC) == 0;
+  int encrypted;
   int ret = ZIPY_ZIP_ERR;
 
   if (!zipy || !zipy->fp || !info || !destpath)
@@ -2260,15 +2294,21 @@ zipy_extract_entry(zipy_archive_t * ZIPY_RESTRICT zipy,
   if (info->entry.method != ZIPY_ZIP_STORE && info->entry.method != ZIPY_ZIP_DEFLATE)
     return ZIPY_ZIP_EUNSUP;
 
-  if (zipy_seek_set(zipy->fp, info->local_header_offset) != 0
-      || !zipy_read(zipy->fp, local, sizeof(local))
-      || zipy_le32(local) != ZIP_SIGN_LOCAL_FILE)
+  localp = zipy_mapped_range(zipy, info->local_header_offset, sizeof(local));
+  if (!localp) {
+    if (zipy_seek_set(zipy->fp, info->local_header_offset) != 0
+        || !zipy_read(zipy->fp, local, sizeof(local)))
+      return ZIPY_ZIP_EFILE;
+    localp = local;
+  }
+
+  if (zipy_le32(localp) != ZIP_SIGN_LOCAL_FILE)
     return ZIPY_ZIP_EFILE;
 
-  flags = zipy_le16(local + 6);
-  method = zipy_le16(local + 8);
-  nameLen = zipy_le16(local + 26);
-  extraLen = zipy_le16(local + 28);
+  flags = zipy_le16(localp + 6);
+  method = zipy_le16(localp + 8);
+  nameLen = zipy_le16(localp + 26);
+  extraLen = zipy_le16(localp + 28);
 
   if (method != info->zip_method || (flags & ZIP_FLAG_STRONG_ENC))
     return ZIPY_ZIP_EUNSUP;
@@ -2288,12 +2328,15 @@ zipy_extract_entry(zipy_archive_t * ZIPY_RESTRICT zipy,
                                       extraLen))
     return ZIPY_ZIP_EUNSUP;
 
-  if (zipy_seek_set(zipy->fp, dataOffset) != 0)
+  compressed_size = info->entry.compressed_size;
+  encrypted = ((flags | info->flags) & ZIP_FLAG_ENCRYPTED) != 0;
+  if (!encrypted)
+    mapped_data = zipy_mapped_range(zipy, dataOffset, compressed_size);
+  if ((encrypted || !mapped_data) && zipy_seek_set(zipy->fp, dataOffset) != 0)
     return ZIPY_ZIP_EFILE;
 
-  compressed_size = info->entry.compressed_size;
   dec_init(&dec);
-  if ((flags | info->flags) & ZIP_FLAG_ENCRYPTED) {
+  if (encrypted) {
     uint8_t verify = ((flags | info->flags) & ZIP_FLAG_DATA_DESC)
                    ? (uint8_t)(info->mod_time >> 8)
                    : (uint8_t)(info->entry.crc32 >> 24);
@@ -2326,6 +2369,9 @@ zipy_extract_entry(zipy_archive_t * ZIPY_RESTRICT zipy,
   if (zipy_is_symlink(info)) {
     uint8_t *target = NULL;
     size_t target_len = 0;
+
+    if (mapped_data && zipy_seek_set(zipy->fp, dataOffset) != 0)
+      return ZIPY_ZIP_EFILE;
 
     if (info->entry.method == ZIPY_ZIP_STORE) {
       if (compressed_size != info->entry.uncompressed_size)
@@ -2369,6 +2415,12 @@ zipy_extract_entry(zipy_archive_t * ZIPY_RESTRICT zipy,
   if (info->entry.method == ZIPY_ZIP_STORE) {
     if (compressed_size != info->entry.uncompressed_size)
       ret = ZIPY_ZIP_ESIZE;
+    else if (mapped_data)
+      ret = zipy_copy_store_mapped(outfp,
+                                   mapped_data,
+                                   info->entry.uncompressed_size,
+                                   info->entry.crc32,
+                                   check_crc);
     else
       ret = zipy_copy_store(zipy, outfp,
                            info->entry.uncompressed_size,
@@ -2378,7 +2430,7 @@ zipy_extract_entry(zipy_archive_t * ZIPY_RESTRICT zipy,
   } else {
     ret = zipy_inflate_raw(zipy,
                           outfp,
-                          dec_ptr ? NULL : zipy_mapped_range(zipy, dataOffset, compressed_size),
+                          mapped_data,
                           compressed_size,
                           info->entry.uncompressed_size,
                           info->entry.crc32,
