@@ -13,14 +13,14 @@
 #include <stdlib.h>
 #include <string.h>
 
-typedef struct ZipyThreadEntry {
+typedef struct zipy_thread_entry_t {
   void (*func)(void *);
   void *arg;
-} ZipyThreadEntry;
+} zipy_thread_entry_t;
 
 static DWORD WINAPI
 zipy_thread_entry(void *arg) {
-  ZipyThreadEntry entry;
+  zipy_thread_entry_t entry;
 
   memcpy(&entry, arg, sizeof(entry));
   free(arg);
@@ -30,8 +30,8 @@ zipy_thread_entry(void *arg) {
 }
 
 int
-zipy_thread_start(ZipyThread *thread, void (*func)(void *), void *arg) {
-  ZipyThreadEntry *entry;
+zipy_thread_start(zipy_thread_t *thread, void (*func)(void *), void *arg) {
+  zipy_thread_entry_t *entry;
 
   entry = calloc(1, sizeof(*entry));
   if (!entry)
@@ -50,28 +50,28 @@ zipy_thread_start(ZipyThread *thread, void (*func)(void *), void *arg) {
 }
 
 void
-zipy_thread_join(ZipyThread *thread) {
+zipy_thread_join(zipy_thread_t *thread) {
   WaitForSingleObject(thread->id, INFINITE);
   CloseHandle(thread->id);
 }
 
 void
-zipy_mutex_init(ZipyMutex *mutex) {
+zipy_mutex_init(zipy_mutex_t *mutex) {
   InitializeCriticalSection(&mutex->mutex);
 }
 
 void
-zipy_mutex_destroy(ZipyMutex *mutex) {
+zipy_mutex_destroy(zipy_mutex_t *mutex) {
   DeleteCriticalSection(&mutex->mutex);
 }
 
 void
-zipy_lock(ZipyMutex *mutex) {
+zipy_lock(zipy_mutex_t *mutex) {
   EnterCriticalSection(&mutex->mutex);
 }
 
 void
-zipy_unlock(ZipyMutex *mutex) {
+zipy_unlock(zipy_mutex_t *mutex) {
   LeaveCriticalSection(&mutex->mutex);
 }
 

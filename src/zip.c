@@ -68,28 +68,28 @@
 #  define ZIPY_PATH_SEP '/'
 #endif
 
-typedef struct ZipyFile {
-  ZipyEntry entry;
-  uint64_t localHeaderOffset;
+typedef struct zipy_file_t {
+  zipy_entry_t entry;
+  uint64_t local_header_offset;
   uint16_t flags;
-  uint32_t externalAttr;
-} ZipyFile;
+  uint32_t external_attr;
+} zipy_file_t;
 
-struct ZipyArchive {
+struct zipy_archive_t {
   FILE    *fp;
   char    *path;
-  ZipyFile *files;
-  size_t   fileCount;
-  uint64_t fileSize;
+  zipy_file_t *files;
+  size_t   file_count;
+  uint64_t file_size;
 };
 
-typedef struct ZipyDirInfo {
-  uint64_t fileSize;
-  uint64_t eocdOffset;
-  uint64_t centralDirOffset;
-  uint64_t centralDirSize;
+typedef struct zipy_dir_info_t {
+  uint64_t file_size;
+  uint64_t eocd_offset;
+  uint64_t central_dir_offset;
+  uint64_t central_dir_size;
   uint64_t entries;
-} ZipyDirInfo;
+} zipy_dir_info_t;
 
 static uint16_t
 zipy_le16(const uint8_t *p) {
@@ -209,15 +209,15 @@ zipy_strndup(const uint8_t *src, size_t len) {
 }
 
 static int
-zipy_read_zip64_eocd(FILE *fp, ZipyDirInfo *dir) {
+zipy_read_zip64_eocd(FILE *fp, zipy_dir_info_t *dir) {
   uint8_t locator[ZIP64_LOCATOR_FIXED];
   uint8_t eocd[ZIP64_EOCD_FIXED];
   uint64_t zip64Off, entriesDisk;
 
-  if (dir->eocdOffset < ZIP64_LOCATOR_FIXED)
+  if (dir->eocd_offset < ZIP64_LOCATOR_FIXED)
     return 0;
 
-  if (zipy_seek_set(fp, dir->eocdOffset - ZIP64_LOCATOR_FIXED) != 0
+  if (zipy_seek_set(fp, dir->eocd_offset - ZIP64_LOCATOR_FIXED) != 0
       || !zipy_read(fp, locator, sizeof(locator)))
     return 0;
 
@@ -228,8 +228,8 @@ zipy_read_zip64_eocd(FILE *fp, ZipyDirInfo *dir) {
     return 0;
 
   zip64Off = zipy_le64(locator + 8);
-  if (dir->fileSize < ZIP64_EOCD_FIXED
-      || zip64Off > dir->fileSize - ZIP64_EOCD_FIXED)
+  if (dir->file_size < ZIP64_EOCD_FIXED
+      || zip64Off > dir->file_size - ZIP64_EOCD_FIXED)
     return 0;
 
   if (zipy_seek_set(fp, zip64Off) != 0 || !zipy_read(fp, eocd, sizeof(eocd)))
@@ -246,26 +246,26 @@ zipy_read_zip64_eocd(FILE *fp, ZipyDirInfo *dir) {
   if (entriesDisk != dir->entries)
     return 0;
 
-  dir->centralDirSize = zipy_le64(eocd + 40);
-  dir->centralDirOffset = zipy_le64(eocd + 48);
+  dir->central_dir_size = zipy_le64(eocd + 40);
+  dir->central_dir_offset = zipy_le64(eocd + 48);
   return 1;
 }
 
 static int
-zipy_find_eocd(FILE *fp, ZipyDirInfo *dir) {
+zipy_find_eocd(FILE *fp, zipy_dir_info_t *dir) {
   uint8_t *tail;
-  uint64_t tailOff, fileSize;
+  uint64_t tailOff, file_size;
   size_t tailSize, i;
 
   memset(dir, 0, sizeof(*dir));
 
-  if (zipy_file_size(fp, &fileSize) != 0 || fileSize < ZIP_EOCD_FIXED)
+  if (zipy_file_size(fp, &file_size) != 0 || file_size < ZIP_EOCD_FIXED)
     return 0;
 
-  tailSize = fileSize < ZIP_MAX_EOCD_SEARCH
-           ? (size_t)fileSize
+  tailSize = file_size < ZIP_MAX_EOCD_SEARCH
+           ? (size_t)file_size
            : (size_t)ZIP_MAX_EOCD_SEARCH;
-  tailOff = fileSize - tailSize;
+  tailOff = file_size - tailSize;
 
   tail = malloc(tailSize);
   if (!tail)
@@ -291,18 +291,18 @@ zipy_find_eocd(FILE *fp, ZipyDirInfo *dir) {
       if (i + ZIP_EOCD_FIXED + commentLen != tailSize)
         goto next;
 
-      dir->fileSize = fileSize;
-      dir->eocdOffset = tailOff + i;
+      dir->file_size = file_size;
+      dir->eocd_offset = tailOff + i;
       dir->entries = entries;
-      dir->centralDirSize = zipy_le32(p + 12);
-      dir->centralDirOffset = zipy_le32(p + 16);
+      dir->central_dir_size = zipy_le32(p + 12);
+      dir->central_dir_offset = zipy_le32(p + 16);
 
       needsZip64 = disk == ZIP64_MAGIC_UINT16
                 || cdDisk == ZIP64_MAGIC_UINT16
                 || entriesDisk == ZIP64_MAGIC_UINT16
                 || entries == ZIP64_MAGIC_UINT16
-                || dir->centralDirSize == ZIP64_MAGIC_UINT32
-                || dir->centralDirOffset == ZIP64_MAGIC_UINT32;
+                || dir->central_dir_size == ZIP64_MAGIC_UINT32
+                || dir->central_dir_offset == ZIP64_MAGIC_UINT32;
 
       if (needsZip64) {
         if (!zipy_read_zip64_eocd(fp, dir))
@@ -312,9 +312,9 @@ zipy_find_eocd(FILE *fp, ZipyDirInfo *dir) {
       }
 
       free(tail);
-      if (UINT64_MAX - dir->centralDirOffset < dir->centralDirSize)
+      if (UINT64_MAX - dir->central_dir_offset < dir->central_dir_size)
         return 0;
-      return dir->centralDirOffset + dir->centralDirSize <= dir->eocdOffset;
+      return dir->central_dir_offset + dir->central_dir_size <= dir->eocd_offset;
     }
 
 next:
@@ -328,7 +328,7 @@ next:
 }
 
 static int
-zipy_parse_zip64_extra(ZipyFile *info,
+zipy_parse_zip64_extra(zipy_file_t *info,
                       const uint8_t *extra,
                       size_t len,
                       uint32_t comp32,
@@ -353,7 +353,7 @@ zipy_parse_zip64_extra(ZipyFile *info,
       if (uncomp32 == ZIP64_MAGIC_UINT32) {
         if (rem < 8)
           return 0;
-        info->entry.uncompressedSize = zipy_le64(p);
+        info->entry.uncompressed_size = zipy_le64(p);
         p += 8;
         rem -= 8;
       }
@@ -361,7 +361,7 @@ zipy_parse_zip64_extra(ZipyFile *info,
       if (comp32 == ZIP64_MAGIC_UINT32) {
         if (rem < 8)
           return 0;
-        info->entry.compressedSize = zipy_le64(p);
+        info->entry.compressed_size = zipy_le64(p);
         p += 8;
         rem -= 8;
       }
@@ -369,7 +369,7 @@ zipy_parse_zip64_extra(ZipyFile *info,
       if (offset32 == ZIP64_MAGIC_UINT32) {
         if (rem < 8)
           return 0;
-        info->localHeaderOffset = zipy_le64(p);
+        info->local_header_offset = zipy_le64(p);
         p += 8;
         rem -= 8;
       }
@@ -387,11 +387,11 @@ zipy_parse_zip64_extra(ZipyFile *info,
   return pos == len
       && disk == 0
       && (comp32 != ZIP64_MAGIC_UINT32
-          || info->entry.compressedSize != ZIP64_MAGIC_UINT32)
+          || info->entry.compressed_size != ZIP64_MAGIC_UINT32)
       && (uncomp32 != ZIP64_MAGIC_UINT32
-          || info->entry.uncompressedSize != ZIP64_MAGIC_UINT32)
+          || info->entry.uncompressed_size != ZIP64_MAGIC_UINT32)
       && (offset32 != ZIP64_MAGIC_UINT32
-          || info->localHeaderOffset != ZIP64_MAGIC_UINT32);
+          || info->local_header_offset != ZIP64_MAGIC_UINT32);
 }
 
 static bool
@@ -585,11 +585,11 @@ zipy_mkdir_parent(const char *path) {
   return ok;
 }
 
-static ZipyFile *
-zipy_find_file(ZipyArchive *zipy, const char *filename) {
+static zipy_file_t *
+zipy_find_file(zipy_archive_t *zipy, const char *filename) {
   size_t i;
 
-  for (i = 0; i < zipy->fileCount; i++) {
+  for (i = 0; i < zipy->file_count; i++) {
     if (strcmp(zipy->files[i].entry.name, filename) == 0)
       return &zipy->files[i];
   }
@@ -598,13 +598,13 @@ zipy_find_file(ZipyArchive *zipy, const char *filename) {
 }
 
 static void
-zipy_free_files(ZipyArchive *zipy) {
+zipy_free_files(zipy_archive_t *zipy) {
   size_t i;
 
   if (!zipy || !zipy->files)
     return;
 
-  for (i = 0; i < zipy->fileCount; i++)
+  for (i = 0; i < zipy->file_count; i++)
     free((char *)zipy->files[i].entry.name);
 
   free(zipy->files);
@@ -639,6 +639,7 @@ zipy_write_chunk(FILE *out,
                 const uint8_t *buf,
                 size_t len,
                 uint32_t *crc,
+                int check_crc,
                 uint64_t *written) {
   if (len == 0)
     return ZIPY_ZIP_OK;
@@ -646,13 +647,18 @@ zipy_write_chunk(FILE *out,
   if (fwrite(buf, 1, len, out) != len)
     return ZIPY_ZIP_EFILE;
 
-  *crc = zipy_crc32_update(*crc, buf, len);
+  if (check_crc)
+    *crc = zipy_crc32_update(*crc, buf, len);
   *written += len;
   return ZIPY_ZIP_OK;
 }
 
 static int
-zipy_copy_store(FILE *fp, FILE *out, uint64_t len, uint32_t expectedCrc) {
+zipy_copy_store(FILE *fp,
+                FILE *out,
+                uint64_t len,
+                uint32_t expectedCrc,
+                int check_crc) {
   uint8_t *buf;
   uint64_t remaining = len, written = 0;
   uint32_t crc;
@@ -671,7 +677,7 @@ zipy_copy_store(FILE *fp, FILE *out, uint64_t len, uint32_t expectedCrc) {
       goto done;
     }
 
-    ret = zipy_write_chunk(out, buf, n, &crc, &written);
+    ret = zipy_write_chunk(out, buf, n, &crc, check_crc, &written);
     if (ret != ZIPY_ZIP_OK)
       goto done;
 
@@ -680,7 +686,7 @@ zipy_copy_store(FILE *fp, FILE *out, uint64_t len, uint32_t expectedCrc) {
 
   if (written != len)
     ret = ZIPY_ZIP_ESIZE;
-  else if ((uint32_t)crc != expectedCrc)
+  else if (check_crc && (uint32_t)crc != expectedCrc)
     ret = ZIPY_ZIP_ECRC;
 
 done:
@@ -691,20 +697,21 @@ done:
 static int
 zipy_inflate_raw(FILE *fp,
                 FILE *out,
-                uint64_t compressedSize,
-                uint64_t uncompressedSize,
-                uint32_t expectedCrc) {
+                uint64_t compressed_size,
+                uint64_t uncompressed_size,
+                uint32_t expectedCrc,
+                int check_crc) {
   uint8_t *inbuf = NULL;
   uint8_t *outbuf = NULL;
   size_t inlen, outlen;
   uint32_t crc;
   int ret;
 
-  if (compressedSize > UINT32_MAX || uncompressedSize > UINT32_MAX)
+  if (compressed_size > UINT32_MAX || uncompressed_size > UINT32_MAX)
     return ZIPY_ZIP_EUNSUP;
 
-  inlen = compressedSize > 0 ? (size_t)compressedSize : 1;
-  outlen = uncompressedSize > 0 ? (size_t)uncompressedSize : 1;
+  inlen = compressed_size > 0 ? (size_t)compressed_size : 1;
+  outlen = uncompressed_size > 0 ? (size_t)uncompressed_size : 1;
 
   inbuf = malloc(inlen);
   outbuf = malloc(outlen);
@@ -713,28 +720,30 @@ zipy_inflate_raw(FILE *fp,
     goto done;
   }
 
-  if (compressedSize > 0 && fread(inbuf, 1, (size_t)compressedSize, fp) != (size_t)compressedSize) {
+  if (compressed_size > 0 && fread(inbuf, 1, (size_t)compressed_size, fp) != (size_t)compressed_size) {
     ret = ZIPY_ZIP_EFILE;
     goto done;
   }
 
   if (infl_buf(inbuf,
-               (uint32_t)compressedSize,
+               (uint32_t)compressed_size,
                outbuf,
-               (uint32_t)uncompressedSize,
+               (uint32_t)uncompressed_size,
                0) != UNZ_OK) {
     ret = ZIPY_ZIP_EINFLATE;
     goto done;
   }
 
-  crc = zipy_crc32_update(0, outbuf, (size_t)uncompressedSize);
-  if (crc != expectedCrc) {
-    ret = ZIPY_ZIP_ECRC;
-    goto done;
+  if (check_crc) {
+    crc = zipy_crc32_update(0, outbuf, (size_t)uncompressed_size);
+    if (crc != expectedCrc) {
+      ret = ZIPY_ZIP_ECRC;
+      goto done;
+    }
   }
 
-  if (uncompressedSize > 0
-      && fwrite(outbuf, 1, (size_t)uncompressedSize, out) != (size_t)uncompressedSize) {
+  if (uncompressed_size > 0
+      && fwrite(outbuf, 1, (size_t)uncompressed_size, out) != (size_t)uncompressed_size) {
     ret = ZIPY_ZIP_EFILE;
     goto done;
   }
@@ -895,16 +904,16 @@ zipy_saved_name(char *buf, size_t len) {
 }
 
 static char *
-zipy_create_save_dir(const char *destdir, ZipySaveLocation saveTo) {
+zipy_create_save_dir(const char *destdir, zipy_save_location_t save_to) {
   char name[64], numbered[96];
   const char *base = destdir;
   char *ownedBase = NULL;
   char *path = NULL;
   unsigned i;
 
-  if (saveTo == ZIPY_SAVE_HOME) {
+  if (save_to == ZIPY_SAVE_HOME) {
     base = zipy_home_dir();
-  } else if (saveTo == ZIPY_SAVE_TRASH) {
+  } else if (save_to == ZIPY_SAVE_TRASH) {
     ownedBase = zipy_trash_dir();
     base = ownedBase;
   }
@@ -952,14 +961,14 @@ done:
 }
 
 static int
-zipy_append_saved_manifest(const char *saveDir,
+zipy_append_saved_manifest(const char *save_dir,
                            const char *savedRelativePath,
                            const char *originalPath) {
   char *manifest;
   FILE *fp;
   size_t len, i;
 
-  manifest = zipy_join_path(saveDir, "zipy_saved_original_paths.txt");
+  manifest = zipy_join_path(save_dir, "zipy_saved_original_paths.txt");
   if (!manifest)
     return 0;
 
@@ -981,33 +990,35 @@ zipy_append_saved_manifest(const char *saveDir,
   return 1;
 }
 
-static ZipyExtractOptions
-zipy_default_extract_options(const ZipyExtractOptions *options) {
-  ZipyExtractOptions out;
+static zipy_extract_options_t
+zipy_default_extract_options(const zipy_extract_options_t *options) {
+  zipy_extract_options_t out;
 
-  out.onConflict = ZIPY_CONFLICT_SAVE;
-  out.saveTo = ZIPY_SAVE_TARGET;
-  out.saveDir = NULL;
+  out.on_conflict = ZIPY_CONFLICT_SAVE;
+  out.save_to = ZIPY_SAVE_TARGET;
+  out.save_dir = NULL;
+  out.flags = ZIPY_EXTRACT_DEFAULT;
 
   if (!options)
     return out;
 
   out = *options;
-  if (out.onConflict < ZIPY_CONFLICT_SAVE
-      || out.onConflict > ZIPY_CONFLICT_FAIL)
-    out.onConflict = ZIPY_CONFLICT_SAVE;
-  if (out.saveTo < ZIPY_SAVE_TARGET || out.saveTo > ZIPY_SAVE_TRASH)
-    out.saveTo = ZIPY_SAVE_TARGET;
+  if (out.on_conflict < ZIPY_CONFLICT_SAVE
+      || out.on_conflict > ZIPY_CONFLICT_FAIL)
+    out.on_conflict = ZIPY_CONFLICT_SAVE;
+  if (out.save_to < ZIPY_SAVE_TARGET || out.save_to > ZIPY_SAVE_TRASH)
+    out.save_to = ZIPY_SAVE_TARGET;
+  out.flags &= ZIPY_EXTRACT_NO_CRC;
 
   return out;
 }
 
 static int
 zipy_prepare_conflict(const char *destdir,
-                      const ZipyEntry *entry,
+                      const zipy_entry_t *entry,
                       const char *destpath,
-                      const ZipyExtractOptions *options,
-                      char **saveDir) {
+                      const zipy_extract_options_t *options,
+                      char **save_dir) {
   int exists, isDir;
   char *savePath = NULL;
   char *cleanDestPath = NULL;
@@ -1027,41 +1038,41 @@ zipy_prepare_conflict(const char *destdir,
     ret = ZIPY_ZIP_OK;
     goto done;
   }
-  if (entry->isDirectory && isDir) {
+  if (entry->is_directory && isDir) {
     ret = ZIPY_ZIP_OK;
     goto done;
   }
 
-  if (options->onConflict == ZIPY_CONFLICT_OVERWRITE) {
+  if (options->on_conflict == ZIPY_CONFLICT_OVERWRITE) {
     ret = ZIPY_ZIP_OK;
     goto done;
   }
-  if (options->onConflict == ZIPY_CONFLICT_SKIP) {
+  if (options->on_conflict == ZIPY_CONFLICT_SKIP) {
     ret = ZIPY_ZIP_SKIPPED;
     goto done;
   }
-  if (options->onConflict == ZIPY_CONFLICT_FAIL) {
+  if (options->on_conflict == ZIPY_CONFLICT_FAIL) {
     ret = ZIPY_ZIP_EEXIST;
     goto done;
   }
 
-  if (!*saveDir) {
-    if (options->saveDir) {
-      *saveDir = zipy_strdup(options->saveDir);
-      if (*saveDir && !zipy_mkdirs(*saveDir)) {
-        free(*saveDir);
-        *saveDir = NULL;
+  if (!*save_dir) {
+    if (options->save_dir) {
+      *save_dir = zipy_strdup(options->save_dir);
+      if (*save_dir && !zipy_mkdirs(*save_dir)) {
+        free(*save_dir);
+        *save_dir = NULL;
       }
     } else {
-      *saveDir = zipy_create_save_dir(destdir, options->saveTo);
+      *save_dir = zipy_create_save_dir(destdir, options->save_to);
     }
   }
-  if (!*saveDir) {
+  if (!*save_dir) {
     ret = ZIPY_ZIP_EFILE;
     goto done;
   }
 
-  savePath = zipy_extract_path(*saveDir, entry->name);
+  savePath = zipy_extract_path(*save_dir, entry->name);
   if (!savePath) {
     ret = ZIPY_ZIP_ERR;
     goto done;
@@ -1082,7 +1093,7 @@ zipy_prepare_conflict(const char *destdir,
     int nowExists, nowIsDir;
 
     if (zipy_path_info(cleanDestPath, &nowExists, &nowIsDir)
-        && (!nowExists || (entry->isDirectory && nowIsDir))) {
+        && (!nowExists || (entry->is_directory && nowIsDir))) {
       ret = ZIPY_ZIP_OK;
       goto done;
     }
@@ -1092,7 +1103,7 @@ zipy_prepare_conflict(const char *destdir,
   }
 
   if (!originalAbs
-      || !zipy_append_saved_manifest(*saveDir, entry->name, originalAbs)) {
+      || !zipy_append_saved_manifest(*save_dir, entry->name, originalAbs)) {
     ret = ZIPY_ZIP_EFILE;
     goto done;
   }
@@ -1109,10 +1120,10 @@ done:
 
 static int
 zipy_prepare_parent_conflicts(const char *destdir,
-                              const ZipyEntry *entry,
-                              const ZipyExtractOptions *options,
-                              char **saveDir) {
-  ZipyEntry parentEntry;
+                              const zipy_entry_t *entry,
+                              const zipy_extract_options_t *options,
+                              char **save_dir) {
+  zipy_entry_t parentEntry;
   char *rel = NULL;
   char *path = NULL;
   size_t len, i, j;
@@ -1128,7 +1139,7 @@ zipy_prepare_parent_conflicts(const char *destdir,
 
   parentEntry = *entry;
   parentEntry.name = rel;
-  parentEntry.isDirectory = false;
+  parentEntry.is_directory = false;
 
   for (i = 0; i < len; i++) {
     int exists, isDir;
@@ -1159,7 +1170,7 @@ zipy_prepare_parent_conflicts(const char *destdir,
                                    &parentEntry,
                                    path,
                                    options,
-                                   saveDir);
+                                   save_dir);
     if (result != ZIPY_ZIP_OK && result != ZIPY_ZIP_SAVED)
       break;
   }
@@ -1171,17 +1182,20 @@ zipy_prepare_parent_conflicts(const char *destdir,
 
 static int
 zipy_prepare_entry_conflict(const char *destdir,
-                            const ZipyEntry *entry,
+                            const zipy_entry_t *entry,
                             const char *destpath,
-                            const ZipyExtractOptions *options,
-                            char **saveDir) {
+                            const zipy_extract_options_t *options,
+                            char **save_dir) {
   int parentRet, ret;
 
-  parentRet = zipy_prepare_parent_conflicts(destdir, entry, options, saveDir);
+  if (options->on_conflict == ZIPY_CONFLICT_OVERWRITE)
+    return ZIPY_ZIP_OK;
+
+  parentRet = zipy_prepare_parent_conflicts(destdir, entry, options, save_dir);
   if (parentRet != ZIPY_ZIP_OK && parentRet != ZIPY_ZIP_SAVED)
     return parentRet;
 
-  ret = zipy_prepare_conflict(destdir, entry, destpath, options, saveDir);
+  ret = zipy_prepare_conflict(destdir, entry, destpath, options, save_dir);
   if (ret == ZIPY_ZIP_OK && parentRet == ZIPY_ZIP_SAVED)
     return ZIPY_ZIP_SAVED;
 
@@ -1189,10 +1203,10 @@ zipy_prepare_entry_conflict(const char *destdir,
 }
 
 ZIPY_EXPORT
-ZipyArchive *
+zipy_archive_t *
 zipy_open(const char *path) {
-  ZipyArchive *zipy = NULL;
-  ZipyDirInfo dir;
+  zipy_archive_t *zipy = NULL;
+  zipy_dir_info_t dir;
   FILE *fp;
   size_t i, count;
 
@@ -1214,8 +1228,8 @@ zipy_open(const char *path) {
   if (!zipy->path)
     goto err;
 
-  zipy->fileCount = count;
-  zipy->fileSize = dir.fileSize;
+  zipy->file_count = count;
+  zipy->file_size = dir.file_size;
 
   if (count > 0) {
     zipy->files = calloc(count, sizeof(*zipy->files));
@@ -1223,13 +1237,13 @@ zipy_open(const char *path) {
       goto err;
   }
 
-  if (zipy_seek_set(fp, dir.centralDirOffset) != 0)
+  if (zipy_seek_set(fp, dir.central_dir_offset) != 0)
     goto err;
 
   for (i = 0; i < count; i++) {
     uint8_t hdr[ZIP_CENTRAL_FIXED];
     uint8_t *name = NULL, *extra = NULL;
-    ZipyFile *info = &zipy->files[i];
+    zipy_file_t *info = &zipy->files[i];
     uint16_t nameLen, extraLen, commentLen, diskStart;
     uint32_t comp32, uncomp32, offset32;
 
@@ -1245,7 +1259,7 @@ zipy_open(const char *path) {
     extraLen = zipy_le16(hdr + 30);
     commentLen = zipy_le16(hdr + 32);
     diskStart = zipy_le16(hdr + 34);
-    info->externalAttr = zipy_le32(hdr + 38);
+    info->external_attr = zipy_le32(hdr + 38);
     offset32 = zipy_le32(hdr + 42);
 
     if (nameLen == 0
@@ -1262,10 +1276,10 @@ zipy_open(const char *path) {
     if (!info->entry.name)
       goto err;
 
-    info->entry.compressedSize = comp32;
-    info->entry.uncompressedSize = uncomp32;
-    info->localHeaderOffset = offset32;
-    info->entry.isDirectory = zipy_is_dir_name(info->entry.name);
+    info->entry.compressed_size = comp32;
+    info->entry.uncompressed_size = uncomp32;
+    info->local_header_offset = offset32;
+    info->entry.is_directory = zipy_is_dir_name(info->entry.name);
 
     if (extraLen > 0) {
       extra = malloc(extraLen);
@@ -1283,9 +1297,9 @@ zipy_open(const char *path) {
       goto err;
     }
 
-    if (info->localHeaderOffset >= dir.centralDirOffset
-        || info->entry.compressedSize > zipy->fileSize
-        || UINT64_MAX - info->localHeaderOffset < ZIP_LOCAL_FIXED)
+    if (info->local_header_offset >= dir.central_dir_offset
+        || info->entry.compressed_size > zipy->file_size
+        || UINT64_MAX - info->local_header_offset < ZIP_LOCAL_FIXED)
       goto err;
 
     if (commentLen > 0 && zipy_skip(fp, commentLen) != 0)
@@ -1305,11 +1319,15 @@ err:
 }
 
 static int
-zipy_extract_entry(ZipyArchive *zipy, ZipyFile *info, const char *destpath) {
+zipy_extract_entry(zipy_archive_t *zipy,
+                   zipy_file_t *info,
+                   const char *destpath,
+                   uint32_t extract_flags) {
   uint8_t local[ZIP_LOCAL_FIXED];
   uint16_t flags, method, nameLen, extraLen;
   uint64_t dataOffset;
   FILE *outfp;
+  int check_crc = (extract_flags & ZIPY_EXTRACT_NO_CRC) == 0;
   int ret = ZIPY_ZIP_ERR;
 
   if (!zipy || !zipy->fp || !info || !destpath)
@@ -1321,13 +1339,13 @@ zipy_extract_entry(ZipyArchive *zipy, ZipyFile *info, const char *destpath) {
   if (info->flags & (ZIP_FLAG_ENCRYPTED | ZIP_FLAG_STRONG_ENC))
     return ZIPY_ZIP_EUNSUP;
 
-  if (info->entry.isDirectory)
+  if (info->entry.is_directory)
     return zipy_mkdirs(destpath) ? ZIPY_ZIP_OK : ZIPY_ZIP_EFILE;
 
   if (info->entry.method != ZIPY_ZIP_STORE && info->entry.method != ZIPY_ZIP_DEFLATE)
     return ZIPY_ZIP_EUNSUP;
 
-  if (zipy_seek_set(zipy->fp, info->localHeaderOffset) != 0
+  if (zipy_seek_set(zipy->fp, info->local_header_offset) != 0
       || !zipy_read(zipy->fp, local, sizeof(local))
       || zipy_le32(local) != ZIP_SIGN_LOCAL_FILE)
     return ZIPY_ZIP_EFILE;
@@ -1340,12 +1358,12 @@ zipy_extract_entry(ZipyArchive *zipy, ZipyFile *info, const char *destpath) {
   if (method != info->entry.method || (flags & (ZIP_FLAG_ENCRYPTED | ZIP_FLAG_STRONG_ENC)))
     return ZIPY_ZIP_EUNSUP;
 
-  if (UINT64_MAX - info->localHeaderOffset
+  if (UINT64_MAX - info->local_header_offset
       < ZIP_LOCAL_FIXED + (uint64_t)nameLen + (uint64_t)extraLen)
     return ZIPY_ZIP_ESIZE;
 
-  dataOffset = info->localHeaderOffset + ZIP_LOCAL_FIXED + nameLen + extraLen;
-  if (dataOffset > zipy->fileSize || info->entry.compressedSize > zipy->fileSize - dataOffset)
+  dataOffset = info->local_header_offset + ZIP_LOCAL_FIXED + nameLen + extraLen;
+  if (dataOffset > zipy->file_size || info->entry.compressed_size > zipy->file_size - dataOffset)
     return ZIPY_ZIP_ESIZE;
 
   if (zipy_seek_set(zipy->fp, dataOffset) != 0)
@@ -1363,17 +1381,19 @@ zipy_extract_entry(ZipyArchive *zipy, ZipyFile *info, const char *destpath) {
   }
 
   if (info->entry.method == ZIPY_ZIP_STORE) {
-    if (info->entry.compressedSize != info->entry.uncompressedSize)
+    if (info->entry.compressed_size != info->entry.uncompressed_size)
       ret = ZIPY_ZIP_ESIZE;
     else
       ret = zipy_copy_store(zipy->fp, outfp,
-                           info->entry.uncompressedSize,
-                           info->entry.crc32);
+                           info->entry.uncompressed_size,
+                           info->entry.crc32,
+                           check_crc);
   } else {
     ret = zipy_inflate_raw(zipy->fp, outfp,
-                          info->entry.compressedSize,
-                          info->entry.uncompressedSize,
-                          info->entry.crc32);
+                          info->entry.compressed_size,
+                          info->entry.uncompressed_size,
+                          info->entry.crc32,
+                          check_crc);
   }
 
   if (fclose(outfp) != 0 && ret == ZIPY_ZIP_OK)
@@ -1384,14 +1404,14 @@ zipy_extract_entry(ZipyArchive *zipy, ZipyFile *info, const char *destpath) {
 
 ZIPY_EXPORT
 size_t
-zipy_count(const ZipyArchive *zipy) {
-  return zipy ? zipy->fileCount : 0;
+zipy_count(const zipy_archive_t *zipy) {
+  return zipy ? zipy->file_count : 0;
 }
 
 ZIPY_EXPORT
-const ZipyEntry *
-zipy_entry(const ZipyArchive *zipy, size_t index) {
-  if (!zipy || index >= zipy->fileCount)
+const zipy_entry_t *
+zipy_entry(const zipy_archive_t *zipy, size_t index) {
+  if (!zipy || index >= zipy->file_count)
     return NULL;
 
   return &zipy->files[index].entry;
@@ -1399,25 +1419,25 @@ zipy_entry(const ZipyArchive *zipy, size_t index) {
 
 ZIPY_EXPORT
 int
-zipy_extract(ZipyArchive *zipy, size_t index, const char *destpath) {
-  if (!zipy || index >= zipy->fileCount)
+zipy_extract(zipy_archive_t *zipy, size_t index, const char *destpath) {
+  if (!zipy || index >= zipy->file_count)
     return ZIPY_ZIP_EFILE;
 
-  return zipy_extract_entry(zipy, &zipy->files[index], destpath);
+  return zipy_extract_entry(zipy, &zipy->files[index], destpath, ZIPY_EXTRACT_DEFAULT);
 }
 
 ZIPY_EXPORT
 int
-zipy_extract_to(ZipyArchive *zipy,
+zipy_extract_to(zipy_archive_t *zipy,
                 size_t index,
                 const char *destdir,
-                const ZipyExtractOptions *options) {
-  ZipyExtractOptions opts;
+                const zipy_extract_options_t *options) {
+  zipy_extract_options_t opts;
   char *destpath;
-  char *saveDir = NULL;
+  char *save_dir = NULL;
   int ret, conflictRet;
 
-  if (!zipy || index >= zipy->fileCount || !destdir)
+  if (!zipy || index >= zipy->file_count || !destdir)
     return ZIPY_ZIP_EFILE;
 
   opts = zipy_default_extract_options(options);
@@ -1429,7 +1449,7 @@ zipy_extract_to(ZipyArchive *zipy,
                                             &zipy->files[index].entry,
                                             destpath,
                                             &opts,
-                                            &saveDir);
+                                            &save_dir);
   if (conflictRet == ZIPY_ZIP_SKIPPED) {
     ret = ZIPY_ZIP_SKIPPED;
     goto done;
@@ -1439,20 +1459,20 @@ zipy_extract_to(ZipyArchive *zipy,
     goto done;
   }
 
-  ret = zipy_extract_entry(zipy, &zipy->files[index], destpath);
+  ret = zipy_extract_entry(zipy, &zipy->files[index], destpath, opts.flags);
   if (ret == ZIPY_ZIP_OK && conflictRet == ZIPY_ZIP_SAVED)
     ret = ZIPY_ZIP_SAVED;
 
 done:
-  free(saveDir);
+  free(save_dir);
   free(destpath);
   return ret;
 }
 
 ZIPY_EXPORT
 int
-zipy_extract_named(ZipyArchive *zipy, const char *name, const char *destpath) {
-  ZipyFile *info;
+zipy_extract_named(zipy_archive_t *zipy, const char *name, const char *destpath) {
+  zipy_file_t *info;
 
   if (!zipy || !name)
     return ZIPY_ZIP_ERR;
@@ -1461,18 +1481,19 @@ zipy_extract_named(ZipyArchive *zipy, const char *name, const char *destpath) {
   if (!info)
     return ZIPY_ZIP_EFILE;
 
-  return zipy_extract_entry(zipy, info, destpath);
+  return zipy_extract_entry(zipy, info, destpath, ZIPY_EXTRACT_DEFAULT);
 }
 
-typedef struct ZipyExtractAllContext {
+typedef struct zipy_extract_all_context_t {
   const char *zipPath;
   const char *destdir;
   const unsigned char *skip;
-  ZipyMutex    lock;
+  uint32_t    flags;
+  zipy_mutex_t    lock;
   size_t      count;
   size_t      next;
   int         result;
-} ZipyExtractAllContext;
+} zipy_extract_all_context_t;
 
 static size_t
 zipy_extract_default_jobs(size_t count) {
@@ -1491,12 +1512,13 @@ zipy_extract_default_jobs(size_t count) {
 }
 
 static int
-zipy_extract_all_serial(ZipyArchive *zipy,
+zipy_extract_all_serial(zipy_archive_t *zipy,
                         const char *destdir,
-                        const unsigned char *skip) {
+                        const unsigned char *skip,
+                        uint32_t flags) {
   size_t i;
 
-  for (i = 0; i < zipy->fileCount; i++) {
+  for (i = 0; i < zipy->file_count; i++) {
     char *path;
     int ret;
 
@@ -1507,7 +1529,7 @@ zipy_extract_all_serial(ZipyArchive *zipy,
     if (!path)
       return ZIPY_ZIP_ERR;
 
-    ret = zipy_extract_entry(zipy, &zipy->files[i], path);
+    ret = zipy_extract_entry(zipy, &zipy->files[i], path, flags);
     free(path);
     if (ret < ZIPY_ZIP_OK)
       return ret;
@@ -1518,8 +1540,8 @@ zipy_extract_all_serial(ZipyArchive *zipy,
 
 static void
 zipy_extract_all_worker(void *arg) {
-  ZipyExtractAllContext *ctx;
-  ZipyArchive *zipy;
+  zipy_extract_all_context_t *ctx;
+  zipy_archive_t *zipy;
   size_t index;
 
   ctx = arg;
@@ -1533,7 +1555,7 @@ zipy_extract_all_worker(void *arg) {
   }
 
   for (;;) {
-    const ZipyEntry *entry;
+    const zipy_entry_t *entry;
     char *path;
     int ret;
 
@@ -1560,7 +1582,7 @@ zipy_extract_all_worker(void *arg) {
       goto fail;
     }
 
-    ret = zipy_extract(zipy, index, path);
+    ret = zipy_extract_entry(zipy, &zipy->files[index], path, ctx->flags);
     free(path);
     if (ret >= ZIPY_ZIP_OK)
       continue;
@@ -1577,27 +1599,29 @@ zipy_extract_all_worker(void *arg) {
 }
 
 static int
-zipy_extract_all_parallel(ZipyArchive *zipy,
+zipy_extract_all_parallel(zipy_archive_t *zipy,
                           const char *destdir,
                           size_t jobs,
-                          const unsigned char *skip) {
-  ZipyExtractAllContext ctx;
-  ZipyThread *threads;
+                          const unsigned char *skip,
+                          uint32_t flags) {
+  zipy_extract_all_context_t ctx;
+  zipy_thread_t *threads;
   size_t i, started;
   int result;
 
   if (!zipy->path || jobs <= 1)
-    return zipy_extract_all_serial(zipy, destdir, skip);
+    return zipy_extract_all_serial(zipy, destdir, skip, flags);
 
   threads = calloc(jobs, sizeof(*threads));
   if (!threads)
-    return zipy_extract_all_serial(zipy, destdir, skip);
+    return zipy_extract_all_serial(zipy, destdir, skip, flags);
 
   memset(&ctx, 0, sizeof(ctx));
   ctx.zipPath = zipy->path;
   ctx.destdir = destdir;
   ctx.skip = skip;
-  ctx.count = zipy->fileCount;
+  ctx.flags = flags;
+  ctx.count = zipy->file_count;
   ctx.result = ZIPY_ZIP_OK;
   zipy_mutex_init(&ctx.lock);
 
@@ -1611,7 +1635,7 @@ zipy_extract_all_parallel(ZipyArchive *zipy,
   if (started == 0) {
     zipy_mutex_destroy(&ctx.lock);
     free(threads);
-    return zipy_extract_all_serial(zipy, destdir, skip);
+    return zipy_extract_all_serial(zipy, destdir, skip, flags);
   }
 
   for (i = 0; i < started; i++)
@@ -1624,20 +1648,20 @@ zipy_extract_all_parallel(ZipyArchive *zipy,
 }
 
 static int
-zipy_prepare_extract_all(ZipyArchive *zipy,
+zipy_prepare_extract_all(zipy_archive_t *zipy,
                          const char *destdir,
-                         const ZipyExtractOptions *options,
+                         const zipy_extract_options_t *options,
                          unsigned char **skipOut) {
-  char *saveDir = NULL;
+  char *save_dir = NULL;
   size_t i;
   int result = ZIPY_ZIP_OK;
 
   *skipOut = NULL;
 
-  if (options->onConflict == ZIPY_CONFLICT_OVERWRITE)
+  if (options->on_conflict == ZIPY_CONFLICT_OVERWRITE)
     return ZIPY_ZIP_OK;
 
-  for (i = 0; i < zipy->fileCount; i++) {
+  for (i = 0; i < zipy->file_count; i++) {
     char *path;
     int ret;
 
@@ -1651,12 +1675,12 @@ zipy_prepare_extract_all(ZipyArchive *zipy,
                                       &zipy->files[i].entry,
                                       path,
                                       options,
-                                      &saveDir);
+                                      &save_dir);
     free(path);
 
     if (ret == ZIPY_ZIP_SKIPPED) {
       if (!*skipOut) {
-        *skipOut = calloc(zipy->fileCount, sizeof(**skipOut));
+        *skipOut = calloc(zipy->file_count, sizeof(**skipOut));
         if (!*skipOut) {
           result = ZIPY_ZIP_ERR;
           break;
@@ -1672,22 +1696,22 @@ zipy_prepare_extract_all(ZipyArchive *zipy,
     }
   }
 
-  free(saveDir);
+  free(save_dir);
   return result;
 }
 
 ZIPY_EXPORT
 int
-zipy_extract_all(ZipyArchive *zipy, const char *destdir) {
+zipy_extract_all(zipy_archive_t *zipy, const char *destdir) {
   return zipy_extract_all_options(zipy, destdir, NULL);
 }
 
 ZIPY_EXPORT
 int
-zipy_extract_all_options(ZipyArchive *zipy,
+zipy_extract_all_options(zipy_archive_t *zipy,
                          const char *destdir,
-                         const ZipyExtractOptions *options) {
-  ZipyExtractOptions opts;
+                         const zipy_extract_options_t *options) {
+  zipy_extract_options_t opts;
   unsigned char *skip = NULL;
   int ret;
 
@@ -1699,8 +1723,9 @@ zipy_extract_all_options(ZipyArchive *zipy,
   if (ret >= ZIPY_ZIP_OK)
     ret = zipy_extract_all_parallel(zipy,
                                     destdir,
-                                    zipy_extract_default_jobs(zipy->fileCount),
-                                    skip);
+                                    zipy_extract_default_jobs(zipy->file_count),
+                                    skip,
+                                    opts.flags);
 
   free(skip);
   return ret;
@@ -1708,7 +1733,7 @@ zipy_extract_all_options(ZipyArchive *zipy,
 
 ZIPY_EXPORT
 void
-zipy_close(ZipyArchive *zipy) {
+zipy_close(zipy_archive_t *zipy) {
   if (!zipy)
     return;
 

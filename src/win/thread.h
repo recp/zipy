@@ -14,31 +14,31 @@
 #include <stddef.h>
 #include <windows.h>
 
-typedef struct ZipyThread {
+typedef struct zipy_thread_t {
   HANDLE id;
-} ZipyThread;
+} zipy_thread_t;
 
-typedef struct ZipyMutex {
+typedef struct zipy_mutex_t {
   CRITICAL_SECTION mutex;
-} ZipyMutex;
+} zipy_mutex_t;
 
 int
-zipy_thread_start(ZipyThread *thread, void (*func)(void *), void *arg);
+zipy_thread_start(zipy_thread_t *thread, void (*func)(void *), void *arg);
 
 void
-zipy_thread_join(ZipyThread *thread);
+zipy_thread_join(zipy_thread_t *thread);
 
 void
-zipy_mutex_init(ZipyMutex *mutex);
+zipy_mutex_init(zipy_mutex_t *mutex);
 
 void
-zipy_mutex_destroy(ZipyMutex *mutex);
+zipy_mutex_destroy(zipy_mutex_t *mutex);
 
 void
-zipy_lock(ZipyMutex *mutex);
+zipy_lock(zipy_mutex_t *mutex);
 
 void
-zipy_unlock(ZipyMutex *mutex);
+zipy_unlock(zipy_mutex_t *mutex);
 
 size_t
 zipy_cpu_count(void);

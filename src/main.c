@@ -44,26 +44,26 @@
 #  define PATH_MAX 4096
 #endif
 
-typedef struct ZipyProgress {
+typedef struct zipy_progress_t {
   FILE  *out;
   size_t count;
   size_t tick;
   int    tty;
   int    color;
-} ZipyProgress;
+} zipy_progress_t;
 
-typedef enum ZipyCliConflictPolicy {
+typedef enum zipy_cli_conflict_policy_t {
   ZIPY_CLI_CONFLICT_ASK = 0,
   ZIPY_CLI_CONFLICT_SAVE,
   ZIPY_CLI_CONFLICT_OVERWRITE,
   ZIPY_CLI_CONFLICT_SKIP,
   ZIPY_CLI_CONFLICT_FAIL
-} ZipyCliConflictPolicy;
+} zipy_cli_conflict_policy_t;
 
-typedef struct ZipyConfig {
-  ZipyCliConflictPolicy onConflict;
-  ZipyExtractOptions options;
-} ZipyConfig;
+typedef struct zipy_config_t {
+  zipy_cli_conflict_policy_t on_conflict;
+  zipy_extract_options_t options;
+} zipy_config_t;
 
 static void
 print_usage(void) {
@@ -73,6 +73,7 @@ print_usage(void) {
   printf("  -j <jobs>   Extract with jobs workers (default: cpu count)\n");
   printf("  --on-conflict <ask|save|overwrite|skip|fail>\n");
   printf("  --save-to <target|home|trash>\n");
+  printf("  --no-crc    Skip CRC32 validation\n");
   printf("  --config [key=value ...]  Show or update ~/.zipy/config\n");
 }
 
@@ -129,7 +130,7 @@ format_duration(char *buf, size_t len, uint64_t ms) {
 }
 
 static const char *
-conflict_name(ZipyCliConflictPolicy policy) {
+conflict_name(zipy_cli_conflict_policy_t policy) {
   switch (policy) {
     case ZIPY_CLI_CONFLICT_SAVE:      return "save";
     case ZIPY_CLI_CONFLICT_OVERWRITE: return "overwrite";
@@ -141,8 +142,8 @@ conflict_name(ZipyCliConflictPolicy policy) {
 }
 
 static const char *
-save_to_name(ZipySaveLocation saveTo) {
-  switch (saveTo) {
+save_to_name(zipy_save_location_t save_to) {
+  switch (save_to) {
     case ZIPY_SAVE_HOME:   return "home";
     case ZIPY_SAVE_TRASH:  return "trash";
     case ZIPY_SAVE_TARGET:
@@ -165,7 +166,7 @@ trim(char *text) {
 }
 
 static int
-parse_conflict(const char *value, ZipyCliConflictPolicy *out) {
+parse_conflict(const char *value, zipy_cli_conflict_policy_t *out) {
   if (strcmp(value, "ask") == 0) {
     *out = ZIPY_CLI_CONFLICT_ASK;
   } else if (strcmp(value, "save") == 0) {
@@ -184,7 +185,7 @@ parse_conflict(const char *value, ZipyCliConflictPolicy *out) {
 }
 
 static int
-parse_save_to(const char *value, ZipySaveLocation *out) {
+parse_save_to(const char *value, zipy_save_location_t *out) {
   if (strcmp(value, "target") == 0) {
     *out = ZIPY_SAVE_TARGET;
   } else if (strcmp(value, "home") == 0) {
@@ -198,8 +199,8 @@ parse_save_to(const char *value, ZipySaveLocation *out) {
   return 1;
 }
 
-static ZipyConflictPolicy
-cli_policy_to_extract(ZipyCliConflictPolicy policy) {
+static zipy_conflict_policy_t
+cli_policy_to_extract(zipy_cli_conflict_policy_t policy) {
   switch (policy) {
     case ZIPY_CLI_CONFLICT_OVERWRITE: return ZIPY_CONFLICT_OVERWRITE;
     case ZIPY_CLI_CONFLICT_SKIP:      return ZIPY_CONFLICT_SKIP;
@@ -211,11 +212,12 @@ cli_policy_to_extract(ZipyCliConflictPolicy policy) {
 }
 
 static void
-config_default(ZipyConfig *config) {
-  config->onConflict = ZIPY_CLI_CONFLICT_ASK;
-  config->options.onConflict = ZIPY_CONFLICT_SAVE;
-  config->options.saveTo = ZIPY_SAVE_TARGET;
-  config->options.saveDir = NULL;
+config_default(zipy_config_t *config) {
+  config->on_conflict = ZIPY_CLI_CONFLICT_ASK;
+  config->options.on_conflict = ZIPY_CONFLICT_SAVE;
+  config->options.save_to = ZIPY_SAVE_TARGET;
+  config->options.save_dir = NULL;
+  config->options.flags = ZIPY_EXTRACT_DEFAULT;
 }
 
 static const char *
@@ -302,7 +304,7 @@ clamp_jobs(size_t jobs, size_t count) {
 }
 
 static void
-progress_init(ZipyProgress *progress, FILE *out, size_t count) {
+progress_init(zipy_progress_t *progress, FILE *out, size_t count) {
   progress->out = out;
   progress->count = count;
   progress->tick = 0;
@@ -311,7 +313,7 @@ progress_init(ZipyProgress *progress, FILE *out, size_t count) {
 }
 
 static void
-progress_clear(const ZipyProgress *progress) {
+progress_clear(const zipy_progress_t *progress) {
   if (!progress->tty)
     return;
 
@@ -341,7 +343,7 @@ progress_print_name(FILE *out, const char *name, size_t maxlen) {
 }
 
 static void
-progress_update(ZipyProgress *progress, size_t current, const char *name) {
+progress_update(zipy_progress_t *progress, size_t current, const char *name) {
   static const char spinner[] = "-\\|/";
   unsigned percent;
 
@@ -498,21 +500,21 @@ mkdir_parent(const char *path) {
 }
 
 static int
-apply_config_pair(ZipyConfig *config, const char *key, const char *value) {
+apply_config_pair(zipy_config_t *config, const char *key, const char *value) {
   if (strcmp(key, "on_conflict") == 0) {
-    if (!parse_conflict(value, &config->onConflict))
+    if (!parse_conflict(value, &config->on_conflict))
       return 0;
-    config->options.onConflict = cli_policy_to_extract(config->onConflict);
+    config->options.on_conflict = cli_policy_to_extract(config->on_conflict);
     return 1;
   }
   if (strcmp(key, "save_to") == 0)
-    return parse_save_to(value, &config->options.saveTo);
+    return parse_save_to(value, &config->options.save_to);
 
   return 0;
 }
 
 static int
-apply_config_assignment(ZipyConfig *config, char *text) {
+apply_config_assignment(zipy_config_t *config, char *text) {
   char *eq, *key, *value;
 
   eq = strchr(text, '=');
@@ -526,7 +528,7 @@ apply_config_assignment(ZipyConfig *config, char *text) {
 }
 
 static void
-read_config(ZipyConfig *config) {
+read_config(zipy_config_t *config) {
   char *path;
   FILE *fp;
   char line[256];
@@ -557,20 +559,20 @@ read_config(ZipyConfig *config) {
 }
 
 static int
-apply_env_config(ZipyConfig *config) {
+apply_env_config(zipy_config_t *config) {
   const char *value;
 
   value = getenv("ZIPY_ON_CONFLICT");
   if (value && *value) {
-    if (!parse_conflict(value, &config->onConflict)) {
+    if (!parse_conflict(value, &config->on_conflict)) {
       fprintf(stderr, "Error: Invalid ZIPY_ON_CONFLICT '%s'\n", value);
       return 0;
     }
-    config->options.onConflict = cli_policy_to_extract(config->onConflict);
+    config->options.on_conflict = cli_policy_to_extract(config->on_conflict);
   }
 
   value = getenv("ZIPY_SAVE_TO");
-  if (value && *value && !parse_save_to(value, &config->options.saveTo)) {
+  if (value && *value && !parse_save_to(value, &config->options.save_to)) {
     fprintf(stderr, "Error: Invalid ZIPY_SAVE_TO '%s'\n", value);
     return 0;
   }
@@ -579,7 +581,7 @@ apply_env_config(ZipyConfig *config) {
 }
 
 static int
-write_config(const ZipyConfig *config) {
+write_config(const zipy_config_t *config) {
   char *path;
   FILE *fp;
   int ok = 0;
@@ -595,8 +597,8 @@ write_config(const ZipyConfig *config) {
 
   fp = fopen(path, "wb");
   if (fp) {
-    fprintf(fp, "on_conflict = %s\n", conflict_name(config->onConflict));
-    fprintf(fp, "save_to = %s\n", save_to_name(config->options.saveTo));
+    fprintf(fp, "on_conflict = %s\n", conflict_name(config->on_conflict));
+    fprintf(fp, "save_to = %s\n", save_to_name(config->options.save_to));
     ok = fclose(fp) == 0;
   }
 
@@ -605,18 +607,18 @@ write_config(const ZipyConfig *config) {
 }
 
 static void
-print_config(const ZipyConfig *config) {
+print_config(const zipy_config_t *config) {
   char *path = config_path();
 
   printf("config: %s\n", path ? path : "(unavailable)");
-  printf("on_conflict = %s\n", conflict_name(config->onConflict));
-  printf("save_to = %s\n", save_to_name(config->options.saveTo));
+  printf("on_conflict = %s\n", conflict_name(config->on_conflict));
+  printf("save_to = %s\n", save_to_name(config->options.save_to));
   free(path);
 }
 
 static int
 handle_config_command(int argc, char **argv) {
-  ZipyConfig config;
+  zipy_config_t config;
   int i;
 
   read_config(&config);
@@ -683,16 +685,16 @@ saved_name(char *buf, size_t len) {
 }
 
 static char *
-create_save_dir(const char *extractdir, ZipySaveLocation saveTo) {
+create_save_dir(const char *extractdir, zipy_save_location_t save_to) {
   char name[64], numbered[96];
   const char *base = extractdir;
   char *ownedBase = NULL;
   char *path = NULL;
   unsigned i;
 
-  if (saveTo == ZIPY_SAVE_HOME) {
+  if (save_to == ZIPY_SAVE_HOME) {
     base = home_dir();
-  } else if (saveTo == ZIPY_SAVE_TRASH) {
+  } else if (save_to == ZIPY_SAVE_TRASH) {
     ownedBase = trash_dir();
     base = ownedBase;
   }
@@ -975,7 +977,7 @@ read_choice_char(void) {
 
 static int
 entry_conflict_path(const char *extractdir,
-                    const ZipyEntry *entry,
+                    const zipy_entry_t *entry,
                     char **conflictPath) {
   char *rel = NULL;
   char *path = NULL;
@@ -1033,7 +1035,7 @@ entry_conflict_path(const char *extractdir,
     if (!path_info(clean, &exists, &isDir))
       goto done;
 
-    if (exists && !(entry->isDirectory && isDir)) {
+    if (exists && !(entry->is_directory && isDir)) {
       *conflictPath = clean;
       clean = NULL;
       result = 1;
@@ -1051,10 +1053,10 @@ done:
 }
 
 static int
-prompt_conflict_action(const ZipyEntry *entry,
+prompt_conflict_action(const zipy_entry_t *entry,
                        const char *path,
-                       ZipyCliConflictPolicy *allPolicy,
-                       ZipyConflictPolicy *policy) {
+                       zipy_cli_conflict_policy_t *allPolicy,
+                       zipy_conflict_policy_t *policy) {
   int color = use_color(file_is_tty(stderr));
 
   if (*allPolicy != ZIPY_CLI_CONFLICT_ASK) {
@@ -1112,13 +1114,13 @@ prompt_conflict_action(const ZipyEntry *entry,
 }
 
 static int
-prepare_ask_plan(ZipyArchive *zip,
+prepare_ask_plan(zipy_archive_t *zip,
                  const char *extractdir,
-                 ZipyConfig *config,
-                 ZipyConflictPolicy **policiesOut,
+                 zipy_config_t *config,
+                 zipy_conflict_policy_t **policiesOut,
                  int *needsSaveDir) {
-  ZipyConflictPolicy *policies = NULL;
-  ZipyCliConflictPolicy allPolicy = ZIPY_CLI_CONFLICT_ASK;
+  zipy_conflict_policy_t *policies = NULL;
+  zipy_cli_conflict_policy_t allPolicy = ZIPY_CLI_CONFLICT_ASK;
   size_t count, i;
   int conflicts = 0;
   int fastNoConflict = 0;
@@ -1126,22 +1128,22 @@ prepare_ask_plan(ZipyArchive *zip,
   *policiesOut = NULL;
   *needsSaveDir = 0;
 
-  config->options.onConflict = cli_policy_to_extract(config->onConflict);
+  config->options.on_conflict = cli_policy_to_extract(config->on_conflict);
+  if (config->options.on_conflict == ZIPY_CONFLICT_OVERWRITE)
+    return 1;
 
-  if (config->onConflict == ZIPY_CLI_CONFLICT_ASK
-      && target_is_empty_or_missing(extractdir, &fastNoConflict)
-      && fastNoConflict) {
-    config->options.onConflict = ZIPY_CONFLICT_OVERWRITE;
+  if (target_is_empty_or_missing(extractdir, &fastNoConflict) && fastNoConflict) {
+    config->options.on_conflict = ZIPY_CONFLICT_OVERWRITE;
     return 1;
   }
 
-  if (config->onConflict != ZIPY_CLI_CONFLICT_ASK) {
-    *needsSaveDir = config->options.onConflict == ZIPY_CONFLICT_SAVE;
+  if (config->on_conflict != ZIPY_CLI_CONFLICT_ASK) {
+    *needsSaveDir = config->options.on_conflict == ZIPY_CONFLICT_SAVE;
     return 1;
   }
 
   if (!file_is_tty(stdin)) {
-    config->options.onConflict = ZIPY_CONFLICT_SAVE;
+    config->options.on_conflict = ZIPY_CONFLICT_SAVE;
     *needsSaveDir = 1;
     return 1;
   }
@@ -1152,11 +1154,11 @@ prepare_ask_plan(ZipyArchive *zip,
     return 0;
 
   for (i = 0; i < count; i++) {
-    const ZipyEntry *entry = zipy_entry(zip, i);
+    const zipy_entry_t *entry = zipy_entry(zip, i);
     char *path = NULL;
     int ret;
 
-    policies[i] = ZIPY_CONFLICT_SAVE;
+    policies[i] = ZIPY_CONFLICT_OVERWRITE;
     if (!entry)
       continue;
 
@@ -1180,15 +1182,16 @@ prepare_ask_plan(ZipyArchive *zip,
     free(path);
 
     if (conflicts == 1 && allPolicy != ZIPY_CLI_CONFLICT_ASK) {
-      config->onConflict = allPolicy;
-      config->options.onConflict = cli_policy_to_extract(allPolicy);
-      *needsSaveDir = config->options.onConflict == ZIPY_CONFLICT_SAVE;
+      config->on_conflict = allPolicy;
+      config->options.on_conflict = cli_policy_to_extract(allPolicy);
+      *needsSaveDir = config->options.on_conflict == ZIPY_CONFLICT_SAVE;
       free(policies);
       return 1;
     }
   }
 
   if (conflicts == 0) {
+    config->options.on_conflict = ZIPY_CONFLICT_OVERWRITE;
     free(policies);
     return 1;
   }
@@ -1200,11 +1203,11 @@ prepare_ask_plan(ZipyArchive *zip,
 typedef struct ExtractContext {
   const char  *zipfile;
   const char  *extractdir;
-  const ZipyExtractOptions *options;
-  const ZipyConflictPolicy *policies;
-  ZipyArchive  *entries;
-  ZipyProgress *progress;
-  ZipyMutex     lock;
+  const zipy_extract_options_t *options;
+  const zipy_conflict_policy_t *policies;
+  zipy_archive_t  *entries;
+  zipy_progress_t *progress;
+  zipy_mutex_t     lock;
   size_t       count;
   size_t       next;
   size_t       done;
@@ -1215,8 +1218,8 @@ typedef struct ExtractContext {
 } ExtractContext;
 
 static void
-extract_one(ExtractContext *ctx, ZipyArchive *zip, size_t index) {
-  const ZipyEntry *entry;
+extract_one(ExtractContext *ctx, zipy_archive_t *zip, size_t index) {
+  const zipy_entry_t *entry;
   const char *name;
   int ret;
 
@@ -1226,8 +1229,8 @@ extract_one(ExtractContext *ctx, ZipyArchive *zip, size_t index) {
 
   name = entry->name;
   if (ctx->policies) {
-    ZipyExtractOptions options = *ctx->options;
-    options.onConflict = ctx->policies[index];
+    zipy_extract_options_t options = *ctx->options;
+    options.on_conflict = ctx->policies[index];
     ret = zipy_extract_to(zip, index, ctx->extractdir, &options);
   } else {
     ret = zipy_extract_to(zip, index, ctx->extractdir, ctx->options);
@@ -1253,7 +1256,7 @@ extract_one(ExtractContext *ctx, ZipyArchive *zip, size_t index) {
 static void
 extract_worker(void *arg) {
   ExtractContext *ctx;
-  ZipyArchive *zip;
+  zipy_archive_t *zip;
   size_t index;
 
   ctx = arg;
@@ -1283,11 +1286,11 @@ extract_worker(void *arg) {
 }
 
 static int
-extract_serial(ZipyArchive *zip,
+extract_serial(zipy_archive_t *zip,
                const char *extractdir,
-               const ZipyExtractOptions *options,
-               const ZipyConflictPolicy *policies,
-               ZipyProgress *progress,
+               const zipy_extract_options_t *options,
+               const zipy_conflict_policy_t *policies,
+               zipy_progress_t *progress,
                size_t count,
                size_t *extracted,
                size_t *saved,
@@ -1316,18 +1319,18 @@ extract_serial(ZipyArchive *zip,
 
 static int
 extract_parallel(const char *zipfile,
-                 ZipyArchive *entries,
+                 zipy_archive_t *entries,
                  const char *extractdir,
-                 const ZipyExtractOptions *options,
-                 const ZipyConflictPolicy *policies,
-                 ZipyProgress *progress,
+                 const zipy_extract_options_t *options,
+                 const zipy_conflict_policy_t *policies,
+                 zipy_progress_t *progress,
                  size_t count,
                  size_t jobs,
                  size_t *extracted,
                  size_t *saved,
                  size_t *skipped) {
   ExtractContext ctx;
-  ZipyThread *threads;
+  zipy_thread_t *threads;
   size_t i, started;
 
   memset(&ctx, 0, sizeof(ctx));
@@ -1375,12 +1378,12 @@ extract_parallel(const char *zipfile,
 
 int
 main(int argc, char *argv[]) {
-  ZipyArchive *zip;
-  ZipyConfig config;
+  zipy_archive_t *zip;
+  zipy_config_t config;
   const char *zipfile = NULL;
   const char *extractdir = ".";  /* Default to current directory */
-  char *saveDir = NULL;
-  ZipyConflictPolicy *policies = NULL;
+  char *save_dir = NULL;
+  zipy_conflict_policy_t *policies = NULL;
   size_t i;
   int success = 0;
   int summaryColor;
@@ -1390,7 +1393,7 @@ main(int argc, char *argv[]) {
   size_t count = 0, extracted = 0, saved = 0, skipped = 0;
   uint64_t startMs, elapsedMs;
   char elapsed[32];
-  ZipyProgress progress;
+  zipy_progress_t progress;
 
   if (argc > 1 && strcmp(argv[1], "--config") == 0)
     return handle_config_command(argc, argv);
@@ -1409,16 +1412,18 @@ main(int argc, char *argv[]) {
         return 1;
       }
     } else if (strcmp(argv[i], "--on-conflict") == 0 && i + 1 < argc) {
-      if (!parse_conflict(argv[++i], &config.onConflict)) {
+      if (!parse_conflict(argv[++i], &config.on_conflict)) {
         print_usage();
         return 1;
       }
-      config.options.onConflict = cli_policy_to_extract(config.onConflict);
+      config.options.on_conflict = cli_policy_to_extract(config.on_conflict);
     } else if (strcmp(argv[i], "--save-to") == 0 && i + 1 < argc) {
-      if (!parse_save_to(argv[++i], &config.options.saveTo)) {
+      if (!parse_save_to(argv[++i], &config.options.save_to)) {
         print_usage();
         return 1;
       }
+    } else if (strcmp(argv[i], "--no-crc") == 0) {
+      config.options.flags |= ZIPY_EXTRACT_NO_CRC;
     } else if (!zipfile) {
       zipfile = argv[i];
     } else {
@@ -1453,14 +1458,14 @@ main(int argc, char *argv[]) {
   }
 
   if (needsSaveDir) {
-    saveDir = create_save_dir(extractdir, config.options.saveTo);
-    if (!saveDir) {
+    save_dir = create_save_dir(extractdir, config.options.save_to);
+    if (!save_dir) {
       fprintf(stderr, "Error: Failed to create saved folder\n");
       zipy_close(zip);
       free(policies);
       return 1;
     }
-    config.options.saveDir = saveDir;
+    config.options.save_dir = save_dir;
   }
 
   startMs = now_ms();
@@ -1475,8 +1480,8 @@ main(int argc, char *argv[]) {
   elapsedMs = now_ms() - startMs;
   format_duration(elapsed, sizeof(elapsed), elapsedMs);
   progress_clear(&progress);
-  if (saveDir && saved == 0) {
-    zipy_rmdir(saveDir);
+  if (save_dir && saved == 0) {
+    zipy_rmdir(save_dir);
   }
 
   if (success) {
@@ -1521,9 +1526,9 @@ main(int argc, char *argv[]) {
              skipped == 1 ? "file" : "files");
   }
 
-  if (!success && saved > 0 && saveDir) {
-    char *shownSaveDir = display_path(saveDir);
-    const char *saveText = shownSaveDir ? shownSaveDir : saveDir;
+  if (!success && saved > 0 && save_dir) {
+    char *shownSaveDir = display_path(save_dir);
+    const char *saveText = shownSaveDir ? shownSaveDir : save_dir;
 
     if (summaryColor)
       printf("  saved existing files to \033[35m%s\033[0m\n", saveText);
@@ -1535,6 +1540,6 @@ main(int argc, char *argv[]) {
   
   zipy_close(zip);
   free(policies);
-  free(saveDir);
+  free(save_dir);
   return success;
 }

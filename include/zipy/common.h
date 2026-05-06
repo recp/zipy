@@ -80,7 +80,7 @@ extern "C" {
 #  define __has_builtin(x) 0
 #endif
 
-typedef enum ZipyResult {
+typedef enum zipy_result_t {
   ZIPY_UNFINISHED =  2,       /* need more data for streaming */
   ZIPY_NOOP       =  1,       /* no operation needed */
   ZIPY_OK         =  0,
@@ -90,7 +90,7 @@ typedef enum ZipyResult {
   ZIPY_EPERM      = -EPERM,
   ZIPY_EBADF      = -EBADF,   /* file couldn't parsed / loaded */
   ZIPY_EFULL      = -ENOBUFS  /* no space ENOBUFS vs ENOSPC    */
-} ZipyResult;
+} zipy_result_t;
 
 #ifdef __cplusplus
 }

@@ -20,6 +20,7 @@ The build creates `libzipy.a` and the `zipy` command line tool.
 zipy archive.zip -d target
 zipy archive.zip -d target -j auto
 zipy archive.zip -d target -j 1
+zipy archive.zip -d target --no-crc
 ```
 
 By default, the CLI asks what to do when an extracted entry would replace an
@@ -102,13 +103,32 @@ zipy archive.zip -d target --save-to trash
 ```c
 #include <zipy/zip.h>
 
-ZipyArchive *zip = zipy_open("archive.zip");
+zipy_archive_t *zip = zipy_open("archive.zip");
 zipy_extract_all(zip, "target");
 zipy_close(zip);
 ```
 
-Use `zipy_extract_all_options()` or `zipy_extract_to()` to set
-`ZipyExtractOptions` explicitly.
+Use `zipy_extract_all_options()` or `zipy_extract_to()` to set conflict
+behavior explicitly:
+
+```c
+zipy_extract_options_t options = {
+  .on_conflict = ZIPY_CONFLICT_SAVE,
+  .save_to = ZIPY_SAVE_TARGET,
+  .save_dir = NULL,
+  .flags = ZIPY_EXTRACT_DEFAULT
+};
+
+zipy_archive_t *zip = zipy_open("archive.zip");
+zipy_extract_all_options(zip, "target", &options);
+zipy_close(zip);
+```
+
+`ask` is CLI-only. Apps should show their own UI and pass `save`,
+`overwrite`, `skip`, or `fail`.
+
+CRC32 validation is enabled by default. Set `ZIPY_EXTRACT_NO_CRC` only when
+lower latency matters more than detecting corrupted archive data.
 
 ## Status
 
@@ -117,3 +137,6 @@ Use `zipy_extract_all_options()` or `zipy_extract_to()` to set
 - [x] extract deflated entries
 - [x] CRC32 validation
 - [x] basic ZIP64 central directory parsing
+- [ ] encrypted ZIP entries
+- [ ] Deflate64
+- [ ] symlinks, attributes, and timestamps

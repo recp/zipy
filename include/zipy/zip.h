@@ -14,9 +14,9 @@
 #include "common.h"
 #include <stdbool.h>
 
-typedef struct ZipyArchive ZipyArchive;
+typedef struct zipy_archive_t zipy_archive_t;
 
-typedef enum ZipyZipResult {
+typedef enum zipy_zip_result_t {
   ZIPY_ZIP_OK       =  0,
   ZIPY_ZIP_SAVED    =  1,
   ZIPY_ZIP_SKIPPED  =  2,
@@ -27,71 +27,77 @@ typedef enum ZipyZipResult {
   ZIPY_ZIP_EFILE    = -5,
   ZIPY_ZIP_EUNSUP   = -6,
   ZIPY_ZIP_EEXIST   = -7
-} ZipyZipResult;
+} zipy_zip_result_t;
 
-typedef enum ZipyZipMethod {
+typedef enum zipy_zip_method_t {
   ZIPY_ZIP_STORE   = 0,
   ZIPY_ZIP_DEFLATE = 8
-} ZipyZipMethod;
+} zipy_zip_method_t;
 
-typedef enum ZipySaveLocation {
+typedef enum zipy_save_location_t {
   ZIPY_SAVE_TARGET = 0,
   ZIPY_SAVE_HOME   = 1,
   ZIPY_SAVE_TRASH  = 2
-} ZipySaveLocation;
+} zipy_save_location_t;
 
-typedef enum ZipyConflictPolicy {
+typedef enum zipy_conflict_policy_t {
   ZIPY_CONFLICT_SAVE      = 0,
   ZIPY_CONFLICT_OVERWRITE = 1,
   ZIPY_CONFLICT_SKIP      = 2,
   ZIPY_CONFLICT_FAIL      = 3
-} ZipyConflictPolicy;
+} zipy_conflict_policy_t;
 
-typedef struct ZipyExtractOptions {
-  ZipyConflictPolicy onConflict;
-  ZipySaveLocation saveTo;
-  const char       *saveDir;
-} ZipyExtractOptions;
+typedef enum zipy_extract_flags_t {
+  ZIPY_EXTRACT_DEFAULT = 0,
+  ZIPY_EXTRACT_NO_CRC  = 1u << 0
+} zipy_extract_flags_t;
 
-typedef struct ZipyEntry {
+typedef struct zipy_extract_options_t {
+  zipy_conflict_policy_t on_conflict;
+  zipy_save_location_t save_to;
+  const char       *save_dir;
+  uint32_t          flags;
+} zipy_extract_options_t;
+
+typedef struct zipy_entry_t {
   const char *name;
-  uint64_t    compressedSize;
-  uint64_t    uncompressedSize;
+  uint64_t    compressed_size;
+  uint64_t    uncompressed_size;
   uint32_t    crc32;
   uint16_t    method;
-  bool        isDirectory;
-} ZipyEntry;
+  bool        is_directory;
+} zipy_entry_t;
 
-ZIPY_EXPORT ZipyArchive *
+ZIPY_EXPORT zipy_archive_t *
 zipy_open(const char *path);
 
 ZIPY_EXPORT size_t
-zipy_count(const ZipyArchive *zipy);
+zipy_count(const zipy_archive_t *zipy);
 
-ZIPY_EXPORT const ZipyEntry *
-zipy_entry(const ZipyArchive *zipy, size_t index);
-
-ZIPY_EXPORT int
-zipy_extract(ZipyArchive *zipy, size_t index, const char *destpath);
+ZIPY_EXPORT const zipy_entry_t *
+zipy_entry(const zipy_archive_t *zipy, size_t index);
 
 ZIPY_EXPORT int
-zipy_extract_to(ZipyArchive *zipy,
+zipy_extract(zipy_archive_t *zipy, size_t index, const char *destpath);
+
+ZIPY_EXPORT int
+zipy_extract_to(zipy_archive_t *zipy,
                 size_t index,
                 const char *destdir,
-                const ZipyExtractOptions *options);
+                const zipy_extract_options_t *options);
 
 ZIPY_EXPORT int
-zipy_extract_named(ZipyArchive *zipy, const char *name, const char *destpath);
+zipy_extract_named(zipy_archive_t *zipy, const char *name, const char *destpath);
 
 ZIPY_EXPORT int
-zipy_extract_all(ZipyArchive *zipy, const char *destdir);
+zipy_extract_all(zipy_archive_t *zipy, const char *destdir);
 
 ZIPY_EXPORT int
-zipy_extract_all_options(ZipyArchive *zipy,
+zipy_extract_all_options(zipy_archive_t *zipy,
                          const char *destdir,
-                         const ZipyExtractOptions *options);
+                         const zipy_extract_options_t *options);
 
 ZIPY_EXPORT void
-zipy_close(ZipyArchive *zipy);
+zipy_close(zipy_archive_t *zipy);
 
 #endif /* zipy_zip_h */
