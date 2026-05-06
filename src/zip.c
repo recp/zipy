@@ -23,13 +23,22 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 
 #if defined(_WIN32)
 #  include <direct.h>
 #  include <io.h>
+#  include <sys/stat.h>
+#  define zipy_getcwd _getcwd
 #else
 #  include <sys/stat.h>
 #  include <sys/types.h>
+#  include <unistd.h>
+#  define zipy_getcwd getcwd
+#endif
+
+#ifndef PATH_MAX
+#  define PATH_MAX 4096
 #endif
 
 #define ZIP_SIGN_LOCAL_FILE    0x04034B50u
@@ -52,6 +61,12 @@
 #define ZIP_EXTRA_ZIP64       0x0001u
 #define ZIP_FLAG_ENCRYPTED    0x0001u
 #define ZIP_FLAG_STRONG_ENC   0x0040u
+
+#if defined(_WIN32)
+#  define ZIPY_PATH_SEP '\\'
+#else
+#  define ZIPY_PATH_SEP '/'
+#endif
 
 typedef struct ZipyFile {
   ZipyEntry entry;
@@ -434,17 +449,62 @@ zipy_is_dir_name(const char *path) {
 }
 
 static int
+zipy_path_info(const char *path, int *exists, int *isDir) {
+#if defined(_WIN32)
+  struct _stat64 st;
+
+  if (_stat64(path, &st) != 0) {
+#else
+  struct stat st;
+
+  if (stat(path, &st) != 0) {
+#endif
+    if (errno == ENOENT || errno == ENOTDIR) {
+      if (exists)
+        *exists = 0;
+      if (isDir)
+        *isDir = 0;
+      return 1;
+    }
+    return 0;
+  }
+
+  if (exists)
+    *exists = 1;
+  if (isDir) {
+#if defined(_WIN32)
+    *isDir = (st.st_mode & _S_IFDIR) != 0;
+#else
+    *isDir = S_ISDIR(st.st_mode);
+#endif
+  }
+  return 1;
+}
+
+static int
+zipy_path_is_dir(const char *path) {
+  int exists, isDir;
+
+  if (!zipy_path_info(path, &exists, &isDir))
+    return 0;
+  return exists && isDir;
+}
+
+static int
 zipy_mkdir_one(const char *path) {
   if (!path || !*path)
     return 1;
 
 #if defined(_WIN32)
-  if (_mkdir(path) == 0 || errno == EEXIST)
+  if (_mkdir(path) == 0)
     return 1;
 #else
-  if (mkdir(path, 0755) == 0 || errno == EEXIST)
+  if (mkdir(path, 0755) == 0)
     return 1;
 #endif
+
+  if (errno == EEXIST)
+    return zipy_path_is_dir(path);
 
   return 0;
 }
@@ -712,6 +772,418 @@ zipy_extract_path(const char *dir, const char *name) {
   return path;
 }
 
+static char *
+zipy_join_path(const char *dir, const char *name) {
+  size_t dirLen, nameLen;
+  char *path;
+
+  if (!dir || !name)
+    return NULL;
+
+  dirLen = strlen(dir);
+  nameLen = strlen(name);
+  path = malloc(dirLen + nameLen + 2);
+  if (!path)
+    return NULL;
+
+  memcpy(path, dir, dirLen);
+  if (dirLen > 0 && !zipy_is_fs_sep(dir[dirLen - 1]))
+    path[dirLen++] = ZIPY_PATH_SEP;
+  memcpy(path + dirLen, name, nameLen + 1);
+  return path;
+}
+
+static int
+zipy_is_abs_path(const char *path) {
+  if (!path || !*path)
+    return 0;
+
+#if defined(_WIN32)
+  if (isalpha((unsigned char)path[0]) && path[1] == ':')
+    return 1;
+#endif
+
+  return zipy_is_fs_sep(path[0]);
+}
+
+static char *
+zipy_abs_path(const char *path) {
+  char cwd[PATH_MAX];
+
+  if (!path)
+    return NULL;
+
+  if (zipy_is_abs_path(path))
+    return zipy_strdup(path);
+
+  if (!zipy_getcwd(cwd, sizeof(cwd)))
+    return zipy_strdup(path);
+
+  return zipy_join_path(cwd, path);
+}
+
+static char *
+zipy_trim_trailing_seps(const char *path) {
+  char *out;
+  size_t len;
+
+  if (!path)
+    return NULL;
+
+  len = strlen(path);
+  while (len > 1 && zipy_is_fs_sep(path[len - 1])) {
+#if defined(_WIN32)
+    if (len == 3 && isalpha((unsigned char)path[0]) && path[1] == ':')
+      break;
+#endif
+    len--;
+  }
+
+  out = malloc(len + 1);
+  if (!out)
+    return NULL;
+
+  memcpy(out, path, len);
+  out[len] = '\0';
+  return out;
+}
+
+static const char *
+zipy_home_dir(void) {
+  const char *home;
+
+#if defined(_WIN32)
+  home = getenv("USERPROFILE");
+  if (!home || !*home)
+    home = getenv("HOME");
+#else
+  home = getenv("HOME");
+#endif
+
+  return home && *home ? home : NULL;
+}
+
+static char *
+zipy_trash_dir(void) {
+  const char *home = zipy_home_dir();
+
+  if (!home)
+    return NULL;
+
+#if defined(_WIN32)
+  return zipy_join_path(home, "AppData\\Local\\Microsoft\\Windows\\Recycle Bin");
+#elif defined(__APPLE__)
+  return zipy_join_path(home, ".Trash");
+#else
+  return zipy_join_path(home, ".local/share/Trash/files");
+#endif
+}
+
+static void
+zipy_saved_name(char *buf, size_t len) {
+  time_t now;
+  struct tm tmv;
+
+  now = time(NULL);
+#if defined(_WIN32)
+  localtime_s(&tmv, &now);
+#else
+  localtime_r(&now, &tmv);
+#endif
+
+  strftime(buf, len, "zipy %Y-%m-%d %H-%M-%S saved", &tmv);
+}
+
+static char *
+zipy_create_save_dir(const char *destdir, ZipySaveLocation saveTo) {
+  char name[64], numbered[96];
+  const char *base = destdir;
+  char *ownedBase = NULL;
+  char *path = NULL;
+  unsigned i;
+
+  if (saveTo == ZIPY_SAVE_HOME) {
+    base = zipy_home_dir();
+  } else if (saveTo == ZIPY_SAVE_TRASH) {
+    ownedBase = zipy_trash_dir();
+    base = ownedBase;
+  }
+
+  if (!base || !*base)
+    goto done;
+
+  if (!zipy_mkdirs(base))
+    goto done;
+
+  zipy_saved_name(name, sizeof(name));
+  for (i = 0; i < 1000; i++) {
+    free(path);
+    if (i == 0) {
+      path = zipy_join_path(base, name);
+    } else {
+      snprintf(numbered, sizeof(numbered), "%s %u", name, i + 1);
+      path = zipy_join_path(base, numbered);
+    }
+
+    if (!path)
+      goto done;
+
+#if defined(_WIN32)
+    if (_mkdir(path) == 0)
+      goto done;
+#else
+    if (mkdir(path, 0755) == 0)
+      goto done;
+#endif
+
+    if (errno != EEXIST) {
+      free(path);
+      path = NULL;
+      goto done;
+    }
+  }
+
+  free(path);
+  path = NULL;
+
+done:
+  free(ownedBase);
+  return path;
+}
+
+static int
+zipy_append_saved_manifest(const char *saveDir,
+                           const char *originalPath,
+                           const char *savedPath) {
+  char *manifest;
+  FILE *fp;
+
+  manifest = zipy_join_path(saveDir, "zipy_saved_original_paths.txt");
+  if (!manifest)
+    return 0;
+
+  fp = fopen(manifest, "ab");
+  free(manifest);
+  if (!fp)
+    return 0;
+
+  fprintf(fp, "%s -> %s\n", originalPath, savedPath);
+  if (fclose(fp) != 0)
+    return 0;
+
+  return 1;
+}
+
+static ZipyExtractOptions
+zipy_default_extract_options(const ZipyExtractOptions *options) {
+  ZipyExtractOptions out;
+
+  out.onConflict = ZIPY_CONFLICT_SAVE;
+  out.saveTo = ZIPY_SAVE_TARGET;
+  out.saveDir = NULL;
+
+  if (!options)
+    return out;
+
+  out = *options;
+  if (out.onConflict < ZIPY_CONFLICT_SAVE
+      || out.onConflict > ZIPY_CONFLICT_FAIL)
+    out.onConflict = ZIPY_CONFLICT_SAVE;
+  if (out.saveTo < ZIPY_SAVE_TARGET || out.saveTo > ZIPY_SAVE_TRASH)
+    out.saveTo = ZIPY_SAVE_TARGET;
+
+  return out;
+}
+
+static int
+zipy_prepare_conflict(const char *destdir,
+                      const ZipyEntry *entry,
+                      const char *destpath,
+                      const ZipyExtractOptions *options,
+                      char **saveDir) {
+  int exists, isDir;
+  char *savePath = NULL;
+  char *cleanDestPath = NULL;
+  char *cleanSavePath = NULL;
+  char *originalAbs = NULL;
+  char *savedAbs = NULL;
+  int ret = ZIPY_ZIP_OK;
+
+  cleanDestPath = zipy_trim_trailing_seps(destpath);
+  if (!cleanDestPath)
+    return ZIPY_ZIP_ERR;
+
+  if (!zipy_path_info(cleanDestPath, &exists, &isDir)) {
+    ret = ZIPY_ZIP_EFILE;
+    goto done;
+  }
+  if (!exists) {
+    ret = ZIPY_ZIP_OK;
+    goto done;
+  }
+  if (entry->isDirectory && isDir) {
+    ret = ZIPY_ZIP_OK;
+    goto done;
+  }
+
+  if (options->onConflict == ZIPY_CONFLICT_OVERWRITE) {
+    ret = ZIPY_ZIP_OK;
+    goto done;
+  }
+  if (options->onConflict == ZIPY_CONFLICT_SKIP) {
+    ret = ZIPY_ZIP_SKIPPED;
+    goto done;
+  }
+  if (options->onConflict == ZIPY_CONFLICT_FAIL) {
+    ret = ZIPY_ZIP_EEXIST;
+    goto done;
+  }
+
+  if (!*saveDir) {
+    if (options->saveDir) {
+      *saveDir = zipy_strdup(options->saveDir);
+      if (*saveDir && !zipy_mkdirs(*saveDir)) {
+        free(*saveDir);
+        *saveDir = NULL;
+      }
+    } else {
+      *saveDir = zipy_create_save_dir(destdir, options->saveTo);
+    }
+  }
+  if (!*saveDir) {
+    ret = ZIPY_ZIP_EFILE;
+    goto done;
+  }
+
+  savePath = zipy_extract_path(*saveDir, entry->name);
+  if (!savePath) {
+    ret = ZIPY_ZIP_ERR;
+    goto done;
+  }
+
+  cleanSavePath = zipy_trim_trailing_seps(savePath);
+  if (!cleanSavePath) {
+    ret = ZIPY_ZIP_ERR;
+    goto done;
+  }
+  if (!zipy_mkdir_parent(cleanSavePath)) {
+    ret = ZIPY_ZIP_EFILE;
+    goto done;
+  }
+
+  originalAbs = zipy_abs_path(cleanDestPath);
+  if (rename(cleanDestPath, cleanSavePath) != 0) {
+    int nowExists, nowIsDir;
+
+    if (zipy_path_info(cleanDestPath, &nowExists, &nowIsDir)
+        && (!nowExists || (entry->isDirectory && nowIsDir))) {
+      ret = ZIPY_ZIP_OK;
+      goto done;
+    }
+
+    ret = ZIPY_ZIP_EFILE;
+    goto done;
+  }
+
+  savedAbs = zipy_abs_path(cleanSavePath);
+  if (!originalAbs || !savedAbs
+      || !zipy_append_saved_manifest(*saveDir, originalAbs, savedAbs)) {
+    ret = ZIPY_ZIP_EFILE;
+    goto done;
+  }
+
+  ret = ZIPY_ZIP_SAVED;
+
+done:
+  free(savedAbs);
+  free(originalAbs);
+  free(cleanSavePath);
+  free(cleanDestPath);
+  free(savePath);
+  return ret;
+}
+
+static int
+zipy_prepare_parent_conflicts(const char *destdir,
+                              const ZipyEntry *entry,
+                              const ZipyExtractOptions *options,
+                              char **saveDir) {
+  ZipyEntry parentEntry;
+  char *rel = NULL;
+  char *path = NULL;
+  size_t len, i, j;
+  int result = ZIPY_ZIP_OK;
+
+  if (!entry || !entry->name)
+    return ZIPY_ZIP_ERR;
+
+  len = strlen(entry->name);
+  rel = malloc(len + 1);
+  if (!rel)
+    return ZIPY_ZIP_ERR;
+
+  parentEntry = *entry;
+  parentEntry.name = rel;
+  parentEntry.isDirectory = false;
+
+  for (i = 0; i < len; i++) {
+    int exists, isDir;
+
+    if (!zipy_is_zip_sep(entry->name[i]) || i == 0)
+      continue;
+
+    for (j = 0; j < i; j++)
+      rel[j] = zipy_is_zip_sep(entry->name[j]) ? '/' : entry->name[j];
+    rel[i] = '\0';
+
+    free(path);
+    path = zipy_extract_path(destdir, rel);
+    if (!path) {
+      result = ZIPY_ZIP_ERR;
+      break;
+    }
+
+    if (!zipy_path_info(path, &exists, &isDir)) {
+      result = ZIPY_ZIP_EFILE;
+      break;
+    }
+
+    if (!exists || isDir)
+      continue;
+
+    result = zipy_prepare_conflict(destdir,
+                                   &parentEntry,
+                                   path,
+                                   options,
+                                   saveDir);
+    if (result != ZIPY_ZIP_OK && result != ZIPY_ZIP_SAVED)
+      break;
+  }
+
+  free(path);
+  free(rel);
+  return result;
+}
+
+static int
+zipy_prepare_entry_conflict(const char *destdir,
+                            const ZipyEntry *entry,
+                            const char *destpath,
+                            const ZipyExtractOptions *options,
+                            char **saveDir) {
+  int parentRet, ret;
+
+  parentRet = zipy_prepare_parent_conflicts(destdir, entry, options, saveDir);
+  if (parentRet != ZIPY_ZIP_OK && parentRet != ZIPY_ZIP_SAVED)
+    return parentRet;
+
+  ret = zipy_prepare_conflict(destdir, entry, destpath, options, saveDir);
+  if (ret == ZIPY_ZIP_OK && parentRet == ZIPY_ZIP_SAVED)
+    return ZIPY_ZIP_SAVED;
+
+  return ret;
+}
+
 ZIPY_EXPORT
 ZipyArchive *
 zipy_open(const char *path) {
@@ -932,6 +1404,49 @@ zipy_extract(ZipyArchive *zipy, size_t index, const char *destpath) {
 
 ZIPY_EXPORT
 int
+zipy_extract_to(ZipyArchive *zipy,
+                size_t index,
+                const char *destdir,
+                const ZipyExtractOptions *options) {
+  ZipyExtractOptions opts;
+  char *destpath;
+  char *saveDir = NULL;
+  int ret, conflictRet;
+
+  if (!zipy || index >= zipy->fileCount || !destdir)
+    return ZIPY_ZIP_EFILE;
+
+  opts = zipy_default_extract_options(options);
+  destpath = zipy_extract_path(destdir, zipy->files[index].entry.name);
+  if (!destpath)
+    return ZIPY_ZIP_ERR;
+
+  conflictRet = zipy_prepare_entry_conflict(destdir,
+                                            &zipy->files[index].entry,
+                                            destpath,
+                                            &opts,
+                                            &saveDir);
+  if (conflictRet == ZIPY_ZIP_SKIPPED) {
+    ret = ZIPY_ZIP_SKIPPED;
+    goto done;
+  }
+  if (conflictRet < ZIPY_ZIP_OK) {
+    ret = conflictRet;
+    goto done;
+  }
+
+  ret = zipy_extract_entry(zipy, &zipy->files[index], destpath);
+  if (ret == ZIPY_ZIP_OK && conflictRet == ZIPY_ZIP_SAVED)
+    ret = ZIPY_ZIP_SAVED;
+
+done:
+  free(saveDir);
+  free(destpath);
+  return ret;
+}
+
+ZIPY_EXPORT
+int
 zipy_extract_named(ZipyArchive *zipy, const char *name, const char *destpath) {
   ZipyFile *info;
 
@@ -948,6 +1463,7 @@ zipy_extract_named(ZipyArchive *zipy, const char *name, const char *destpath) {
 typedef struct ZipyExtractAllContext {
   const char *zipPath;
   const char *destdir;
+  const unsigned char *skip;
   ZipyMutex    lock;
   size_t      count;
   size_t      next;
@@ -971,12 +1487,17 @@ zipy_extract_default_jobs(size_t count) {
 }
 
 static int
-zipy_extract_all_serial(ZipyArchive *zipy, const char *destdir) {
+zipy_extract_all_serial(ZipyArchive *zipy,
+                        const char *destdir,
+                        const unsigned char *skip) {
   size_t i;
 
   for (i = 0; i < zipy->fileCount; i++) {
     char *path;
     int ret;
+
+    if (skip && skip[i])
+      continue;
 
     path = zipy_extract_path(destdir, zipy->files[i].entry.name);
     if (!path)
@@ -984,7 +1505,7 @@ zipy_extract_all_serial(ZipyArchive *zipy, const char *destdir) {
 
     ret = zipy_extract_entry(zipy, &zipy->files[i], path);
     free(path);
-    if (ret != ZIPY_ZIP_OK)
+    if (ret < ZIPY_ZIP_OK)
       return ret;
   }
 
@@ -1020,6 +1541,9 @@ zipy_extract_all_worker(void *arg) {
     index = ctx->next++;
     zipy_unlock(&ctx->lock);
 
+    if (ctx->skip && ctx->skip[index])
+      continue;
+
     entry = zipy_entry(zipy, index);
     if (!entry) {
       ret = ZIPY_ZIP_EFILE;
@@ -1034,7 +1558,7 @@ zipy_extract_all_worker(void *arg) {
 
     ret = zipy_extract(zipy, index, path);
     free(path);
-    if (ret == ZIPY_ZIP_OK)
+    if (ret >= ZIPY_ZIP_OK)
       continue;
 
   fail:
@@ -1049,22 +1573,26 @@ zipy_extract_all_worker(void *arg) {
 }
 
 static int
-zipy_extract_all_parallel(ZipyArchive *zipy, const char *destdir, size_t jobs) {
+zipy_extract_all_parallel(ZipyArchive *zipy,
+                          const char *destdir,
+                          size_t jobs,
+                          const unsigned char *skip) {
   ZipyExtractAllContext ctx;
   ZipyThread *threads;
   size_t i, started;
   int result;
 
   if (!zipy->path || jobs <= 1)
-    return zipy_extract_all_serial(zipy, destdir);
+    return zipy_extract_all_serial(zipy, destdir, skip);
 
   threads = calloc(jobs, sizeof(*threads));
   if (!threads)
-    return zipy_extract_all_serial(zipy, destdir);
+    return zipy_extract_all_serial(zipy, destdir, skip);
 
   memset(&ctx, 0, sizeof(ctx));
   ctx.zipPath = zipy->path;
   ctx.destdir = destdir;
+  ctx.skip = skip;
   ctx.count = zipy->fileCount;
   ctx.result = ZIPY_ZIP_OK;
   zipy_mutex_init(&ctx.lock);
@@ -1079,7 +1607,7 @@ zipy_extract_all_parallel(ZipyArchive *zipy, const char *destdir, size_t jobs) {
   if (started == 0) {
     zipy_mutex_destroy(&ctx.lock);
     free(threads);
-    return zipy_extract_all_serial(zipy, destdir);
+    return zipy_extract_all_serial(zipy, destdir, skip);
   }
 
   for (i = 0; i < started; i++)
@@ -1091,14 +1619,87 @@ zipy_extract_all_parallel(ZipyArchive *zipy, const char *destdir, size_t jobs) {
   return result;
 }
 
+static int
+zipy_prepare_extract_all(ZipyArchive *zipy,
+                         const char *destdir,
+                         const ZipyExtractOptions *options,
+                         unsigned char **skipOut) {
+  char *saveDir = NULL;
+  size_t i;
+  int result = ZIPY_ZIP_OK;
+
+  *skipOut = NULL;
+
+  if (options->onConflict == ZIPY_CONFLICT_OVERWRITE)
+    return ZIPY_ZIP_OK;
+
+  for (i = 0; i < zipy->fileCount; i++) {
+    char *path;
+    int ret;
+
+    path = zipy_extract_path(destdir, zipy->files[i].entry.name);
+    if (!path) {
+      result = ZIPY_ZIP_ERR;
+      break;
+    }
+
+    ret = zipy_prepare_entry_conflict(destdir,
+                                      &zipy->files[i].entry,
+                                      path,
+                                      options,
+                                      &saveDir);
+    free(path);
+
+    if (ret == ZIPY_ZIP_SKIPPED) {
+      if (!*skipOut) {
+        *skipOut = calloc(zipy->fileCount, sizeof(**skipOut));
+        if (!*skipOut) {
+          result = ZIPY_ZIP_ERR;
+          break;
+        }
+      }
+      (*skipOut)[i] = 1;
+      continue;
+    }
+
+    if (ret < ZIPY_ZIP_OK) {
+      result = ret;
+      break;
+    }
+  }
+
+  free(saveDir);
+  return result;
+}
+
 ZIPY_EXPORT
 int
 zipy_extract_all(ZipyArchive *zipy, const char *destdir) {
+  return zipy_extract_all_options(zipy, destdir, NULL);
+}
+
+ZIPY_EXPORT
+int
+zipy_extract_all_options(ZipyArchive *zipy,
+                         const char *destdir,
+                         const ZipyExtractOptions *options) {
+  ZipyExtractOptions opts;
+  unsigned char *skip = NULL;
+  int ret;
+
   if (!zipy || !destdir)
     return ZIPY_ZIP_ERR;
 
-  return zipy_extract_all_parallel(zipy, destdir,
-                                  zipy_extract_default_jobs(zipy->fileCount));
+  opts = zipy_default_extract_options(options);
+  ret = zipy_prepare_extract_all(zipy, destdir, &opts, &skip);
+  if (ret >= ZIPY_ZIP_OK)
+    ret = zipy_extract_all_parallel(zipy,
+                                    destdir,
+                                    zipy_extract_default_jobs(zipy->fileCount),
+                                    skip);
+
+  free(skip);
+  return ret;
 }
 
 ZIPY_EXPORT
