@@ -47,7 +47,7 @@ find_package(ZLIB REQUIRED)
 
 include_directories(include)
 
-option(ZAP_BUILD_EXECUTABLE "Build zap command line tool" OFF)
+option(ZAP_BUILD_EXECUTABLE "Build zap command line tool" ON)
 
 add_library(${PROJECT_NAME}
         src/zip.c
