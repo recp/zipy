@@ -8,8 +8,8 @@
  *      http://www.apache.org/licenses/LICENSE-2.0
  */
 
-#ifndef zap_thread_h
-#define zap_thread_h
+#ifndef zipy_thread_h
+#define zipy_thread_h
 
 #include <stddef.h>
 
@@ -19,4 +19,4 @@
 #  include "../posix/thread.h"
 #endif
 
-#endif /* zap_thread_h */
+#endif /* zipy_thread_h */

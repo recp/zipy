@@ -1,4 +1,4 @@
-# zap - minimal ZIP archive reader
+# zipy - minimal ZIP archive reader
 
 - [x] open ZIP central directory
 - [x] extract stored entries

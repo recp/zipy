@@ -10,7 +10,7 @@
 
 #include "thread/thread.h"
 
-#include <zap/zip.h>
+#include <zipy/zip.h>
 #include <ctype.h>
 #include <errno.h>
 #include <limits.h>
@@ -22,21 +22,23 @@
 
 #if defined(_WIN32)
 #  include <io.h>
+#  include <windows.h>
 #else
+#  include <time.h>
 #  include <unistd.h>
 #endif
 
-typedef struct ZapProgress {
+typedef struct ZipyProgress {
   FILE  *out;
   size_t count;
   size_t tick;
   int    tty;
   int    color;
-} ZapProgress;
+} ZipyProgress;
 
 static void
 print_usage(void) {
-  printf("Usage: zap <zipfile> [-d extractdir]\n");
+  printf("Usage: zipy <zipfile> [-d extractdir]\n");
   printf("Options:\n");
   printf("  -d <dir>    Extract files into <dir>\n");
   printf("  -j <jobs>   Extract with jobs workers (default: cpu count)\n");
@@ -63,6 +65,35 @@ use_color(int tty) {
 
   term = getenv("TERM");
   return !term || strcmp(term, "dumb") != 0;
+}
+
+static uint64_t
+now_ms(void) {
+#if defined(_WIN32)
+  LARGE_INTEGER freq, counter;
+
+  QueryPerformanceFrequency(&freq);
+  QueryPerformanceCounter(&counter);
+  return (uint64_t)((counter.QuadPart * 1000ull) / freq.QuadPart);
+#else
+  struct timespec ts;
+
+  clock_gettime(CLOCK_MONOTONIC, &ts);
+  return (uint64_t)ts.tv_sec * 1000ull + (uint64_t)ts.tv_nsec / 1000000ull;
+#endif
+}
+
+static void
+format_duration(char *buf, size_t len, uint64_t ms) {
+  if (ms < 1000) {
+    snprintf(buf, len, "%llums", (unsigned long long)ms);
+  } else if (ms < 10000) {
+    snprintf(buf, len, "%.2fs", (double)ms / 1000.0);
+  } else if (ms < 100000) {
+    snprintf(buf, len, "%.1fs", (double)ms / 1000.0);
+  } else {
+    snprintf(buf, len, "%llus", (unsigned long long)(ms / 1000));
+  }
 }
 
 static int
@@ -94,7 +125,7 @@ default_jobs(size_t count) {
   if (count <= 1)
     return 1;
 
-  jobs = zap_cpu_count();
+  jobs = zipy_cpu_count();
   if (jobs < 1)
     jobs = 1;
   if (jobs > count)
@@ -117,7 +148,7 @@ clamp_jobs(size_t jobs, size_t count) {
 }
 
 static void
-progress_init(ZapProgress *progress, FILE *out, size_t count) {
+progress_init(ZipyProgress *progress, FILE *out, size_t count) {
   progress->out = out;
   progress->count = count;
   progress->tick = 0;
@@ -126,7 +157,7 @@ progress_init(ZapProgress *progress, FILE *out, size_t count) {
 }
 
 static void
-progress_clear(const ZapProgress *progress) {
+progress_clear(const ZipyProgress *progress) {
   if (!progress->tty)
     return;
 
@@ -156,7 +187,7 @@ progress_print_name(FILE *out, const char *name, size_t maxlen) {
 }
 
 static void
-progress_update(ZapProgress *progress, size_t current, const char *name) {
+progress_update(ZipyProgress *progress, size_t current, const char *name) {
   static const char spinner[] = "-\\|/";
   unsigned percent;
 
@@ -217,9 +248,9 @@ make_extract_path(const char *dir, const char *filename) {
 typedef struct ExtractContext {
   const char  *zipfile;
   const char  *extractdir;
-  ZapArchive  *entries;
-  ZapProgress *progress;
-  ZapMutex     lock;
+  ZipyArchive  *entries;
+  ZipyProgress *progress;
+  ZipyMutex     lock;
   size_t       count;
   size_t       next;
   size_t       done;
@@ -228,34 +259,34 @@ typedef struct ExtractContext {
 } ExtractContext;
 
 static void
-extract_one(ExtractContext *ctx, ZapArchive *zip, size_t index) {
-  const ZapEntry *entry;
+extract_one(ExtractContext *ctx, ZipyArchive *zip, size_t index) {
+  const ZipyEntry *entry;
   const char *name;
   char *destpath;
   int ret;
 
-  entry = zap_entry(ctx->entries, index);
+  entry = zipy_entry(ctx->entries, index);
   if (!entry)
     return;
 
   name = entry->name;
   destpath = make_extract_path(ctx->extractdir, name);
   if (!destpath) {
-    zap_lock(&ctx->lock);
+    zipy_lock(&ctx->lock);
     ctx->done++;
     ctx->failed = 1;
     progress_clear(ctx->progress);
     fprintf(stderr, "  Error: Failed to allocate path for '%s'\n", name);
     progress_update(ctx->progress, ctx->done, name);
-    zap_unlock(&ctx->lock);
+    zipy_unlock(&ctx->lock);
     return;
   }
 
-  ret = zap_extract(zip, index, destpath);
+  ret = zipy_extract(zip, index, destpath);
 
-  zap_lock(&ctx->lock);
+  zipy_lock(&ctx->lock);
   ctx->done++;
-  if (ret == ZAP_ZIP_OK) {
+  if (ret == ZIPY_ZIP_OK) {
     ctx->extracted++;
   } else {
     progress_clear(ctx->progress);
@@ -263,7 +294,7 @@ extract_one(ExtractContext *ctx, ZapArchive *zip, size_t index) {
     ctx->failed = 1;
   }
   progress_update(ctx->progress, ctx->done, name);
-  zap_unlock(&ctx->lock);
+  zipy_unlock(&ctx->lock);
 
   free(destpath);
 }
@@ -271,39 +302,39 @@ extract_one(ExtractContext *ctx, ZapArchive *zip, size_t index) {
 static void
 extract_worker(void *arg) {
   ExtractContext *ctx;
-  ZapArchive *zip;
+  ZipyArchive *zip;
   size_t index;
 
   ctx = arg;
-  zip = zap_open(ctx->zipfile);
+  zip = zipy_open(ctx->zipfile);
   if (!zip) {
-    zap_lock(&ctx->lock);
+    zipy_lock(&ctx->lock);
     ctx->failed = 1;
     progress_clear(ctx->progress);
     fprintf(stderr, "  Error: Cannot open ZIP file '%s'\n", ctx->zipfile);
-    zap_unlock(&ctx->lock);
+    zipy_unlock(&ctx->lock);
     return;
   }
 
   for (;;) {
-    zap_lock(&ctx->lock);
+    zipy_lock(&ctx->lock);
     if (ctx->next >= ctx->count) {
-      zap_unlock(&ctx->lock);
+      zipy_unlock(&ctx->lock);
       break;
     }
     index = ctx->next++;
-    zap_unlock(&ctx->lock);
+    zipy_unlock(&ctx->lock);
 
     extract_one(ctx, zip, index);
   }
 
-  zap_close(zip);
+  zipy_close(zip);
 }
 
 static int
-extract_serial(ZapArchive *zip,
+extract_serial(ZipyArchive *zip,
                const char *extractdir,
-               ZapProgress *progress,
+               ZipyProgress *progress,
                size_t count,
                size_t *extracted) {
   ExtractContext ctx;
@@ -314,26 +345,26 @@ extract_serial(ZapArchive *zip,
   ctx.entries = zip;
   ctx.progress = progress;
   ctx.count = count;
-  zap_mutex_init(&ctx.lock);
+  zipy_mutex_init(&ctx.lock);
 
   for (i = 0; i < count; i++)
     extract_one(&ctx, zip, i);
 
-  zap_mutex_destroy(&ctx.lock);
+  zipy_mutex_destroy(&ctx.lock);
   *extracted = ctx.extracted;
   return ctx.failed;
 }
 
 static int
 extract_parallel(const char *zipfile,
-                 ZapArchive *entries,
+                 ZipyArchive *entries,
                  const char *extractdir,
-                 ZapProgress *progress,
+                 ZipyProgress *progress,
                  size_t count,
                  size_t jobs,
                  size_t *extracted) {
   ExtractContext ctx;
-  ZapThread *threads;
+  ZipyThread *threads;
   size_t i, started;
 
   memset(&ctx, 0, sizeof(ctx));
@@ -342,32 +373,32 @@ extract_parallel(const char *zipfile,
   ctx.entries = entries;
   ctx.progress = progress;
   ctx.count = count;
-  zap_mutex_init(&ctx.lock);
+  zipy_mutex_init(&ctx.lock);
 
   threads = calloc(jobs, sizeof(*threads));
   if (!threads) {
-    zap_mutex_destroy(&ctx.lock);
+    zipy_mutex_destroy(&ctx.lock);
     return extract_serial(entries, extractdir, progress, count, extracted);
   }
 
   started = 0;
   for (i = 0; i < jobs; i++) {
-    if (zap_thread_start(&threads[i], extract_worker, &ctx) != 0)
+    if (zipy_thread_start(&threads[i], extract_worker, &ctx) != 0)
       break;
     started++;
   }
 
   if (started == 0) {
     free(threads);
-    zap_mutex_destroy(&ctx.lock);
+    zipy_mutex_destroy(&ctx.lock);
     return extract_serial(entries, extractdir, progress, count, extracted);
   }
 
   for (i = 0; i < started; i++)
-    zap_thread_join(&threads[i]);
+    zipy_thread_join(&threads[i]);
 
   free(threads);
-  zap_mutex_destroy(&ctx.lock);
+  zipy_mutex_destroy(&ctx.lock);
 
   *extracted = ctx.extracted;
   return ctx.failed;
@@ -375,7 +406,7 @@ extract_parallel(const char *zipfile,
 
 int
 main(int argc, char *argv[]) {
-  ZapArchive *zip;
+  ZipyArchive *zip;
   const char *zipfile = NULL;
   const char *extractdir = ".";  /* Default to current directory */
   size_t i;
@@ -384,7 +415,9 @@ main(int argc, char *argv[]) {
   int summaryTty;
   size_t jobs = 0;
   size_t count = 0, extracted = 0;
-  ZapProgress progress;
+  uint64_t startMs, elapsedMs;
+  char elapsed[32];
+  ZipyProgress progress;
   
   /* Parse command line arguments */
   for (i = 1; i < argc; i++) {
@@ -409,7 +442,7 @@ main(int argc, char *argv[]) {
   }
   
   /* Open ZIP file */
-  zip = zap_open(zipfile);
+  zip = zipy_open(zipfile);
   if (!zip) {
     fprintf(stderr, "Error: Cannot open ZIP file '%s'\n", zipfile);
     return 1;
@@ -419,46 +452,54 @@ main(int argc, char *argv[]) {
   summaryColor = use_color(summaryTty);
 
   /* Extract all files */
-  count = zap_count(zip);
+  count = zipy_count(zip);
   jobs = clamp_jobs(jobs, count);
   progress_init(&progress, stderr, count);
+  startMs = now_ms();
   if (jobs > 1)
     success = extract_parallel(zipfile, zip, extractdir, &progress, count, jobs, &extracted);
   else
     success = extract_serial(zip, extractdir, &progress, count, &extracted);
 
+  elapsedMs = now_ms() - startMs;
+  format_duration(elapsed, sizeof(elapsed), elapsedMs);
   progress_clear(&progress);
   if (success) {
     if (summaryColor)
-      printf("  \033[31mextracted %zu/%zu %s to \033[35m%s\033[0m\n",
+      printf("  \033[31mextracted %zu/%zu %s to \033[35m%s\033[0m \033[2min %s\033[0m\n",
              extracted,
              count,
              count == 1 ? "file" : "files",
-             extractdir);
+             extractdir,
+             elapsed);
     else
-      printf("  extracted %zu/%zu %s to %s\n",
+      printf("  extracted %zu/%zu %s to %s in %s\n",
              extracted,
              count,
              count == 1 ? "file" : "files",
-             extractdir);
+             extractdir,
+             elapsed);
   } else {
     if (summaryColor)
-      printf("  \033[33m⚡\033[0m extracted %zu %s to \033[35m%s\033[0m\n",
+      printf("  \033[33m⚡\033[0m extracted %zu %s to \033[35m%s\033[0m \033[2min %s\033[0m\n",
              extracted,
              extracted == 1 ? "file" : "files",
-             extractdir);
+             extractdir,
+             elapsed);
     else if (summaryTty)
-      printf("  ⚡ extracted %zu %s to %s\n",
+      printf("  ⚡ extracted %zu %s to %s in %s\n",
              extracted,
              extracted == 1 ? "file" : "files",
-             extractdir);
+             extractdir,
+             elapsed);
     else
-      printf("  extracted %zu %s to %s\n",
+      printf("  extracted %zu %s to %s in %s\n",
              extracted,
              extracted == 1 ? "file" : "files",
-             extractdir);
+             extractdir,
+             elapsed);
   }
   
-  zap_close(zip);
+  zipy_close(zip);
   return success;
 }

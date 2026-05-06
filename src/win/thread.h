@@ -8,39 +8,39 @@
  *      http://www.apache.org/licenses/LICENSE-2.0
  */
 
-#ifndef zap_win_thread_h
-#define zap_win_thread_h
+#ifndef zipy_win_thread_h
+#define zipy_win_thread_h
 
 #include <stddef.h>
 #include <windows.h>
 
-typedef struct ZapThread {
+typedef struct ZipyThread {
   HANDLE id;
-} ZapThread;
+} ZipyThread;
 
-typedef struct ZapMutex {
+typedef struct ZipyMutex {
   CRITICAL_SECTION mutex;
-} ZapMutex;
+} ZipyMutex;
 
 int
-zap_thread_start(ZapThread *thread, void (*func)(void *), void *arg);
+zipy_thread_start(ZipyThread *thread, void (*func)(void *), void *arg);
 
 void
-zap_thread_join(ZapThread *thread);
+zipy_thread_join(ZipyThread *thread);
 
 void
-zap_mutex_init(ZapMutex *mutex);
+zipy_mutex_init(ZipyMutex *mutex);
 
 void
-zap_mutex_destroy(ZapMutex *mutex);
+zipy_mutex_destroy(ZipyMutex *mutex);
 
 void
-zap_lock(ZapMutex *mutex);
+zipy_lock(ZipyMutex *mutex);
 
 void
-zap_unlock(ZapMutex *mutex);
+zipy_unlock(ZipyMutex *mutex);
 
 size_t
-zap_cpu_count(void);
+zipy_cpu_count(void);
 
-#endif /* zap_win_thread_h */
+#endif /* zipy_win_thread_h */

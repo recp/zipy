@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.13)
-project(zap
+project(zipy
   VERSION 0.1.0
-  HOMEPAGE_URL https://github.com/recp/zap
+  HOMEPAGE_URL https://github.com/recp/zipy
   DESCRIPTION "minimal ZIP archive library"
   LANGUAGES C
 )
@@ -45,7 +45,7 @@ endif()
 
 include_directories(include)
 
-option(ZAP_BUILD_EXECUTABLE "Build zap command line tool" ON)
+option(ZIPY_BUILD_EXECUTABLE "Build zipy command line tool" ON)
 
 if(NOT EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/deps/defl/include/defl/infl.h"
    OR NOT EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/deps/huff/include/huff/huff.h")
@@ -53,15 +53,15 @@ if(NOT EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/deps/defl/include/defl/infl.h"
 endif()
 
 if(WIN32)
-    set(ZAP_THREAD_SOURCE src/win/thread.c)
+    set(ZIPY_THREAD_SOURCE src/win/thread.c)
 else()
-    set(ZAP_THREAD_SOURCE src/posix/thread.c)
+    set(ZIPY_THREAD_SOURCE src/posix/thread.c)
     find_package(Threads REQUIRED)
 endif()
 
 add_library(${PROJECT_NAME}
         src/zip.c
-        ${ZAP_THREAD_SOURCE}
+        ${ZIPY_THREAD_SOURCE}
         deps/defl/src/infl/infl.c
         deps/defl/src/infl/mem.c
 )
@@ -76,7 +76,7 @@ if(WIN32)
     RUNTIME_OUTPUT_NAME ${PROJECT_NAME}-${PROJECT_VERSION_MAJOR})
 endif()
 
-target_include_directories(zap
+target_include_directories(zipy
     PUBLIC
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
         $<INSTALL_INTERFACE:include>
@@ -86,51 +86,53 @@ target_include_directories(zap
         ${CMAKE_CURRENT_SOURCE_DIR}/deps/huff/include
 )
 
-target_compile_definitions(zap
+target_compile_definitions(zipy
     PRIVATE
+        ZIPY_STATIC=1
+        ZIPY_EXPORTS=1
         UNZ_STATIC=1
         UNZ_EXPORTS=1
 )
 
 if(NOT WIN32)
-    target_link_libraries(zap
+    target_link_libraries(zipy
         PUBLIC
             Threads::Threads
     )
 endif()
 
 # Executable target
-if(ZAP_BUILD_EXECUTABLE)
-    add_executable(zap-bin
+if(ZIPY_BUILD_EXECUTABLE)
+    add_executable(zipy-bin
         src/main.c
     )
     
-    set_target_properties(zap-bin 
+    set_target_properties(zipy-bin
         PROPERTIES 
-        OUTPUT_NAME "zap"
+        OUTPUT_NAME "zipy"
     )
     
-    target_link_libraries(zap-bin
+    target_link_libraries(zipy-bin
         PRIVATE
-            zap
+            zipy
     )
 
-    target_include_directories(zap-bin
+    target_include_directories(zipy-bin
         PRIVATE
             ${CMAKE_CURRENT_SOURCE_DIR}/src
     )
 
 endif()
 
-install(TARGETS zap
-        EXPORT zapTargets
+install(TARGETS zipy
+        EXPORT zipyTargets
         LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
         ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
         RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
         INCLUDES DESTINATION ${CMAKE_INSTALL_INCLUDEDIR})
 
-if(ZAP_BUILD_EXECUTABLE)
-    install(TARGETS zap-bin
+if(ZIPY_BUILD_EXECUTABLE)
+    install(TARGETS zipy-bin
             RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
     )
 endif()
@@ -139,22 +141,22 @@ install(DIRECTORY include/
         DESTINATION ${CMAKE_INSTALL_INCLUDEDIR})
 
 # Package config
-install(EXPORT zapTargets
-        FILE zapTargets.cmake
-        NAMESPACE zap::
-        DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/zap
+install(EXPORT zipyTargets
+        FILE zipyTargets.cmake
+        NAMESPACE zipy::
+        DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/zipy
 )
 
 include(CMakePackageConfigHelpers)
 write_basic_package_version_file(
-    "zapConfigVersion.cmake"
+    "zipyConfigVersion.cmake"
     VERSION ${PROJECT_VERSION}
     COMPATIBILITY SameMajorVersion
 )
 
 install(FILES
-        "${CMAKE_CURRENT_BINARY_DIR}/zapConfigVersion.cmake"
-        DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/zap
+        "${CMAKE_CURRENT_BINARY_DIR}/zipyConfigVersion.cmake"
+        DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/zipy
 )
 
 set(CPACK_PROJECT_NAME ${PROJECT_NAME})

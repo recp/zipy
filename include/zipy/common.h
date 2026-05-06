@@ -14,8 +14,8 @@
  * limitations under the License.
  */
 
-#ifndef zap_common_h
-#define zap_common_h
+#ifndef zipy_common_h
+#define zipy_common_h
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -46,53 +46,53 @@ extern "C" {
 #endif
 
 #if defined(_MSC_VER) || defined(__MINGW32__) || defined(__MINGW64__)
-#  define ZAP_WINAPI
+#  define ZIPY_WINAPI
 #  pragma warning (disable : 4068) /* disable unknown pragma warnings */
 #endif
 
 #if defined(_MSC_VER) || defined(__MINGW32__) || defined(__MINGW64__)
-#  ifdef ZAP_STATIC
-#    define ZAP_EXPORT
-#  elif defined(ZAP_EXPORTS)
-#    define ZAP_EXPORT __declspec(dllexport)
+#  ifdef ZIPY_STATIC
+#    define ZIPY_EXPORT
+#  elif defined(ZIPY_EXPORTS)
+#    define ZIPY_EXPORT __declspec(dllexport)
 #  else
-#    define ZAP_EXPORT __declspec(dllimport)
+#    define ZIPY_EXPORT __declspec(dllimport)
 #  endif
-#  define ZAP_HIDE
+#  define ZIPY_HIDE
 #else
-#  define ZAP_EXPORT   __attribute__((visibility("default")))
-#  define ZAP_HIDE     __attribute__((visibility("hidden")))
+#  define ZIPY_EXPORT   __attribute__((visibility("default")))
+#  define ZIPY_HIDE     __attribute__((visibility("hidden")))
 #endif
 
 #if defined(_MSC_VER)
-#  define ZAP_INLINE      __forceinline
-#  define ZAP_ALIGN(X)    __declspec(align(X))
-#  define ZAP_HOT
-#  define ZAP_HOT_INLINE  __forceinline
+#  define ZIPY_INLINE      __forceinline
+#  define ZIPY_ALIGN(X)    __declspec(align(X))
+#  define ZIPY_HOT
+#  define ZIPY_HOT_INLINE  __forceinline
 #else
-#  define ZAP_INLINE      static inline __attribute__((always_inline))
-#  define ZAP_ALIGN(X)    __attribute__((aligned(X)))
-#  define ZAP_HOT         __attribute__((hot))
-#  define ZAP_HOT_INLINE  static inline __attribute__((hot, always_inline))
+#  define ZIPY_INLINE      static inline __attribute__((always_inline))
+#  define ZIPY_ALIGN(X)    __attribute__((aligned(X)))
+#  define ZIPY_HOT         __attribute__((hot))
+#  define ZIPY_HOT_INLINE  static inline __attribute__((hot, always_inline))
 #endif
 
 #ifndef __has_builtin
 #  define __has_builtin(x) 0
 #endif
 
-typedef enum ZapResult {
-  ZAP_UNFINISHED =  2,       /* need more data for streaming */
-  ZAP_NOOP       =  1,       /* no operation needed */
-  ZAP_OK         =  0,
-  ZAP_ERR        = -1,       /* UKNOWN ERR */
-  ZAP_EFOUND     = -1000,
-  ZAP_ENOMEM     = -ENOMEM,
-  ZAP_EPERM      = -EPERM,
-  ZAP_EBADF      = -EBADF,   /* file couldn't parsed / loaded */
-  ZAP_EFULL      = -ENOBUFS  /* no space ENOBUFS vs ENOSPC    */
-} ZapResult;
+typedef enum ZipyResult {
+  ZIPY_UNFINISHED =  2,       /* need more data for streaming */
+  ZIPY_NOOP       =  1,       /* no operation needed */
+  ZIPY_OK         =  0,
+  ZIPY_ERR        = -1,       /* UKNOWN ERR */
+  ZIPY_EFOUND     = -1000,
+  ZIPY_ENOMEM     = -ENOMEM,
+  ZIPY_EPERM      = -EPERM,
+  ZIPY_EBADF      = -EBADF,   /* file couldn't parsed / loaded */
+  ZIPY_EFULL      = -ENOBUFS  /* no space ENOBUFS vs ENOSPC    */
+} ZipyResult;
 
 #ifdef __cplusplus
 }
 #endif
-#endif /* zap_common_h */
+#endif /* zipy_common_h */

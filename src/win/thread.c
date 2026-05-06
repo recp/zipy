@@ -13,14 +13,14 @@
 #include <stdlib.h>
 #include <string.h>
 
-typedef struct ZapThreadEntry {
+typedef struct ZipyThreadEntry {
   void (*func)(void *);
   void *arg;
-} ZapThreadEntry;
+} ZipyThreadEntry;
 
 static DWORD WINAPI
-zap_thread_entry(void *arg) {
-  ZapThreadEntry entry;
+zipy_thread_entry(void *arg) {
+  ZipyThreadEntry entry;
 
   memcpy(&entry, arg, sizeof(entry));
   free(arg);
@@ -30,8 +30,8 @@ zap_thread_entry(void *arg) {
 }
 
 int
-zap_thread_start(ZapThread *thread, void (*func)(void *), void *arg) {
-  ZapThreadEntry *entry;
+zipy_thread_start(ZipyThread *thread, void (*func)(void *), void *arg) {
+  ZipyThreadEntry *entry;
 
   entry = calloc(1, sizeof(*entry));
   if (!entry)
@@ -40,7 +40,7 @@ zap_thread_start(ZapThread *thread, void (*func)(void *), void *arg) {
   entry->func = func;
   entry->arg = arg;
 
-  thread->id = CreateThread(NULL, 0, zap_thread_entry, entry, 0, NULL);
+  thread->id = CreateThread(NULL, 0, zipy_thread_entry, entry, 0, NULL);
   if (!thread->id) {
     free(entry);
     return -1;
@@ -50,33 +50,33 @@ zap_thread_start(ZapThread *thread, void (*func)(void *), void *arg) {
 }
 
 void
-zap_thread_join(ZapThread *thread) {
+zipy_thread_join(ZipyThread *thread) {
   WaitForSingleObject(thread->id, INFINITE);
   CloseHandle(thread->id);
 }
 
 void
-zap_mutex_init(ZapMutex *mutex) {
+zipy_mutex_init(ZipyMutex *mutex) {
   InitializeCriticalSection(&mutex->mutex);
 }
 
 void
-zap_mutex_destroy(ZapMutex *mutex) {
+zipy_mutex_destroy(ZipyMutex *mutex) {
   DeleteCriticalSection(&mutex->mutex);
 }
 
 void
-zap_lock(ZapMutex *mutex) {
+zipy_lock(ZipyMutex *mutex) {
   EnterCriticalSection(&mutex->mutex);
 }
 
 void
-zap_unlock(ZapMutex *mutex) {
+zipy_unlock(ZipyMutex *mutex) {
   LeaveCriticalSection(&mutex->mutex);
 }
 
 size_t
-zap_cpu_count(void) {
+zipy_cpu_count(void) {
   SYSTEM_INFO info;
 
   GetSystemInfo(&info);

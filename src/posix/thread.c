@@ -14,14 +14,14 @@
 #include <string.h>
 #include <unistd.h>
 
-typedef struct ZapThreadEntry {
+typedef struct ZipyThreadEntry {
   void (*func)(void *);
   void *arg;
-} ZapThreadEntry;
+} ZipyThreadEntry;
 
 static void *
-zap_thread_entry(void *arg) {
-  ZapThreadEntry entry;
+zipy_thread_entry(void *arg) {
+  ZipyThreadEntry entry;
 
   memcpy(&entry, arg, sizeof(entry));
   free(arg);
@@ -31,8 +31,8 @@ zap_thread_entry(void *arg) {
 }
 
 int
-zap_thread_start(ZapThread *thread, void (*func)(void *), void *arg) {
-  ZapThreadEntry *entry;
+zipy_thread_start(ZipyThread *thread, void (*func)(void *), void *arg) {
+  ZipyThreadEntry *entry;
 
   entry = calloc(1, sizeof(*entry));
   if (!entry)
@@ -41,7 +41,7 @@ zap_thread_start(ZapThread *thread, void (*func)(void *), void *arg) {
   entry->func = func;
   entry->arg = arg;
 
-  if (pthread_create(&thread->id, NULL, zap_thread_entry, entry) != 0) {
+  if (pthread_create(&thread->id, NULL, zipy_thread_entry, entry) != 0) {
     free(entry);
     return -1;
   }
@@ -50,32 +50,32 @@ zap_thread_start(ZapThread *thread, void (*func)(void *), void *arg) {
 }
 
 void
-zap_thread_join(ZapThread *thread) {
+zipy_thread_join(ZipyThread *thread) {
   pthread_join(thread->id, NULL);
 }
 
 void
-zap_mutex_init(ZapMutex *mutex) {
+zipy_mutex_init(ZipyMutex *mutex) {
   pthread_mutex_init(&mutex->mutex, NULL);
 }
 
 void
-zap_mutex_destroy(ZapMutex *mutex) {
+zipy_mutex_destroy(ZipyMutex *mutex) {
   pthread_mutex_destroy(&mutex->mutex);
 }
 
 void
-zap_lock(ZapMutex *mutex) {
+zipy_lock(ZipyMutex *mutex) {
   pthread_mutex_lock(&mutex->mutex);
 }
 
 void
-zap_unlock(ZapMutex *mutex) {
+zipy_unlock(ZipyMutex *mutex) {
   pthread_mutex_unlock(&mutex->mutex);
 }
 
 size_t
-zap_cpu_count(void) {
+zipy_cpu_count(void) {
   long n;
 
   n = sysconf(_SC_NPROCESSORS_ONLN);
