@@ -13,61 +13,50 @@
 
 #include "common.h"
 #include <stdbool.h>
-#include <stdio.h>
 
-/* ZIP signatures */
-#define ZIP_SIGN_LOCAL_FILE    0x04034B50
-#define ZIP_SIGN_CENTRAL_DIR   0x02014B50
-#define ZIP_SIGN_END_CENTRAL   0x06054B50
-#define ZIP_SIGN_DATA_DESC     0x08074B50
+typedef struct ZapArchive ZapArchive;
 
-/* ZIP64 signatures */
-#define ZIP_SIGN_ZIP64_END     0x06064B50
-#define ZIP_SIGN_ZIP64_LOCATOR 0x07064B50
+typedef enum ZapZipResult {
+  ZAP_ZIP_OK       =  0,
+  ZAP_ZIP_ERR      = -1,
+  ZAP_ZIP_EINFLATE = -2,
+  ZAP_ZIP_ESIZE    = -3,
+  ZAP_ZIP_ECRC     = -4,
+  ZAP_ZIP_EFILE    = -5,
+  ZAP_ZIP_EUNSUP   = -6
+} ZapZipResult;
 
-/* ZIP64 magic values that indicate ZIP64 fields are used */
-#define ZIP64_MAGIC_UINT16     0xFFFF
-#define ZIP64_MAGIC_UINT32     0xFFFFFFFF
+typedef enum ZapZipMethod {
+  ZAP_ZIP_STORE   = 0,
+  ZAP_ZIP_DEFLATE = 8
+} ZapZipMethod;
 
-/* Compression methods */
-#define ZIP_METHOD_STORE        0
-#define ZIP_METHOD_DEFLATE      8
+typedef struct ZapEntry {
+  const char *name;
+  uint64_t    compressedSize;
+  uint64_t    uncompressedSize;
+  uint32_t    crc32;
+  uint16_t    method;
+  bool        isDirectory;
+} ZapEntry;
 
-/* Error codes */
-#define ZIP_OK            0
-#define ZIP_ERR_GENERAL  -1
-#define ZIP_ERR_INFLATE  -2
-#define ZIP_ERR_SIZE     -3
-#define ZIP_ERR_CRC      -4
-#define ZIP_ERR_FILE     -5
-#define ZIP_ERR_UNSUP    -6
-
-typedef struct ZapFileInfo {
-  char    *filename;
-  uint64_t compressedSize;
-  uint64_t uncompressedSize;
-  uint64_t localHeaderOffset;
-  uint16_t method;
-  uint16_t flags;
-  uint32_t crc32;
-  uint32_t externalAttr;
-  bool     isDirectory;
-} ZapFileInfo;
-
-typedef struct ZapArchive {
-  FILE        *fp;
-  ZapFileInfo *files;
-  size_t       fileCount;
-  uint64_t     fileSize;
-} ZapArchive;
-
-ZAP_EXPORT ZapArchive*
+ZAP_EXPORT ZapArchive *
 zap_open(const char *path);
 
+ZAP_EXPORT size_t
+zap_count(const ZapArchive *zap);
+
+ZAP_EXPORT const ZapEntry *
+zap_entry(const ZapArchive *zap, size_t index);
+
 ZAP_EXPORT int
-zap_extract_file(ZapArchive *zap, 
-                 const char *filename,
-                 const char *destpath);
+zap_extract(ZapArchive *zap, size_t index, const char *destpath);
+
+ZAP_EXPORT int
+zap_extract_named(ZapArchive *zap, const char *name, const char *destpath);
+
+ZAP_EXPORT int
+zap_extract_all(ZapArchive *zap, const char *destdir);
 
 ZAP_EXPORT void
 zap_close(ZapArchive *zap);

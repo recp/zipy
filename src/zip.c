@@ -18,6 +18,7 @@
 #include <errno.h>
 #include <limits.h>
 #include <stdint.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -29,16 +30,40 @@
 #  include <sys/types.h>
 #endif
 
+#define ZIP_SIGN_LOCAL_FILE    0x04034B50u
+#define ZIP_SIGN_CENTRAL_DIR   0x02014B50u
+#define ZIP_SIGN_END_CENTRAL   0x06054B50u
+#define ZIP_SIGN_ZIP64_END     0x06064B50u
+#define ZIP_SIGN_ZIP64_LOCATOR 0x07064B50u
+
+#define ZIP64_MAGIC_UINT16     0xFFFFu
+#define ZIP64_MAGIC_UINT32     0xFFFFFFFFu
+
 #define ZIP_LOCAL_FIXED       30u
 #define ZIP_CENTRAL_FIXED     46u
 #define ZIP_EOCD_FIXED        22u
 #define ZIP64_EOCD_FIXED      56u
 #define ZIP64_LOCATOR_FIXED   20u
 #define ZIP_MAX_EOCD_SEARCH   (ZIP_EOCD_FIXED + 65535u)
+#define ZIP_IO_CHUNK          (256u * 1024u)
 
 #define ZIP_EXTRA_ZIP64       0x0001u
 #define ZIP_FLAG_ENCRYPTED    0x0001u
 #define ZIP_FLAG_STRONG_ENC   0x0040u
+
+typedef struct ZapFile {
+  ZapEntry entry;
+  uint64_t localHeaderOffset;
+  uint16_t flags;
+  uint32_t externalAttr;
+} ZapFile;
+
+struct ZapArchive {
+  FILE    *fp;
+  ZapFile *files;
+  size_t   fileCount;
+  uint64_t fileSize;
+};
 
 typedef struct ZapDirInfo {
   uint64_t fileSize;
@@ -130,11 +155,6 @@ zap_u64_to_size(uint64_t value, size_t *out) {
 
   *out = (size_t)value;
   return 1;
-}
-
-static void *
-zap_alloc_size(size_t size) {
-  return malloc(size ? size : 1);
 }
 
 static char *
@@ -273,7 +293,7 @@ next:
 }
 
 static int
-zap_parse_zip64_extra(ZapFileInfo *info,
+zap_parse_zip64_extra(ZapFile *info,
                       const uint8_t *extra,
                       size_t len,
                       uint32_t comp32,
@@ -298,7 +318,7 @@ zap_parse_zip64_extra(ZapFileInfo *info,
       if (uncomp32 == ZIP64_MAGIC_UINT32) {
         if (rem < 8)
           return 0;
-        info->uncompressedSize = zap_le64(p);
+        info->entry.uncompressedSize = zap_le64(p);
         p += 8;
         rem -= 8;
       }
@@ -306,7 +326,7 @@ zap_parse_zip64_extra(ZapFileInfo *info,
       if (comp32 == ZIP64_MAGIC_UINT32) {
         if (rem < 8)
           return 0;
-        info->compressedSize = zap_le64(p);
+        info->entry.compressedSize = zap_le64(p);
         p += 8;
         rem -= 8;
       }
@@ -332,9 +352,9 @@ zap_parse_zip64_extra(ZapFileInfo *info,
   return pos == len
       && disk == 0
       && (comp32 != ZIP64_MAGIC_UINT32
-          || info->compressedSize != ZIP64_MAGIC_UINT32)
+          || info->entry.compressedSize != ZIP64_MAGIC_UINT32)
       && (uncomp32 != ZIP64_MAGIC_UINT32
-          || info->uncompressedSize != ZIP64_MAGIC_UINT32)
+          || info->entry.uncompressedSize != ZIP64_MAGIC_UINT32)
       && (offset32 != ZIP64_MAGIC_UINT32
           || info->localHeaderOffset != ZIP64_MAGIC_UINT32);
 }
@@ -485,64 +505,12 @@ zap_mkdir_parent(const char *path) {
   return ok;
 }
 
-static uint32_t
-zap_crc32(const uint8_t *buf, size_t len) {
-  static uint32_t table[256];
-  static bool init;
-  uint32_t crc = 0xFFFFFFFFu;
-  size_t i;
-
-  if (!init) {
-    uint32_t n;
-    for (n = 0; n < 256; n++) {
-      uint32_t c = n;
-      int k;
-      for (k = 0; k < 8; k++)
-        c = (c & 1) ? (0xEDB88320u ^ (c >> 1)) : (c >> 1);
-      table[n] = c;
-    }
-    init = true;
-  }
-
-  for (i = 0; i < len; i++)
-    crc = table[(crc ^ buf[i]) & 0xFFu] ^ (crc >> 8);
-
-  return crc ^ 0xFFFFFFFFu;
-}
-
-static int
-zap_inflate_raw(const uint8_t *src, size_t srcLen, uint8_t *dst, size_t dstLen) {
-  z_stream strm;
-  int ret, ok;
-
-  if (srcLen > UINT_MAX || dstLen > UINT_MAX)
-    return -1;
-
-  memset(&strm, 0, sizeof(strm));
-  strm.next_in = (Bytef *)src;
-  strm.avail_in = (uInt)srcLen;
-  strm.next_out = dst;
-  strm.avail_out = (uInt)dstLen;
-
-  ret = inflateInit2(&strm, -MAX_WBITS);
-  if (ret != Z_OK)
-    return -1;
-
-  ret = inflate(&strm, Z_FINISH);
-  ok = ret == Z_STREAM_END
-    && strm.total_in == srcLen
-    && strm.total_out == dstLen;
-
-  inflateEnd(&strm);
-  return ok ? 0 : -1;
-}
-
-static ZapFileInfo *
+static ZapFile *
 zap_find_file(ZapArchive *zap, const char *filename) {
   size_t i;
 
   for (i = 0; i < zap->fileCount; i++) {
-    if (strcmp(zap->files[i].filename, filename) == 0)
+    if (strcmp(zap->files[i].entry.name, filename) == 0)
       return &zap->files[i];
   }
 
@@ -557,10 +525,178 @@ zap_free_files(ZapArchive *zap) {
     return;
 
   for (i = 0; i < zap->fileCount; i++)
-    free(zap->files[i].filename);
+    free((char *)zap->files[i].entry.name);
 
   free(zap->files);
   zap->files = NULL;
+}
+
+static size_t
+zap_chunk_size(uint64_t remaining) {
+  return remaining > ZIP_IO_CHUNK ? ZIP_IO_CHUNK : (size_t)remaining;
+}
+
+static int
+zap_write_chunk(FILE *out,
+                const uint8_t *buf,
+                size_t len,
+                uLong *crc,
+                uint64_t *written) {
+  if (len == 0)
+    return ZAP_ZIP_OK;
+
+  if (fwrite(buf, 1, len, out) != len)
+    return ZAP_ZIP_EFILE;
+
+  *crc = crc32(*crc, buf, (uInt)len);
+  *written += len;
+  return ZAP_ZIP_OK;
+}
+
+static int
+zap_copy_store(FILE *fp, FILE *out, uint64_t len, uint32_t expectedCrc) {
+  uint8_t *buf;
+  uint64_t remaining = len, written = 0;
+  uLong crc;
+  int ret = ZAP_ZIP_OK;
+
+  buf = malloc(ZIP_IO_CHUNK);
+  if (!buf)
+    return ZAP_ZIP_ERR;
+
+  crc = crc32(0L, Z_NULL, 0);
+  while (remaining > 0) {
+    size_t n = zap_chunk_size(remaining);
+
+    if (fread(buf, 1, n, fp) != n) {
+      ret = ZAP_ZIP_EFILE;
+      goto done;
+    }
+
+    ret = zap_write_chunk(out, buf, n, &crc, &written);
+    if (ret != ZAP_ZIP_OK)
+      goto done;
+
+    remaining -= n;
+  }
+
+  if (written != len)
+    ret = ZAP_ZIP_ESIZE;
+  else if ((uint32_t)crc != expectedCrc)
+    ret = ZAP_ZIP_ECRC;
+
+done:
+  free(buf);
+  return ret;
+}
+
+static int
+zap_inflate_raw(FILE *fp,
+                FILE *out,
+                uint64_t compressedSize,
+                uint64_t uncompressedSize,
+                uint32_t expectedCrc) {
+  uint8_t *inbuf = NULL, *outbuf = NULL;
+  uint64_t remaining = compressedSize, written = 0;
+  z_stream strm;
+  uLong crc;
+  int ret, zret;
+
+  inbuf = malloc(ZIP_IO_CHUNK);
+  outbuf = malloc(ZIP_IO_CHUNK);
+  if (!inbuf || !outbuf) {
+    ret = ZAP_ZIP_ERR;
+    goto done;
+  }
+
+  memset(&strm, 0, sizeof(strm));
+  zret = inflateInit2(&strm, -MAX_WBITS);
+  if (zret != Z_OK) {
+    ret = ZAP_ZIP_EINFLATE;
+    goto done;
+  }
+
+  crc = crc32(0L, Z_NULL, 0);
+  ret = ZAP_ZIP_OK;
+  zret = Z_OK;
+
+  while (remaining > 0 && zret != Z_STREAM_END) {
+    size_t n = zap_chunk_size(remaining);
+
+    if (fread(inbuf, 1, n, fp) != n) {
+      ret = ZAP_ZIP_EFILE;
+      goto inflate_done;
+    }
+
+    remaining -= n;
+    strm.next_in = inbuf;
+    strm.avail_in = (uInt)n;
+
+    do {
+      size_t produced;
+
+      strm.next_out = outbuf;
+      strm.avail_out = ZIP_IO_CHUNK;
+
+      zret = inflate(&strm, Z_NO_FLUSH);
+      if (zret != Z_OK && zret != Z_STREAM_END) {
+        ret = ZAP_ZIP_EINFLATE;
+        goto inflate_done;
+      }
+
+      produced = ZIP_IO_CHUNK - strm.avail_out;
+      if (produced > 0) {
+        if (written + produced > uncompressedSize) {
+          ret = ZAP_ZIP_ESIZE;
+          goto inflate_done;
+        }
+
+        ret = zap_write_chunk(out, outbuf, produced, &crc, &written);
+        if (ret != ZAP_ZIP_OK)
+          goto inflate_done;
+      }
+    } while (strm.avail_in > 0 || (zret == Z_OK && strm.avail_out == 0));
+  }
+
+  if (zret != Z_STREAM_END || remaining != 0 || strm.avail_in != 0)
+    ret = ZAP_ZIP_EINFLATE;
+  else if (written != uncompressedSize)
+    ret = ZAP_ZIP_ESIZE;
+  else if ((uint32_t)crc != expectedCrc)
+    ret = ZAP_ZIP_ECRC;
+
+inflate_done:
+  inflateEnd(&strm);
+
+done:
+  free(outbuf);
+  free(inbuf);
+  return ret;
+}
+
+static char *
+zap_extract_path(const char *dir, const char *name) {
+  size_t dirLen, nameLen, i;
+  char *path;
+
+  if (!dir || !name)
+    return NULL;
+
+  dirLen = strlen(dir);
+  nameLen = strlen(name);
+  path = malloc(dirLen + nameLen + 2);
+  if (!path)
+    return NULL;
+
+  memcpy(path, dir, dirLen);
+  if (dirLen > 0 && !zap_is_fs_sep(dir[dirLen - 1]))
+    path[dirLen++] = '/';
+
+  for (i = 0; i < nameLen; i++)
+    path[dirLen + i] = zap_is_zip_sep(name[i]) ? '/' : name[i];
+  path[dirLen + nameLen] = '\0';
+
+  return path;
 }
 
 ZAP_EXPORT
@@ -600,7 +736,7 @@ zap_open(const char *path) {
   for (i = 0; i < count; i++) {
     uint8_t hdr[ZIP_CENTRAL_FIXED];
     uint8_t *name = NULL, *extra = NULL;
-    ZapFileInfo *info = &zap->files[i];
+    ZapFile *info = &zap->files[i];
     uint16_t nameLen, extraLen, commentLen, diskStart;
     uint32_t comp32, uncomp32, offset32;
 
@@ -608,8 +744,8 @@ zap_open(const char *path) {
       goto err;
 
     info->flags = zap_le16(hdr + 8);
-    info->method = zap_le16(hdr + 10);
-    info->crc32 = zap_le32(hdr + 16);
+    info->entry.method = zap_le16(hdr + 10);
+    info->entry.crc32 = zap_le32(hdr + 16);
     comp32 = zap_le32(hdr + 20);
     uncomp32 = zap_le32(hdr + 24);
     nameLen = zap_le16(hdr + 28);
@@ -627,16 +763,16 @@ zap_open(const char *path) {
     if (!name || !zap_read(fp, name, nameLen))
       goto err;
 
-    info->filename = zap_strndup(name, nameLen);
+    info->entry.name = zap_strndup(name, nameLen);
     free(name);
     name = NULL;
-    if (!info->filename)
+    if (!info->entry.name)
       goto err;
 
-    info->compressedSize = comp32;
-    info->uncompressedSize = uncomp32;
+    info->entry.compressedSize = comp32;
+    info->entry.uncompressedSize = uncomp32;
     info->localHeaderOffset = offset32;
-    info->isDirectory = zap_is_dir_name(info->filename);
+    info->entry.isDirectory = zap_is_dir_name(info->entry.name);
 
     if (extraLen > 0) {
       extra = malloc(extraLen);
@@ -655,7 +791,7 @@ zap_open(const char *path) {
     }
 
     if (info->localHeaderOffset >= dir.centralDirOffset
-        || info->compressedSize > zap->fileSize
+        || info->entry.compressedSize > zap->fileSize
         || UINT64_MAX - info->localHeaderOffset < ZIP_LOCAL_FIXED)
       goto err;
 
@@ -674,126 +810,146 @@ err:
   return NULL;
 }
 
-ZAP_EXPORT
-int
-zap_extract_file(ZapArchive *zap, const char *filename, const char *destpath) {
-  ZapFileInfo *info;
+static int
+zap_extract_entry(ZapArchive *zap, ZapFile *info, const char *destpath) {
   uint8_t local[ZIP_LOCAL_FIXED];
-  uint8_t *inbuf = NULL, *outbuf = NULL;
-  const uint8_t *writebuf;
   uint16_t flags, method, nameLen, extraLen;
   uint64_t dataOffset;
-  size_t inSize, outSize;
   FILE *outfp;
-  int ret = ZIP_ERR_GENERAL;
+  int ret = ZAP_ZIP_ERR;
 
-  if (!zap || !zap->fp || !filename || !destpath)
-    return ZIP_ERR_GENERAL;
+  if (!zap || !zap->fp || !info || !destpath)
+    return ZAP_ZIP_ERR;
 
-  info = zap_find_file(zap, filename);
-  if (!info)
-    return ZIP_ERR_FILE;
-
-  if (!zap_is_safe_member_name(info->filename))
-    return ZIP_ERR_FILE;
+  if (!zap_is_safe_member_name(info->entry.name))
+    return ZAP_ZIP_EFILE;
 
   if (info->flags & (ZIP_FLAG_ENCRYPTED | ZIP_FLAG_STRONG_ENC))
-    return ZIP_ERR_UNSUP;
+    return ZAP_ZIP_EUNSUP;
 
-  if (info->isDirectory)
-    return zap_mkdirs(destpath) ? ZIP_OK : ZIP_ERR_FILE;
+  if (info->entry.isDirectory)
+    return zap_mkdirs(destpath) ? ZAP_ZIP_OK : ZAP_ZIP_EFILE;
 
-  if (info->method != ZIP_METHOD_STORE && info->method != ZIP_METHOD_DEFLATE)
-    return ZIP_ERR_UNSUP;
-
-  if (!zap_u64_to_size(info->compressedSize, &inSize)
-      || !zap_u64_to_size(info->uncompressedSize, &outSize))
-    return ZIP_ERR_SIZE;
-
-  if (info->method == ZIP_METHOD_DEFLATE
-      && (info->compressedSize > UINT32_MAX
-          || info->uncompressedSize > UINT32_MAX))
-    return ZIP_ERR_SIZE;
+  if (info->entry.method != ZAP_ZIP_STORE && info->entry.method != ZAP_ZIP_DEFLATE)
+    return ZAP_ZIP_EUNSUP;
 
   if (zap_seek_set(zap->fp, info->localHeaderOffset) != 0
       || !zap_read(zap->fp, local, sizeof(local))
       || zap_le32(local) != ZIP_SIGN_LOCAL_FILE)
-    return ZIP_ERR_FILE;
+    return ZAP_ZIP_EFILE;
 
   flags = zap_le16(local + 6);
   method = zap_le16(local + 8);
   nameLen = zap_le16(local + 26);
   extraLen = zap_le16(local + 28);
 
-  if (method != info->method || (flags & (ZIP_FLAG_ENCRYPTED | ZIP_FLAG_STRONG_ENC)))
-    return ZIP_ERR_UNSUP;
+  if (method != info->entry.method || (flags & (ZIP_FLAG_ENCRYPTED | ZIP_FLAG_STRONG_ENC)))
+    return ZAP_ZIP_EUNSUP;
 
   if (UINT64_MAX - info->localHeaderOffset
       < ZIP_LOCAL_FIXED + (uint64_t)nameLen + (uint64_t)extraLen)
-    return ZIP_ERR_SIZE;
+    return ZAP_ZIP_ESIZE;
 
   dataOffset = info->localHeaderOffset + ZIP_LOCAL_FIXED + nameLen + extraLen;
-  if (dataOffset > zap->fileSize || info->compressedSize > zap->fileSize - dataOffset)
-    return ZIP_ERR_SIZE;
+  if (dataOffset > zap->fileSize || info->entry.compressedSize > zap->fileSize - dataOffset)
+    return ZAP_ZIP_ESIZE;
 
   if (zap_seek_set(zap->fp, dataOffset) != 0)
-    return ZIP_ERR_FILE;
-
-  inbuf = zap_alloc_size(inSize);
-  if (!inbuf)
-    return ZIP_ERR_GENERAL;
-
-  if (!zap_read(zap->fp, inbuf, inSize)) {
-    ret = ZIP_ERR_FILE;
-    goto done;
-  }
-
-  if (info->method == ZIP_METHOD_STORE) {
-    if (info->compressedSize != info->uncompressedSize) {
-      ret = ZIP_ERR_SIZE;
-      goto done;
-    }
-    writebuf = inbuf;
-  } else {
-    outbuf = zap_alloc_size(outSize);
-    if (!outbuf)
-      goto done;
-
-    if (zap_inflate_raw(inbuf, inSize, outbuf, outSize) != 0) {
-      ret = ZIP_ERR_INFLATE;
-      goto done;
-    }
-    writebuf = outbuf;
-  }
-
-  if (zap_crc32(writebuf, outSize) != info->crc32) {
-    ret = ZIP_ERR_CRC;
-    goto done;
-  }
+    return ZAP_ZIP_EFILE;
 
   if (!zap_mkdir_parent(destpath)) {
-    ret = ZIP_ERR_FILE;
-    goto done;
+    ret = ZAP_ZIP_EFILE;
+    return ret;
   }
 
   outfp = fopen(destpath, "wb");
   if (!outfp) {
-    ret = ZIP_ERR_FILE;
-    goto done;
+    ret = ZAP_ZIP_EFILE;
+    return ret;
   }
 
-  if (outSize > 0 && fwrite(writebuf, 1, outSize, outfp) != outSize)
-    ret = ZIP_ERR_FILE;
-  else
-    ret = ZIP_OK;
+  if (info->entry.method == ZAP_ZIP_STORE) {
+    if (info->entry.compressedSize != info->entry.uncompressedSize)
+      ret = ZAP_ZIP_ESIZE;
+    else
+      ret = zap_copy_store(zap->fp, outfp,
+                           info->entry.uncompressedSize,
+                           info->entry.crc32);
+  } else {
+    ret = zap_inflate_raw(zap->fp, outfp,
+                          info->entry.compressedSize,
+                          info->entry.uncompressedSize,
+                          info->entry.crc32);
+  }
 
-  if (fclose(outfp) != 0 && ret == ZIP_OK)
-    ret = ZIP_ERR_FILE;
+  if (fclose(outfp) != 0 && ret == ZAP_ZIP_OK)
+    ret = ZAP_ZIP_EFILE;
 
-done:
-  free(outbuf);
-  free(inbuf);
   return ret;
+}
+
+ZAP_EXPORT
+size_t
+zap_count(const ZapArchive *zap) {
+  return zap ? zap->fileCount : 0;
+}
+
+ZAP_EXPORT
+const ZapEntry *
+zap_entry(const ZapArchive *zap, size_t index) {
+  if (!zap || index >= zap->fileCount)
+    return NULL;
+
+  return &zap->files[index].entry;
+}
+
+ZAP_EXPORT
+int
+zap_extract(ZapArchive *zap, size_t index, const char *destpath) {
+  if (!zap || index >= zap->fileCount)
+    return ZAP_ZIP_EFILE;
+
+  return zap_extract_entry(zap, &zap->files[index], destpath);
+}
+
+ZAP_EXPORT
+int
+zap_extract_named(ZapArchive *zap, const char *name, const char *destpath) {
+  ZapFile *info;
+
+  if (!zap || !name)
+    return ZAP_ZIP_ERR;
+
+  info = zap_find_file(zap, name);
+  if (!info)
+    return ZAP_ZIP_EFILE;
+
+  return zap_extract_entry(zap, info, destpath);
+}
+
+ZAP_EXPORT
+int
+zap_extract_all(ZapArchive *zap, const char *destdir) {
+  size_t i;
+
+  if (!zap || !destdir)
+    return ZAP_ZIP_ERR;
+
+  for (i = 0; i < zap->fileCount; i++) {
+    char *path;
+    int ret;
+
+    path = zap_extract_path(destdir, zap->files[i].entry.name);
+    if (!path)
+      return ZAP_ZIP_ERR;
+
+    ret = zap_extract_entry(zap, &zap->files[i], path);
+    free(path);
+    if (ret != ZAP_ZIP_OK)
+      return ret;
+  }
+
+  return ZAP_ZIP_OK;
 }
 
 ZAP_EXPORT

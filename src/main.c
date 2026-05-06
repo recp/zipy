@@ -53,7 +53,8 @@ main(int argc, char *argv[]) {
   const char *extractdir = ".";  /* Default to current directory */
   char *destpath;
   size_t i;
-  int success = 0, count = 0;
+  int success = 0;
+  size_t count = 0, extracted = 0;
   
   /* Parse command line arguments */
   for (i = 1; i < argc; i++) {
@@ -81,26 +82,30 @@ main(int argc, char *argv[]) {
   
   /* Extract all files */
   printf("Archive: %s\n", zipfile);
-  
-  for (i = 0; i < zip->fileCount; i++) {
-    destpath = make_extract_path(extractdir, zip->files[i].filename);
+
+  count = zap_count(zip);
+  for (i = 0; i < count; i++) {
+    const ZapEntry *entry = zap_entry(zip, i);
+    if (!entry) continue;
+
+    destpath = make_extract_path(extractdir, entry->name);
     if (!destpath) continue;
     
-    printf("  extracting: %s\n", zip->files[i].filename);
+    printf("  extracting: %s\n", entry->name);
     
-    int ret = zap_extract_file(zip, zip->files[i].filename, destpath);
+    int ret = zap_extract(zip, i, destpath);
     if (ret == 0) {
-      count++;
+      extracted++;
     } else {
       fprintf(stderr, "Error: Failed to extract '%s' (%d)\n",
-              zip->files[i].filename, ret);
+              entry->name, ret);
       success = 1;
     }
     
     free(destpath);
   }
   
-  printf("Successfully extracted %d file(s)\n", count);
+  printf("Successfully extracted %zu file(s)\n", extracted);
   
   zap_close(zip);
   return success;
