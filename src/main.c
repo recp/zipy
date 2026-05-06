@@ -22,6 +22,7 @@
 #include <time.h>
 
 #if defined(_WIN32)
+#  include <conio.h>
 #  include <direct.h>
 #  include <io.h>
 #  include <windows.h>
@@ -29,8 +30,10 @@
 #  define zipy_mkdir(path) _mkdir(path)
 #  define zipy_rmdir(path) _rmdir(path)
 #else
+#  include <dirent.h>
 #  include <sys/stat.h>
 #  include <sys/types.h>
+#  include <termios.h>
 #  include <unistd.h>
 #  define zipy_getcwd getcwd
 #  define zipy_mkdir(path) mkdir((path), 0755)
@@ -762,6 +765,74 @@ path_info(const char *path, int *exists, int *isDir) {
   return 1;
 }
 
+static int
+target_is_empty_or_missing(const char *path, int *emptyOrMissing) {
+  int exists, isDir;
+
+  *emptyOrMissing = 0;
+  if (!path_info(path, &exists, &isDir))
+    return 0;
+  if (!exists) {
+    *emptyOrMissing = 1;
+    return 1;
+  }
+  if (!isDir)
+    return 1;
+
+#if defined(_WIN32)
+  {
+    char *pattern;
+    WIN32_FIND_DATAA data;
+    HANDLE handle;
+
+    pattern = make_extract_path(path, "*");
+    if (!pattern)
+      return 0;
+
+    handle = FindFirstFileA(pattern, &data);
+    free(pattern);
+    if (handle == INVALID_HANDLE_VALUE) {
+      if (GetLastError() == ERROR_FILE_NOT_FOUND) {
+        *emptyOrMissing = 1;
+        return 1;
+      }
+      return 0;
+    }
+
+    do {
+      if (strcmp(data.cFileName, ".") != 0 && strcmp(data.cFileName, "..") != 0) {
+        FindClose(handle);
+        return 1;
+      }
+    } while (FindNextFileA(handle, &data));
+
+    FindClose(handle);
+    *emptyOrMissing = 1;
+  }
+#else
+  {
+    DIR *dir;
+    struct dirent *entry;
+
+    dir = opendir(path);
+    if (!dir)
+      return 0;
+
+    while ((entry = readdir(dir))) {
+      if (strcmp(entry->d_name, ".") != 0 && strcmp(entry->d_name, "..") != 0) {
+        closedir(dir);
+        return 1;
+      }
+    }
+
+    closedir(dir);
+    *emptyOrMissing = 1;
+  }
+#endif
+
+  return 1;
+}
+
 static char *
 trim_trailing_seps_path(const char *path) {
   char *out;
@@ -786,6 +857,120 @@ trim_trailing_seps_path(const char *path) {
   memcpy(out, path, len);
   out[len] = '\0';
   return out;
+}
+
+static int
+path_is_absolute(const char *path) {
+  if (!path || !*path)
+    return 0;
+
+#if defined(_WIN32)
+  if (isalpha((unsigned char)path[0]) && path[1] == ':')
+    return 1;
+#endif
+
+  return path[0] == '/' || path[0] == '\\';
+}
+
+static char *
+display_path(const char *path) {
+  char cwd[PATH_MAX];
+  size_t cwdLen;
+
+  if (!path)
+    return NULL;
+
+  if (!path_is_absolute(path))
+    return dup_text(path);
+
+  if (!zipy_getcwd(cwd, sizeof(cwd)))
+    return dup_text(path);
+
+  cwdLen = strlen(cwd);
+  if (strncmp(path, cwd, cwdLen) == 0
+      && (path[cwdLen] == '/' || path[cwdLen] == '\\'))
+    return dup_text(path + cwdLen + 1);
+
+  return dup_text(path);
+}
+
+static void
+print_choice_key(FILE *out, int color, char key) {
+  if (color)
+    fprintf(out, "[\033[36m%c\033[0m]", key);
+  else
+    fprintf(out, "[%c]", key);
+}
+
+static void
+print_choice_option(FILE *out,
+                    int color,
+                    const char *prefix,
+                    char key,
+                    const char *suffix) {
+  fputs(prefix, out);
+  print_choice_key(out, color, key);
+  fputs(suffix, out);
+}
+
+static void
+print_conflict_choices(FILE *out, int color) {
+  fputs("  ", out);
+  print_choice_option(out, color, "", 's', "ave, ");
+  print_choice_option(out, color, "", 'o', "verwrite, ");
+  print_choice_option(out, color, "s", 'k', "ip, ");
+  print_choice_option(out, color, "", 'f', "ail,\n  ");
+  print_choice_option(out, color, "", 'S', "ave all, ");
+  print_choice_option(out, color, "", 'O', "verwrite all, ");
+  print_choice_option(out, color, "s", 'K', "ip all, ");
+  print_choice_option(out, color, "", 'F', "ail all? ");
+}
+
+static int
+read_choice_char(void) {
+  char line[64];
+
+  if (file_is_tty(stdin)) {
+#if defined(_WIN32)
+    int ch = _getch();
+
+    if (ch == 0 || ch == 224) {
+      (void)_getch();
+      fputc('\n', stderr);
+      return 0;
+    }
+    if (isprint((unsigned char)ch))
+      fputc(ch, stderr);
+    fputc('\n', stderr);
+    return ch;
+#else
+    struct termios oldTerm, newTerm;
+    int ch;
+
+    if (tcgetattr(fileno(stdin), &oldTerm) == 0) {
+      newTerm = oldTerm;
+      newTerm.c_lflag &= (tcflag_t)~(ICANON | ECHO);
+      newTerm.c_cc[VMIN] = 1;
+      newTerm.c_cc[VTIME] = 0;
+
+      if (tcsetattr(fileno(stdin), TCSANOW, &newTerm) == 0) {
+        ch = fgetc(stdin);
+        tcsetattr(fileno(stdin), TCSANOW, &oldTerm);
+        if (ch != EOF) {
+          if (isprint((unsigned char)ch))
+            fputc(ch, stderr);
+          fputc('\n', stderr);
+          return ch;
+        }
+      }
+    }
+#endif
+  }
+
+  if (!fgets(line, sizeof(line), stdin))
+    return EOF;
+
+  return (unsigned char)line[0];
 }
 
 static int
@@ -870,7 +1055,7 @@ prompt_conflict_action(const ZipyEntry *entry,
                        const char *path,
                        ZipyCliConflictPolicy *allPolicy,
                        ZipyConflictPolicy *policy) {
-  char line[64];
+  int color = use_color(file_is_tty(stderr));
 
   if (*allPolicy != ZIPY_CLI_CONFLICT_ASK) {
     *policy = cli_policy_to_extract(*allPolicy);
@@ -878,19 +1063,19 @@ prompt_conflict_action(const ZipyEntry *entry,
   }
 
   for (;;) {
-    fprintf(stderr,
-            "\n  conflict: %s\n"
-            "  exists: %s\n"
-            "  [s]ave, [o]verwrite, s[k]ip, [f]ail, "
-            "[S]ave all, [O]verwrite all, s[K]ip all, [F]ail all? ",
-            entry->name,
-            path);
+    int ch;
+
+    fprintf(stderr, "\n  %-9s %s\n  %-9s %s\n\n",
+            "conflict:", entry->name,
+            "exists:", path);
+    print_conflict_choices(stderr, color);
     fflush(stderr);
 
-    if (!fgets(line, sizeof(line), stdin))
+    ch = read_choice_char();
+    if (ch == EOF)
       return 0;
 
-    switch (line[0]) {
+    switch (ch) {
       case 's':
         *policy = ZIPY_CONFLICT_SAVE;
         return 1;
@@ -936,11 +1121,19 @@ prepare_ask_plan(ZipyArchive *zip,
   ZipyCliConflictPolicy allPolicy = ZIPY_CLI_CONFLICT_ASK;
   size_t count, i;
   int conflicts = 0;
+  int fastNoConflict = 0;
 
   *policiesOut = NULL;
   *needsSaveDir = 0;
 
   config->options.onConflict = cli_policy_to_extract(config->onConflict);
+
+  if (config->onConflict == ZIPY_CLI_CONFLICT_ASK
+      && target_is_empty_or_missing(extractdir, &fastNoConflict)
+      && fastNoConflict) {
+    config->options.onConflict = ZIPY_CONFLICT_OVERWRITE;
+    return 1;
+  }
 
   if (config->onConflict != ZIPY_CLI_CONFLICT_ASK) {
     *needsSaveDir = config->options.onConflict == ZIPY_CONFLICT_SAVE;
@@ -985,6 +1178,14 @@ prepare_ask_plan(ZipyArchive *zip,
       *needsSaveDir = 1;
 
     free(path);
+
+    if (conflicts == 1 && allPolicy != ZIPY_CLI_CONFLICT_ASK) {
+      config->onConflict = allPolicy;
+      config->options.onConflict = cli_policy_to_extract(allPolicy);
+      *needsSaveDir = config->options.onConflict == ZIPY_CONFLICT_SAVE;
+      free(policies);
+      return 1;
+    }
   }
 
   if (conflicts == 0) {
@@ -1321,10 +1522,15 @@ main(int argc, char *argv[]) {
   }
 
   if (!success && saved > 0 && saveDir) {
+    char *shownSaveDir = display_path(saveDir);
+    const char *saveText = shownSaveDir ? shownSaveDir : saveDir;
+
     if (summaryColor)
-      printf("  saved existing files to \033[35m%s\033[0m\n", saveDir);
+      printf("  saved existing files to \033[35m%s\033[0m\n", saveText);
     else
-      printf("  saved existing files to %s\n", saveDir);
+      printf("  saved existing files to %s\n", saveText);
+
+    free(shownSaveDir);
   }
   
   zipy_close(zip);
