@@ -11,8 +11,8 @@
 #define _FILE_OFFSET_BITS 64
 #define _LARGEFILE_SOURCE
 
+#include <defl/infl.h>
 #include <zap/zip.h>
-#include <zlib.h>
 
 #include <ctype.h>
 #include <errno.h>
@@ -536,11 +536,29 @@ zap_chunk_size(uint64_t remaining) {
   return remaining > ZIP_IO_CHUNK ? ZIP_IO_CHUNK : (size_t)remaining;
 }
 
+static uint32_t
+zap_crc32_update(uint32_t crc, const uint8_t *buf, size_t len) {
+  static const uint32_t table[16] = {
+    0x00000000u, 0x1DB71064u, 0x3B6E20C8u, 0x26D930ACu,
+    0x76DC4190u, 0x6B6B51F4u, 0x4DB26158u, 0x5005713Cu,
+    0xEDB88320u, 0xF00F9344u, 0xD6D6A3E8u, 0xCB61B38Cu,
+    0x9B64C2B0u, 0x86D3D2D4u, 0xA00AE278u, 0xBDBDF21Cu
+  };
+
+  crc = ~crc;
+  while (len--) {
+    crc ^= *buf++;
+    crc = (crc >> 4) ^ table[crc & 0x0Fu];
+    crc = (crc >> 4) ^ table[crc & 0x0Fu];
+  }
+  return ~crc;
+}
+
 static int
 zap_write_chunk(FILE *out,
                 const uint8_t *buf,
                 size_t len,
-                uLong *crc,
+                uint32_t *crc,
                 uint64_t *written) {
   if (len == 0)
     return ZAP_ZIP_OK;
@@ -548,7 +566,7 @@ zap_write_chunk(FILE *out,
   if (fwrite(buf, 1, len, out) != len)
     return ZAP_ZIP_EFILE;
 
-  *crc = crc32(*crc, buf, (uInt)len);
+  *crc = zap_crc32_update(*crc, buf, len);
   *written += len;
   return ZAP_ZIP_OK;
 }
@@ -557,14 +575,14 @@ static int
 zap_copy_store(FILE *fp, FILE *out, uint64_t len, uint32_t expectedCrc) {
   uint8_t *buf;
   uint64_t remaining = len, written = 0;
-  uLong crc;
+  uint32_t crc;
   int ret = ZAP_ZIP_OK;
 
   buf = malloc(ZIP_IO_CHUNK);
   if (!buf)
     return ZAP_ZIP_ERR;
 
-  crc = crc32(0L, Z_NULL, 0);
+  crc = 0;
   while (remaining > 0) {
     size_t n = zap_chunk_size(remaining);
 
@@ -596,77 +614,52 @@ zap_inflate_raw(FILE *fp,
                 uint64_t compressedSize,
                 uint64_t uncompressedSize,
                 uint32_t expectedCrc) {
-  uint8_t *inbuf = NULL, *outbuf = NULL;
-  uint64_t remaining = compressedSize, written = 0;
-  z_stream strm;
-  uLong crc;
-  int ret, zret;
+  uint8_t *inbuf = NULL;
+  uint8_t *outbuf = NULL;
+  size_t inlen, outlen;
+  uint32_t crc;
+  int ret;
 
-  inbuf = malloc(ZIP_IO_CHUNK);
-  outbuf = malloc(ZIP_IO_CHUNK);
+  if (compressedSize > UINT32_MAX || uncompressedSize > UINT32_MAX)
+    return ZAP_ZIP_EUNSUP;
+
+  inlen = compressedSize > 0 ? (size_t)compressedSize : 1;
+  outlen = uncompressedSize > 0 ? (size_t)uncompressedSize : 1;
+
+  inbuf = malloc(inlen);
+  outbuf = malloc(outlen);
   if (!inbuf || !outbuf) {
     ret = ZAP_ZIP_ERR;
     goto done;
   }
 
-  memset(&strm, 0, sizeof(strm));
-  zret = inflateInit2(&strm, -MAX_WBITS);
-  if (zret != Z_OK) {
+  if (compressedSize > 0 && fread(inbuf, 1, (size_t)compressedSize, fp) != (size_t)compressedSize) {
+    ret = ZAP_ZIP_EFILE;
+    goto done;
+  }
+
+  if (infl_buf(inbuf,
+               (uint32_t)compressedSize,
+               outbuf,
+               (uint32_t)uncompressedSize,
+               0) != UNZ_OK) {
     ret = ZAP_ZIP_EINFLATE;
     goto done;
   }
 
-  crc = crc32(0L, Z_NULL, 0);
-  ret = ZAP_ZIP_OK;
-  zret = Z_OK;
-
-  while (remaining > 0 && zret != Z_STREAM_END) {
-    size_t n = zap_chunk_size(remaining);
-
-    if (fread(inbuf, 1, n, fp) != n) {
-      ret = ZAP_ZIP_EFILE;
-      goto inflate_done;
-    }
-
-    remaining -= n;
-    strm.next_in = inbuf;
-    strm.avail_in = (uInt)n;
-
-    do {
-      size_t produced;
-
-      strm.next_out = outbuf;
-      strm.avail_out = ZIP_IO_CHUNK;
-
-      zret = inflate(&strm, Z_NO_FLUSH);
-      if (zret != Z_OK && zret != Z_STREAM_END) {
-        ret = ZAP_ZIP_EINFLATE;
-        goto inflate_done;
-      }
-
-      produced = ZIP_IO_CHUNK - strm.avail_out;
-      if (produced > 0) {
-        if (written + produced > uncompressedSize) {
-          ret = ZAP_ZIP_ESIZE;
-          goto inflate_done;
-        }
-
-        ret = zap_write_chunk(out, outbuf, produced, &crc, &written);
-        if (ret != ZAP_ZIP_OK)
-          goto inflate_done;
-      }
-    } while (strm.avail_in > 0 || (zret == Z_OK && strm.avail_out == 0));
+  crc = zap_crc32_update(0, outbuf, (size_t)uncompressedSize);
+  if (crc != expectedCrc) {
+    ret = ZAP_ZIP_ECRC;
+    goto done;
   }
 
-  if (zret != Z_STREAM_END || remaining != 0 || strm.avail_in != 0)
-    ret = ZAP_ZIP_EINFLATE;
-  else if (written != uncompressedSize)
-    ret = ZAP_ZIP_ESIZE;
-  else if ((uint32_t)crc != expectedCrc)
-    ret = ZAP_ZIP_ECRC;
+  if (uncompressedSize > 0
+      && fwrite(outbuf, 1, (size_t)uncompressedSize, out) != (size_t)uncompressedSize) {
+    ret = ZAP_ZIP_EFILE;
+    goto done;
+  }
 
-inflate_done:
-  inflateEnd(&strm);
+  ret = ZAP_ZIP_OK;
 
 done:
   free(outbuf);

@@ -43,14 +43,19 @@ if(POLICY CMP0002)
   cmake_policy(SET CMP0002 NEW)
 endif()
 
-find_package(ZLIB REQUIRED)
-
 include_directories(include)
 
 option(ZAP_BUILD_EXECUTABLE "Build zap command line tool" ON)
 
+if(NOT EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/deps/defl/include/defl/infl.h"
+   OR NOT EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/deps/huff/include/huff/huff.h")
+  message(FATAL_ERROR "Missing submodules. Run: git submodule update --init")
+endif()
+
 add_library(${PROJECT_NAME}
         src/zip.c
+        deps/defl/src/infl/infl.c
+        deps/defl/src/infl/mem.c
 )
 
 set_target_properties(${PROJECT_NAME} PROPERTIES
@@ -69,11 +74,14 @@ target_include_directories(zap
         $<INSTALL_INTERFACE:include>
     PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/src
+        ${CMAKE_CURRENT_SOURCE_DIR}/deps/defl/include
+        ${CMAKE_CURRENT_SOURCE_DIR}/deps/huff/include
 )
 
-target_link_libraries(zap
-    PUBLIC
-        ZLIB::ZLIB
+target_compile_definitions(zap
+    PRIVATE
+        UNZ_STATIC=1
+        UNZ_EXPORTS=1
 )
 
 # Executable target
