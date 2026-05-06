@@ -14,8 +14,8 @@
  * limitations under the License.
  */
 
-#ifndef unz_common_h
-#define unz_common_h
+#ifndef zap_common_h
+#define zap_common_h
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -46,52 +46,53 @@ extern "C" {
 #endif
 
 #if defined(_MSC_VER) || defined(__MINGW32__) || defined(__MINGW64__)
-#  define UNZ_WINAPI
+#  define ZAP_WINAPI
 #  pragma warning (disable : 4068) /* disable unknown pragma warnings */
 #endif
 
 #if defined(_MSC_VER) || defined(__MINGW32__) || defined(__MINGW64__)
-#  ifdef UNZ_STATIC
-#    define UNZ_EXPORT
-#  elif defined(UNZ_EXPORTS)
-#    define UNZ_EXPORT __declspec(dllexport)
+#  ifdef ZAP_STATIC
+#    define ZAP_EXPORT
+#  elif defined(ZAP_EXPORTS)
+#    define ZAP_EXPORT __declspec(dllexport)
 #  else
-#    define UNZ_EXPORT __declspec(dllimport)
+#    define ZAP_EXPORT __declspec(dllimport)
 #  endif
-#  define UNZ_HIDE
+#  define ZAP_HIDE
 #else
-#  define UNZ_EXPORT   __attribute__((visibility("default")))
-#  define UNZ_HIDE     __attribute__((visibility("hidden")))
+#  define ZAP_EXPORT   __attribute__((visibility("default")))
+#  define ZAP_HIDE     __attribute__((visibility("hidden")))
 #endif
 
 #if defined(_MSC_VER)
-#  define UNZ_INLINE      __forceinline
-#  define UNZ_ALIGN(X)    __declspec(align(X))
-#  define UNZ_HOT
-#  define UNZ_HOT_INLINE  __forceinline
+#  define ZAP_INLINE      __forceinline
+#  define ZAP_ALIGN(X)    __declspec(align(X))
+#  define ZAP_HOT
+#  define ZAP_HOT_INLINE  __forceinline
 #else
-#  define UNZ_INLINE      static inline __attribute__((always_inline))
-#  define UNZ_ALIGN(X)    __attribute__((aligned(X)))
-#  define UNZ_HOT         __attribute__((hot))
-#  define UNZ_HOT_INLINE  static inline __attribute__((hot, always_inline))
+#  define ZAP_INLINE      static inline __attribute__((always_inline))
+#  define ZAP_ALIGN(X)    __attribute__((aligned(X)))
+#  define ZAP_HOT         __attribute__((hot))
+#  define ZAP_HOT_INLINE  static inline __attribute__((hot, always_inline))
 #endif
 
 #ifndef __has_builtin
 #  define __has_builtin(x) 0
 #endif
 
-typedef enum UnzResult {
-  UNZ_NOOP     =  1,       /* no operation needed */
-  UNZ_OK       =  0,
-  UNZ_ERR      = -1,       /* UKNOWN ERR */
-  UNZ_EFOUND   = -1000,
-  UNZ_ENOMEM   = -ENOMEM,
-  UNZ_EPERM    = -EPERM,
-  UNZ_EBADF    = -EBADF,   /* file couldn't parsed / loaded */
-  UNZ_EFULL    = -ENOBUFS  /* no space ENOBUFS vs ENOSPC    */
-} UnzResult;
+typedef enum ZapResult {
+  ZAP_UNFINISHED =  2,       /* need more data for streaming */
+  ZAP_NOOP       =  1,       /* no operation needed */
+  ZAP_OK         =  0,
+  ZAP_ERR        = -1,       /* UKNOWN ERR */
+  ZAP_EFOUND     = -1000,
+  ZAP_ENOMEM     = -ENOMEM,
+  ZAP_EPERM      = -EPERM,
+  ZAP_EBADF      = -EBADF,   /* file couldn't parsed / loaded */
+  ZAP_EFULL      = -ENOBUFS  /* no space ENOBUFS vs ENOSPC    */
+} ZapResult;
 
 #ifdef __cplusplus
 }
 #endif
-#endif /* unz_common_h */
+#endif /* zap_common_h */

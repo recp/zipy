@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <Scheme
-   LastUpgradeVersion = "1620"
+   LastUpgradeVersion = "2600"
    version = "1.7">
    <BuildAction
       parallelizeBuildables = "YES"
@@ -15,24 +15,10 @@
             buildForAnalyzing = "YES">
             <BuildableReference
                BuildableIdentifier = "primary"
-               BlueprintIdentifier = "1E9338562D31691900A39B9B"
-               BuildableName = "libunz.a"
-               BlueprintName = "unz"
-               ReferencedContainer = "container:unz.xcodeproj">
-            </BuildableReference>
-         </BuildActionEntry>
-         <BuildActionEntry
-            buildForTesting = "YES"
-            buildForRunning = "YES"
-            buildForProfiling = "YES"
-            buildForArchiving = "YES"
-            buildForAnalyzing = "YES">
-            <BuildableReference
-               BuildableIdentifier = "primary"
-               BlueprintIdentifier = "1ECE63A32D1C5F93003E36DF"
-               BuildableName = "libhuff.a"
-               BlueprintName = "huff"
-               ReferencedContainer = "container:../../huff/huff.xcodeproj">
+               BlueprintIdentifier = "1E1AEC3C2D60E37900514DA6"
+               BuildableName = "zaptest"
+               BlueprintName = "zaptest"
+               ReferencedContainer = "container:zap.xcodeproj">
             </BuildableReference>
          </BuildActionEntry>
       </BuildActionEntries>
@@ -53,7 +39,24 @@
       ignoresPersistentStateOnLaunch = "NO"
       debugDocumentVersioning = "YES"
       debugServiceExtension = "internal"
-      allowLocationSimulation = "YES">
+      allowLocationSimulation = "YES"
+      viewDebuggingEnabled = "No">
+      <BuildableProductRunnable
+         runnableDebuggingMode = "0">
+         <BuildableReference
+            BuildableIdentifier = "primary"
+            BlueprintIdentifier = "1E1AEC3C2D60E37900514DA6"
+            BuildableName = "zaptest"
+            BlueprintName = "zaptest"
+            ReferencedContainer = "container:zap.xcodeproj">
+         </BuildableReference>
+      </BuildableProductRunnable>
+      <CommandLineArguments>
+         <CommandLineArgument
+            argument = "./w.zip"
+            isEnabled = "YES">
+         </CommandLineArgument>
+      </CommandLineArguments>
    </LaunchAction>
    <ProfileAction
       buildConfiguration = "Release"
@@ -61,15 +64,16 @@
       savedToolIdentifier = ""
       useCustomWorkingDirectory = "NO"
       debugDocumentVersioning = "YES">
-      <MacroExpansion>
+      <BuildableProductRunnable
+         runnableDebuggingMode = "0">
          <BuildableReference
             BuildableIdentifier = "primary"
-            BlueprintIdentifier = "1E9338562D31691900A39B9B"
-            BuildableName = "libunz.a"
-            BlueprintName = "unz"
-            ReferencedContainer = "container:unz.xcodeproj">
+            BlueprintIdentifier = "1E1AEC3C2D60E37900514DA6"
+            BuildableName = "zaptest"
+            BlueprintName = "zaptest"
+            ReferencedContainer = "container:zap.xcodeproj">
          </BuildableReference>
-      </MacroExpansion>
+      </BuildableProductRunnable>
    </ProfileAction>
    <AnalyzeAction
       buildConfiguration = "Debug">

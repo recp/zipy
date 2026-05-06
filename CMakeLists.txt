@@ -1,8 +1,8 @@
 cmake_minimum_required(VERSION 3.13)
-project(unz
+project(zap
   VERSION 0.1.0
-  HOMEPAGE_URL https://github.com/recp/unz
-  DESCRIPTION "compression library"
+  HOMEPAGE_URL https://github.com/recp/zap
+  DESCRIPTION "minimal ZIP archive library"
   LANGUAGES C
 )
 
@@ -43,18 +43,13 @@ if(POLICY CMP0002)
   cmake_policy(SET CMP0002 NEW)
 endif()
 
-if(NOT TARGET huff)
-  add_subdirectory(deps/huff EXCLUDE_FROM_ALL)
-endif()
-
-if(NOT TARGET defl)
-  add_subdirectory(deps/defl EXCLUDE_FROM_ALL)
-endif()
+find_package(ZLIB REQUIRED)
 
 include_directories(include)
 
+option(ZAP_BUILD_EXECUTABLE "Build zap command line tool" OFF)
+
 add_library(${PROJECT_NAME}
-        src/unzip.c
         src/zip.c
 )
 
@@ -62,14 +57,13 @@ set_target_properties(${PROJECT_NAME} PROPERTIES
                               VERSION ${PROJECT_VERSION} 
                             SOVERSION ${PROJECT_VERSION_MAJOR})
 
-
 if(WIN32)
   # Because SOVERSION has no effect to file naming on Windows
   set_target_properties(${PROJECT_NAME} PROPERTIES
     RUNTIME_OUTPUT_NAME ${PROJECT_NAME}-${PROJECT_VERSION_MAJOR})
 endif()
 
-target_include_directories(unz
+target_include_directories(zap
     PUBLIC
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
         $<INSTALL_INTERFACE:include>
@@ -77,38 +71,37 @@ target_include_directories(unz
         ${CMAKE_CURRENT_SOURCE_DIR}/src
 )
 
-target_link_libraries(unz
+target_link_libraries(zap
     PUBLIC
-        huff
-        defl
+        ZLIB::ZLIB
 )
 
 # Executable target
-if(UNZ_BUILD_EXECUTABLE)
-    add_executable(unz-bin
+if(ZAP_BUILD_EXECUTABLE)
+    add_executable(zap-bin
         src/main.c
     )
     
-    set_target_properties(unz-bin 
+    set_target_properties(zap-bin 
         PROPERTIES 
-        OUTPUT_NAME "unz"
+        OUTPUT_NAME "zap"
     )
     
-    target_link_libraries(unz-bin
+    target_link_libraries(zap-bin
         PRIVATE
-            unz
+            zap
     )
 endif()
 
-install(TARGETS unz
-        EXPORT unzTargets
+install(TARGETS zap
+        EXPORT zapTargets
         LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
         ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
         RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
         INCLUDES DESTINATION ${CMAKE_INSTALL_INCLUDEDIR})
 
-if(UNZ_BUILD_EXECUTABLE)
-    install(TARGETS unz-bin
+if(ZAP_BUILD_EXECUTABLE)
+    install(TARGETS zap-bin
             RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
     )
 endif()
@@ -117,22 +110,22 @@ install(DIRECTORY include/
         DESTINATION ${CMAKE_INSTALL_INCLUDEDIR})
 
 # Package config
-install(EXPORT unzTargets
-        FILE unzTargets.cmake
-        NAMESPACE unz::
-        DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/unz
+install(EXPORT zapTargets
+        FILE zapTargets.cmake
+        NAMESPACE zap::
+        DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/zap
 )
 
 include(CMakePackageConfigHelpers)
 write_basic_package_version_file(
-    "unzConfigVersion.cmake"
+    "zapConfigVersion.cmake"
     VERSION ${PROJECT_VERSION}
     COMPATIBILITY SameMajorVersion
 )
 
 install(FILES
-        "${CMAKE_CURRENT_BINARY_DIR}/unzConfigVersion.cmake"
-        DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/unz
+        "${CMAKE_CURRENT_BINARY_DIR}/zapConfigVersion.cmake"
+        DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/zap
 )
 
 set(CPACK_PROJECT_NAME ${PROJECT_NAME})

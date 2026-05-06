@@ -1,7 +1,7 @@
-# unzip
-flexible and fast de-compress zip file or memory
+# zap - minimal ZIP archive reader
 
-- [ ] unzip to memory: known size 
-- [ ] unzip to memory: unknown size
-- [ ] gzip
-- [ ] unzip to file[s]
+- [x] open ZIP central directory
+- [x] extract stored entries
+- [x] extract deflated entries
+- [x] CRC32 validation
+- [x] basic ZIP64 central directory parsing
