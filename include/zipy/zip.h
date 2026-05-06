@@ -27,7 +27,8 @@ typedef enum zipy_zip_result_t {
   ZIPY_ZIP_EFILE    = -5,
   ZIPY_ZIP_EUNSUP   = -6,
   ZIPY_ZIP_EEXIST   = -7,
-  ZIPY_ZIP_EPASS    = -8
+  ZIPY_ZIP_EPASS    = -8,
+  ZIPY_ZIP_EAUTH    = -9
 } zipy_zip_result_t;
 
 typedef enum zipy_zip_method_t {

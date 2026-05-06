@@ -1,8 +1,8 @@
 # zipy
 
 zipy is a small, fast ZIP extractor and C library. It reads ZIP central
-directories, extracts stored and deflated entries, validates CRC32, and keeps
-existing files safe on conflicts.
+directories, extracts stored and deflated entries, validates CRC32, restores
+common Unix metadata, and keeps existing files safe on conflicts.
 
 ## Build
 
@@ -140,6 +140,6 @@ lower latency matters more than detecting corrupted archive data.
 - [x] CRC32 validation
 - [x] basic ZIP64 central directory parsing
 - [x] legacy ZipCrypto decryption
-- [ ] WinZip AES decryption
+- [x] WinZip AES decryption
+- [x] symlinks, attributes, and timestamps
 - [ ] Deflate64
-- [ ] symlinks, attributes, and timestamps

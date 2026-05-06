@@ -11,14 +11,33 @@
 #ifndef zipy_crypto_dec_h
 #define zipy_crypto_dec_h
 
+#include "aes_wg.h"
+
 #include <stddef.h>
 #include <stdint.h>
+#include <stdio.h>
+
+#include <zipy/zip.h>
 
 #define ZIPCRYPTO_HEADER_SIZE 12u
 
 typedef struct zipcrypto_t {
   uint32_t keys[3];
 } zipcrypto_t;
+
+typedef enum dec_kind_t {
+  DEC_NONE = 0,
+  DEC_ZIPCRYPTO,
+  DEC_AES_WG
+} dec_kind_t;
+
+typedef struct dec_t {
+  dec_kind_t kind;
+  union {
+    zipcrypto_t zipcrypto;
+    aes_wg_t    aes_wg;
+  } u;
+} dec_t;
 
 void
 zipcrypto_init(zipcrypto_t *ctx, const char *password);
@@ -31,5 +50,28 @@ zipcrypto_open(zipcrypto_t *ctx,
                const char *password,
                uint8_t header[ZIPCRYPTO_HEADER_SIZE],
                uint8_t verify);
+
+void
+dec_init(dec_t *dec);
+
+int
+dec_open_zipcrypto(dec_t *dec,
+                   FILE *fp,
+                   const char *password,
+                   uint8_t verify,
+                   uint64_t *compressed_size);
+
+int
+dec_open_aes_wg(dec_t *dec,
+                FILE *fp,
+                const char *password,
+                uint8_t strength,
+                uint64_t *compressed_size);
+
+void
+dec_decrypt(dec_t *dec, uint8_t *buf, size_t len);
+
+int
+dec_finish(dec_t *dec, FILE *fp);
 
 #endif /* zipy_crypto_dec_h */

@@ -62,6 +62,8 @@ endif()
 add_library(${PROJECT_NAME}
         src/zip.c
         src/crypto/dec.c
+        src/crypto/aes_wg.c
+        src/crypto/sha1.c
         ${ZIPY_THREAD_SOURCE}
         deps/defl/src/infl/infl.c
         deps/defl/src/infl/mem.c

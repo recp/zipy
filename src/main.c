@@ -14,6 +14,7 @@
 #include <ctype.h>
 #include <errno.h>
 #include <limits.h>
+#include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -99,6 +100,23 @@ use_color(int tty) {
 
   term = getenv("TERM");
   return !term || strcmp(term, "dumb") != 0;
+}
+
+static void
+print_error(const char *fmt, ...) {
+  va_list args;
+  int color = use_color(file_is_tty(stderr));
+
+  if (color)
+    fputs("\033[31m", stderr);
+
+  va_start(args, fmt);
+  vfprintf(stderr, fmt, args);
+  va_end(args);
+
+  if (color)
+    fputs("\033[0m", stderr);
+  fflush(stderr);
 }
 
 static uint64_t
@@ -567,7 +585,7 @@ apply_env_config(zipy_config_t *config) {
   value = getenv("ZIPY_ON_CONFLICT");
   if (value && *value) {
     if (!parse_conflict(value, &config->on_conflict)) {
-      fprintf(stderr, "Error: Invalid ZIPY_ON_CONFLICT '%s'\n", value);
+      print_error("Error: Invalid ZIPY_ON_CONFLICT '%s'\n", value);
       return 0;
     }
     config->options.on_conflict = cli_policy_to_extract(config->on_conflict);
@@ -575,7 +593,7 @@ apply_env_config(zipy_config_t *config) {
 
   value = getenv("ZIPY_SAVE_TO");
   if (value && *value && !parse_save_to(value, &config->options.save_to)) {
-    fprintf(stderr, "Error: Invalid ZIPY_SAVE_TO '%s'\n", value);
+    print_error("Error: Invalid ZIPY_SAVE_TO '%s'\n", value);
     return 0;
   }
 
@@ -641,13 +659,13 @@ handle_config_command(int argc, char **argv) {
     ok = apply_config_assignment(&config, arg);
     free(arg);
     if (!ok) {
-      fprintf(stderr, "Error: Invalid config assignment '%s'\n", argv[i]);
+      print_error("Error: Invalid config assignment '%s'\n", argv[i]);
       return 1;
     }
   }
 
   if (!write_config(&config)) {
-    fprintf(stderr, "Error: Failed to write config\n");
+    print_error("Error: Failed to write config\n");
     return 1;
   }
 
@@ -1230,7 +1248,11 @@ extract_one(ExtractContext *ctx, zipy_archive_t *zip, size_t index) {
     return;
 
   name = entry->name;
-  if (ctx->policies) {
+  if (entry->is_directory) {
+    ret = ctx->policies && ctx->policies[index] == ZIPY_CONFLICT_SKIP
+        ? ZIPY_ZIP_SKIPPED
+        : ZIPY_ZIP_OK;
+  } else if (ctx->policies) {
     zipy_extract_options_t options = *ctx->options;
     options.on_conflict = ctx->policies[index];
     ret = zipy_extract_to(zip, index, ctx->extractdir, &options);
@@ -1249,9 +1271,11 @@ extract_one(ExtractContext *ctx, zipy_archive_t *zip, size_t index) {
   } else {
     progress_clear(ctx->progress);
     if (ret == ZIPY_ZIP_EPASS)
-      fprintf(stderr, "  Error: Missing or incorrect password for '%s'\n", name);
+      print_error("  Error: Missing or incorrect password for '%s'\n", name);
+    else if (ret == ZIPY_ZIP_EAUTH)
+      print_error("  Error: Authentication failed for '%s'\n", name);
     else
-      fprintf(stderr, "  Error: Failed to extract '%s' (%d)\n", name, ret);
+      print_error("  Error: Failed to extract '%s' (%d)\n", name, ret);
     ctx->failed = 1;
   }
   progress_update(ctx->progress, ctx->done, name);
@@ -1270,7 +1294,7 @@ extract_worker(void *arg) {
     zipy_lock(&ctx->lock);
     ctx->failed = 1;
     progress_clear(ctx->progress);
-    fprintf(stderr, "  Error: Cannot open ZIP file '%s'\n", ctx->zipfile);
+    print_error("  Error: Cannot open ZIP file '%s'\n", ctx->zipfile);
     zipy_unlock(&ctx->lock);
     return;
   }
@@ -1381,6 +1405,36 @@ extract_parallel(const char *zipfile,
   return ctx.failed;
 }
 
+static int
+apply_directory_entries(zipy_archive_t *zip,
+                        const char *extractdir,
+                        const zipy_extract_options_t *options,
+                        const zipy_conflict_policy_t *policies,
+                        size_t count) {
+  size_t i;
+
+  for (i = count; i > 0; i--) {
+    const zipy_entry_t *entry = zipy_entry(zip, i - 1u);
+    zipy_extract_options_t dirOptions;
+    int ret;
+
+    if (!entry || !entry->is_directory)
+      continue;
+    if (policies && policies[i - 1u] == ZIPY_CONFLICT_SKIP)
+      continue;
+
+    dirOptions = *options;
+    if (policies)
+      dirOptions.on_conflict = policies[i - 1u];
+
+    ret = zipy_extract_to(zip, i - 1u, extractdir, &dirOptions);
+    if (ret < ZIPY_ZIP_OK)
+      return 1;
+  }
+
+  return 0;
+}
+
 int
 main(int argc, char *argv[]) {
   zipy_archive_t *zip;
@@ -1448,7 +1502,7 @@ main(int argc, char *argv[]) {
   /* Open ZIP file */
   zip = zipy_open(zipfile);
   if (!zip) {
-    fprintf(stderr, "Error: Cannot open ZIP file '%s'\n", zipfile);
+    print_error("Error: Cannot open ZIP file '%s'\n", zipfile);
     return 1;
   }
   
@@ -1468,7 +1522,7 @@ main(int argc, char *argv[]) {
   if (needsSaveDir) {
     save_dir = create_save_dir(extractdir, config.options.save_to);
     if (!save_dir) {
-      fprintf(stderr, "Error: Failed to create saved folder\n");
+      print_error("Error: Failed to create saved folder\n");
       zipy_close(zip);
       free(policies);
       return 1;
@@ -1484,6 +1538,8 @@ main(int argc, char *argv[]) {
   else
     success = extract_serial(zip, extractdir, &config.options, policies, &progress,
                              count, &extracted, &saved, &skipped);
+  if (!success)
+    success = apply_directory_entries(zip, extractdir, &config.options, policies, count);
 
   elapsedMs = now_ms() - startMs;
   format_duration(elapsed, sizeof(elapsed), elapsedMs);
