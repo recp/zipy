@@ -11,6 +11,8 @@
 #define _FILE_OFFSET_BITS 64
 #define _LARGEFILE_SOURCE
 
+#include "thread/thread.h"
+
 #include <defl/infl.h>
 #include <zap/zip.h>
 
@@ -60,6 +62,7 @@ typedef struct ZapFile {
 
 struct ZapArchive {
   FILE    *fp;
+  char    *path;
   ZapFile *files;
   size_t   fileCount;
   uint64_t fileSize;
@@ -155,6 +158,23 @@ zap_u64_to_size(uint64_t value, size_t *out) {
 
   *out = (size_t)value;
   return 1;
+}
+
+static char *
+zap_strdup(const char *src) {
+  size_t len;
+  char *dst;
+
+  if (!src)
+    return NULL;
+
+  len = strlen(src);
+  dst = malloc(len + 1);
+  if (!dst)
+    return NULL;
+
+  memcpy(dst, src, len + 1);
+  return dst;
 }
 
 static char *
@@ -714,6 +734,10 @@ zap_open(const char *path) {
     goto err;
 
   zap->fp = fp;
+  zap->path = zap_strdup(path);
+  if (!zap->path)
+    goto err;
+
   zap->fileCount = count;
   zap->fileSize = dir.fileSize;
 
@@ -797,6 +821,7 @@ zap_open(const char *path) {
 err:
   if (zap) {
     zap_free_files(zap);
+    free(zap->path);
     free(zap);
   }
   fclose(fp);
@@ -920,13 +945,34 @@ zap_extract_named(ZapArchive *zap, const char *name, const char *destpath) {
   return zap_extract_entry(zap, info, destpath);
 }
 
-ZAP_EXPORT
-int
-zap_extract_all(ZapArchive *zap, const char *destdir) {
-  size_t i;
+typedef struct ZapExtractAllContext {
+  const char *zipPath;
+  const char *destdir;
+  ZapMutex    lock;
+  size_t      count;
+  size_t      next;
+  int         result;
+} ZapExtractAllContext;
 
-  if (!zap || !destdir)
-    return ZAP_ZIP_ERR;
+static size_t
+zap_extract_default_jobs(size_t count) {
+  size_t jobs;
+
+  if (count <= 1)
+    return 1;
+
+  jobs = zap_cpu_count();
+  if (jobs < 1)
+    jobs = 1;
+  if (jobs > count)
+    jobs = count;
+
+  return jobs;
+}
+
+static int
+zap_extract_all_serial(ZapArchive *zap, const char *destdir) {
+  size_t i;
 
   for (i = 0; i < zap->fileCount; i++) {
     char *path;
@@ -945,6 +991,116 @@ zap_extract_all(ZapArchive *zap, const char *destdir) {
   return ZAP_ZIP_OK;
 }
 
+static void
+zap_extract_all_worker(void *arg) {
+  ZapExtractAllContext *ctx;
+  ZapArchive *zap;
+  size_t index;
+
+  ctx = arg;
+  zap = zap_open(ctx->zipPath);
+  if (!zap) {
+    zap_lock(&ctx->lock);
+    if (ctx->result == ZAP_ZIP_OK)
+      ctx->result = ZAP_ZIP_EFILE;
+    zap_unlock(&ctx->lock);
+    return;
+  }
+
+  for (;;) {
+    const ZapEntry *entry;
+    char *path;
+    int ret;
+
+    zap_lock(&ctx->lock);
+    if (ctx->result != ZAP_ZIP_OK || ctx->next >= ctx->count) {
+      zap_unlock(&ctx->lock);
+      break;
+    }
+    index = ctx->next++;
+    zap_unlock(&ctx->lock);
+
+    entry = zap_entry(zap, index);
+    if (!entry) {
+      ret = ZAP_ZIP_EFILE;
+      goto fail;
+    }
+
+    path = zap_extract_path(ctx->destdir, entry->name);
+    if (!path) {
+      ret = ZAP_ZIP_ERR;
+      goto fail;
+    }
+
+    ret = zap_extract(zap, index, path);
+    free(path);
+    if (ret == ZAP_ZIP_OK)
+      continue;
+
+  fail:
+    zap_lock(&ctx->lock);
+    if (ctx->result == ZAP_ZIP_OK)
+      ctx->result = ret;
+    zap_unlock(&ctx->lock);
+    break;
+  }
+
+  zap_close(zap);
+}
+
+static int
+zap_extract_all_parallel(ZapArchive *zap, const char *destdir, size_t jobs) {
+  ZapExtractAllContext ctx;
+  ZapThread *threads;
+  size_t i, started;
+  int result;
+
+  if (!zap->path || jobs <= 1)
+    return zap_extract_all_serial(zap, destdir);
+
+  threads = calloc(jobs, sizeof(*threads));
+  if (!threads)
+    return zap_extract_all_serial(zap, destdir);
+
+  memset(&ctx, 0, sizeof(ctx));
+  ctx.zipPath = zap->path;
+  ctx.destdir = destdir;
+  ctx.count = zap->fileCount;
+  ctx.result = ZAP_ZIP_OK;
+  zap_mutex_init(&ctx.lock);
+
+  started = 0;
+  for (i = 0; i < jobs; i++) {
+    if (zap_thread_start(&threads[i], zap_extract_all_worker, &ctx) != 0)
+      break;
+    started++;
+  }
+
+  if (started == 0) {
+    zap_mutex_destroy(&ctx.lock);
+    free(threads);
+    return zap_extract_all_serial(zap, destdir);
+  }
+
+  for (i = 0; i < started; i++)
+    zap_thread_join(&threads[i]);
+
+  result = ctx.result;
+  zap_mutex_destroy(&ctx.lock);
+  free(threads);
+  return result;
+}
+
+ZAP_EXPORT
+int
+zap_extract_all(ZapArchive *zap, const char *destdir) {
+  if (!zap || !destdir)
+    return ZAP_ZIP_ERR;
+
+  return zap_extract_all_parallel(zap, destdir,
+                                  zap_extract_default_jobs(zap->fileCount));
+}
+
 ZAP_EXPORT
 void
 zap_close(ZapArchive *zap) {
@@ -952,6 +1108,7 @@ zap_close(ZapArchive *zap) {
     return;
 
   zap_free_files(zap);
+  free(zap->path);
   if (zap->fp)
     fclose(zap->fp);
   free(zap);

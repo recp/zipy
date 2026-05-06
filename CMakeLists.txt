@@ -52,8 +52,16 @@ if(NOT EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/deps/defl/include/defl/infl.h"
   message(FATAL_ERROR "Missing submodules. Run: git submodule update --init")
 endif()
 
+if(WIN32)
+    set(ZAP_THREAD_SOURCE src/win/thread.c)
+else()
+    set(ZAP_THREAD_SOURCE src/posix/thread.c)
+    find_package(Threads REQUIRED)
+endif()
+
 add_library(${PROJECT_NAME}
         src/zip.c
+        ${ZAP_THREAD_SOURCE}
         deps/defl/src/infl/infl.c
         deps/defl/src/infl/mem.c
 )
@@ -84,6 +92,13 @@ target_compile_definitions(zap
         UNZ_EXPORTS=1
 )
 
+if(NOT WIN32)
+    target_link_libraries(zap
+        PUBLIC
+            Threads::Threads
+    )
+endif()
+
 # Executable target
 if(ZAP_BUILD_EXECUTABLE)
     add_executable(zap-bin
@@ -99,6 +114,12 @@ if(ZAP_BUILD_EXECUTABLE)
         PRIVATE
             zap
     )
+
+    target_include_directories(zap-bin
+        PRIVATE
+            ${CMAKE_CURRENT_SOURCE_DIR}/src
+    )
+
 endif()
 
 install(TARGETS zap
