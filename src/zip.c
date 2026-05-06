@@ -953,21 +953,28 @@ done:
 
 static int
 zipy_append_saved_manifest(const char *saveDir,
-                           const char *originalPath,
-                           const char *savedPath) {
+                           const char *savedRelativePath,
+                           const char *originalPath) {
   char *manifest;
   FILE *fp;
+  size_t len, i;
 
   manifest = zipy_join_path(saveDir, "zipy_saved_original_paths.txt");
   if (!manifest)
     return 0;
+
+  len = strlen(savedRelativePath);
+  while (len > 0 && zipy_is_zip_sep(savedRelativePath[len - 1]))
+    len--;
 
   fp = fopen(manifest, "ab");
   free(manifest);
   if (!fp)
     return 0;
 
-  fprintf(fp, "%s -> %s\n", originalPath, savedPath);
+  for (i = 0; i < len; i++)
+    fputc(zipy_is_zip_sep(savedRelativePath[i]) ? '/' : savedRelativePath[i], fp);
+  fprintf(fp, " -> %s\n", originalPath);
   if (fclose(fp) != 0)
     return 0;
 
@@ -1006,7 +1013,6 @@ zipy_prepare_conflict(const char *destdir,
   char *cleanDestPath = NULL;
   char *cleanSavePath = NULL;
   char *originalAbs = NULL;
-  char *savedAbs = NULL;
   int ret = ZIPY_ZIP_OK;
 
   cleanDestPath = zipy_trim_trailing_seps(destpath);
@@ -1085,9 +1091,8 @@ zipy_prepare_conflict(const char *destdir,
     goto done;
   }
 
-  savedAbs = zipy_abs_path(cleanSavePath);
-  if (!originalAbs || !savedAbs
-      || !zipy_append_saved_manifest(*saveDir, originalAbs, savedAbs)) {
+  if (!originalAbs
+      || !zipy_append_saved_manifest(*saveDir, entry->name, originalAbs)) {
     ret = ZIPY_ZIP_EFILE;
     goto done;
   }
@@ -1095,7 +1100,6 @@ zipy_prepare_conflict(const char *destdir,
   ret = ZIPY_ZIP_SAVED;
 
 done:
-  free(savedAbs);
   free(originalAbs);
   free(cleanSavePath);
   free(cleanDestPath);

@@ -1,8 +1,8 @@
 # zipy
 
 zipy is a small, fast ZIP extractor and C library. It reads ZIP central
-directories, extracts stored and deflated entries, validates CRC32, and avoids
-overwriting existing files by default.
+directories, extracts stored and deflated entries, validates CRC32, and keeps
+existing files safe on conflicts.
 
 ## Build
 
@@ -22,17 +22,25 @@ zipy archive.zip -d target -j auto
 zipy archive.zip -d target -j 1
 ```
 
-By default, zipy extracts with multiple worker threads and saves existing
-target files before writing new files.
+By default, the CLI asks what to do when an extracted entry would replace an
+existing file. Non-interactive runs fall back to saving existing files before
+writing new files.
 
 ## Conflicts
 
 ```ini
-on_conflict = save | overwrite | skip | fail
+on_conflict = ask | save | overwrite | skip | fail
 save_to = target | home | trash
 ```
 
-Defaults:
+CLI defaults:
+
+```ini
+on_conflict = ask
+save_to = target
+```
+
+Library defaults:
 
 ```ini
 on_conflict = save
@@ -55,16 +63,18 @@ If the saved folder name already exists, zipy appends a number such as
 `save_to = home` creates it directly under `~/`.
 `save_to = trash` creates it under the platform trash location.
 
-`zipy_saved_original_paths.txt` records each moved file as:
+`zipy_saved_original_paths.txt` records each moved file as a saved-folder
+relative path pointing back to the original full path:
 
 ```text
-/original/full/path -> /saved/full/path
+1F26 -> /original/full/path/1F26
 ```
 
 ## Config
 
 ```sh
 zipy --config
+zipy --config on_conflict=ask
 zipy --config on_conflict=save
 zipy --config save_to=trash
 ```
@@ -83,6 +93,7 @@ Command line options override both config and environment values:
 
 ```sh
 zipy archive.zip -d target --on-conflict overwrite
+zipy archive.zip -d target --on-conflict ask
 zipy archive.zip -d target --save-to trash
 ```
 
