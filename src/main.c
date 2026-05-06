@@ -9,6 +9,7 @@
  */
 
 #include "thread/thread.h"
+#include "zip_private.h"
 
 #include <zipy/zip.h>
 #include <ctype.h>
@@ -1289,7 +1290,7 @@ extract_worker(void *arg) {
   size_t index;
 
   ctx = arg;
-  zip = zipy_open(ctx->zipfile);
+  zip = zipy_clone(ctx->entries);
   if (!zip) {
     zipy_lock(&ctx->lock);
     ctx->failed = 1;

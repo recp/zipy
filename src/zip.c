@@ -13,6 +13,7 @@
 
 #include "crypto/dec.h"
 #include "thread/thread.h"
+#include "zip_private.h"
 
 #include <defl/infl.h>
 #include <zipy/zip.h>
@@ -114,6 +115,8 @@ struct zipy_archive_t {
   uint64_t file_size;
   const uint8_t *map;
   size_t   map_size;
+  int      owns_files;
+  int      owns_map;
   zipy_path_buf_t path_buf;
   zipy_path_buf_t parent_buf;
   uint8_t *copy_buf;
@@ -308,6 +311,7 @@ zipy_map_archive(zipy_archive_t *zipy) {
     zipy->map = view;
     zipy->map_size = (size_t)zipy->file_size;
     zipy->map_handle = mapping;
+    zipy->owns_map = 1;
   }
 #else
   {
@@ -324,6 +328,7 @@ zipy_map_archive(zipy_archive_t *zipy) {
 
     zipy->map = view;
     zipy->map_size = (size_t)zipy->file_size;
+    zipy->owns_map = 1;
   }
 #endif
 }
@@ -332,6 +337,12 @@ static void
 zipy_unmap_archive(zipy_archive_t *zipy) {
   if (!zipy || !zipy->map)
     return;
+
+  if (!zipy->owns_map) {
+    zipy->map = NULL;
+    zipy->map_size = 0;
+    return;
+  }
 
 #if defined(_WIN32)
   UnmapViewOfFile(zipy->map);
@@ -344,6 +355,7 @@ zipy_unmap_archive(zipy_archive_t *zipy) {
 
   zipy->map = NULL;
   zipy->map_size = 0;
+  zipy->owns_map = 0;
 }
 
 static const uint8_t *
@@ -1180,6 +1192,12 @@ zipy_free_files(zipy_archive_t *zipy) {
 
   if (!zipy || !zipy->files)
     return;
+
+  if (!zipy->owns_files) {
+    zipy->files = NULL;
+    zipy->file_count = 0;
+    return;
+  }
 
   for (i = 0; i < zipy->file_count; i++)
     free((char *)zipy->files[i].entry.name);
@@ -2022,6 +2040,7 @@ zipy_open(const char *path) {
     zipy->files = calloc(count, sizeof(*zipy->files));
     if (!zipy->files)
       goto err;
+    zipy->owns_files = 1;
   }
 
   if (zipy_seek_set(fp, dir.central_dir_offset) != 0)
@@ -2139,6 +2158,45 @@ err:
     free(zipy);
   }
   fclose(fp);
+  return NULL;
+}
+
+zipy_archive_t *
+zipy_clone(zipy_archive_t *zipy) {
+  zipy_archive_t *clone;
+
+  if (!zipy || !zipy->path || !zipy->fp)
+    return NULL;
+
+  clone = calloc(1, sizeof(*clone));
+  if (!clone)
+    return NULL;
+
+  clone->fp = fopen(zipy->path, "rb");
+  if (!clone->fp)
+    goto err;
+
+  clone->path = zipy_strdup(zipy->path);
+  if (!clone->path)
+    goto err;
+
+  clone->files = zipy->files;
+  clone->file_count = zipy->file_count;
+  clone->file_size = zipy->file_size;
+  clone->owns_files = 0;
+
+  if (zipy->map) {
+    clone->map = zipy->map;
+    clone->map_size = zipy->map_size;
+    clone->owns_map = 0;
+  } else {
+    zipy_map_archive(clone);
+  }
+
+  return clone;
+
+err:
+  zipy_close(clone);
   return NULL;
 }
 
@@ -2409,7 +2467,7 @@ zipy_extract_named(zipy_archive_t *zipy, const char *name, const char *destpath)
 }
 
 typedef struct zipy_extract_all_context_t {
-  const char *zipPath;
+  zipy_archive_t *source;
   const char *destdir;
   const char *password;
   const unsigned char *skip;
@@ -2476,7 +2534,7 @@ zipy_extract_all_worker(void *arg) {
   size_t index;
 
   ctx = arg;
-  zipy = zipy_open(ctx->zipPath);
+  zipy = zipy_clone(ctx->source);
   if (!zipy) {
     zipy_lock(&ctx->lock);
     if (ctx->result == ZIPY_ZIP_OK)
@@ -2552,7 +2610,7 @@ zipy_extract_all_parallel(zipy_archive_t *zipy,
     return zipy_extract_all_serial(zipy, destdir, skip, flags, password);
 
   memset(&ctx, 0, sizeof(ctx));
-  ctx.zipPath = zipy->path;
+  ctx.source = zipy;
   ctx.destdir = destdir;
   ctx.password = password;
   ctx.skip = skip;
