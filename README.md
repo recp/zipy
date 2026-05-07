@@ -118,8 +118,8 @@ zipy_extract_all(zip, "target");
 zipy_close(zip);
 ```
 
-Use `zipy_file_count(zip)` for progress UIs. `zipy_count(zip)` returns all
-entries, including directories.
+Use `zipy_file_count(zip)` and `zipy_uncompressed_size(zip)` for progress or
+space checks. `zipy_count(zip)` returns all entries, including directories.
 
 Use `zipy_extract_all_options()` or `zipy_extract_to()` to set conflict
 behavior explicitly:

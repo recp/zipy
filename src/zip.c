@@ -147,6 +147,7 @@ struct zipy_archive_t {
   size_t   extract_work_file_count;
   size_t   directory_count;
   uint64_t extract_work_size;
+  uint64_t extract_uncompressed_size;
   uint64_t file_size;
   const uint8_t *map;
   size_t   map_size;
@@ -1186,6 +1187,10 @@ zipy_record_extract_metrics(zipy_archive_t * ZIPY_RESTRICT zipy,
   }
 
   zipy->extract_file_count++;
+  if (UINT64_MAX - zipy->extract_uncompressed_size < info->entry.uncompressed_size)
+    zipy->extract_uncompressed_size = UINT64_MAX;
+  else
+    zipy->extract_uncompressed_size += info->entry.uncompressed_size;
   if (info->entry.method == ZIPY_ZIP_STORE && !(info->flags & ZIP_FLAG_ENCRYPTED))
     return;
 
@@ -3246,6 +3251,7 @@ zipy_clone_init(zipy_archive_t *clone, zipy_archive_t *zipy) {
   clone->extract_work_file_count = zipy->extract_work_file_count;
   clone->directory_count = zipy->directory_count;
   clone->extract_work_size = zipy->extract_work_size;
+  clone->extract_uncompressed_size = zipy->extract_uncompressed_size;
   clone->file_size = zipy->file_size;
   clone->owns_files = 0;
   clone->has_encrypted = zipy->has_encrypted;
@@ -3532,6 +3538,12 @@ ZIPY_EXPORT
 size_t
 zipy_file_count(const zipy_archive_t *zipy) {
   return zipy ? zipy->extract_file_count : 0;
+}
+
+ZIPY_EXPORT
+uint64_t
+zipy_uncompressed_size(const zipy_archive_t *zipy) {
+  return zipy ? zipy->extract_uncompressed_size : 0;
 }
 
 ZIPY_EXPORT

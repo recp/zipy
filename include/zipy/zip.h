@@ -87,6 +87,9 @@ zipy_count(const zipy_archive_t *zipy);
 ZIPY_EXPORT size_t
 zipy_file_count(const zipy_archive_t *zipy);
 
+ZIPY_EXPORT uint64_t
+zipy_uncompressed_size(const zipy_archive_t *zipy);
+
 ZIPY_EXPORT const zipy_entry_t *
 zipy_entry(const zipy_archive_t *zipy, size_t index);
 
