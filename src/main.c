@@ -338,12 +338,15 @@ clamp_jobs(size_t jobs, size_t count) {
 }
 
 static size_t
-adaptive_jobs(zipy_archive_t *zip, size_t count) {
+adaptive_jobs(zipy_archive_t *zip, size_t count, size_t *filesOut) {
   uint64_t workSize = 0;
   size_t i, files = 0, workFiles = 0;
   size_t jobs;
 
-  if (!zip || count <= 1)
+  if (filesOut)
+    *filesOut = 0;
+
+  if (!zip)
     return 1;
 
   for (i = 0; i < count; i++) {
@@ -361,6 +364,9 @@ adaptive_jobs(zipy_archive_t *zip, size_t count) {
       workSize += entry->uncompressed_size;
   }
 
+  if (filesOut)
+    *filesOut = files;
+
   if (files <= 1
       || workFiles <= 1
       || (workFiles < ZIPY_PARALLEL_MIN_ENTRIES
@@ -369,23 +375,6 @@ adaptive_jobs(zipy_archive_t *zip, size_t count) {
 
   jobs = cpu_jobs(workFiles);
   return jobs > 0 ? jobs : 1;
-}
-
-static size_t
-file_count(zipy_archive_t *zip, size_t count) {
-  size_t i, files = 0;
-
-  if (!zip)
-    return 0;
-
-  for (i = 0; i < count; i++) {
-    const zipy_entry_t *entry = zipy_entry(zip, i);
-
-    if (entry && !entry->is_directory)
-      files++;
-  }
-
-  return files;
 }
 
 static void
@@ -1539,6 +1528,7 @@ main(int argc, char *argv[]) {
   int noProgress = 0;
   int jobsSpecified = 0;
   size_t jobs = 0;
+  size_t autoJobs = 1;
   size_t count = 0, files = 0, extracted = 0, saved = 0, skipped = 0;
   uint64_t startMs, elapsedMs;
   char elapsed[32];
@@ -1619,12 +1609,12 @@ main(int argc, char *argv[]) {
 
   /* Extract all files */
   count = zipy_count(zip);
-  files = file_count(zip, count);
+  autoJobs = adaptive_jobs(zip, count, &files);
   if (jobsSpecified && jobs != 0) {
     jobs = clamp_jobs(jobs, count);
     config.options.jobs = jobs;
   } else {
-    jobs = adaptive_jobs(zip, count);
+    jobs = autoJobs;
     config.options.jobs = 0;
   }
   progress_init(&progress, noProgress ? NULL : stderr, count);
