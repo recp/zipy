@@ -1671,6 +1671,18 @@ replace_file(const char *src, const char *dst) {
   return 0;
 }
 
+static void
+remove_empty_dir(const char *path) {
+  if (!path || !*path)
+    return;
+
+#if defined(_WIN32)
+  (void)_rmdir(path);
+#else
+  (void)rmdir(path);
+#endif
+}
+
 static int
 path_buf_set_dir(path_buf_t * __restrict buf,
                  const char * __restrict dir,
@@ -1763,6 +1775,43 @@ resume_part_path(zipy_archive_t * __restrict zipy,
     return NULL;
 
   return zipy->part_buf.data;
+}
+
+static void
+cleanup_empty_parts_dirs(zipy_archive_t * __restrict zipy,
+                         const char * __restrict destdir,
+                         const char * __restrict partpath) {
+  char *p, *last;
+  size_t stopLen, len;
+
+  if (!zipy || !destdir || !partpath)
+    return;
+  if (!path_buf_set_dir(&zipy->state_buf, destdir, &stopLen))
+    return;
+
+  len = strlen(partpath);
+  if (len <= stopLen || strncmp(partpath, zipy->state_buf.data, stopLen) != 0)
+    return;
+  if (!path_buf_reserve(&zipy->parent_buf, len + 1u))
+    return;
+
+  memcpy(zipy->parent_buf.data, partpath, len + 1u);
+  for (;;) {
+    last = NULL;
+    for (p = zipy->parent_buf.data; *p; p++) {
+      if (is_fs_sep(*p))
+        last = p;
+    }
+    if (!last)
+      return;
+
+    *last = '\0';
+    len = strlen(zipy->parent_buf.data);
+    if (len <= stopLen)
+      return;
+
+    remove_empty_dir(zipy->parent_buf.data);
+  }
 }
 
 static void
@@ -4149,6 +4198,8 @@ extract_entry(zipy_archive_t * __restrict zipy,
                        resume_offset,
                        extract_flags,
                        ret == ZIPY_ZIP_OK ? "done" : "failed");
+  if (use_part && !keep_part && part_destdir)
+    cleanup_empty_parts_dirs(zipy, part_destdir, output_path);
 
   return ret;
 }
