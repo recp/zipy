@@ -275,6 +275,8 @@ config_default(config_t *config) {
   config->options.flags = ZIPY_EXTRACT_DEFAULT;
   config->options.password = NULL;
   config->options.jobs = 0;
+  config->options.progress = NULL;
+  config->options.userdata = NULL;
 }
 
 static const char *

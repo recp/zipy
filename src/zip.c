@@ -3623,6 +3623,8 @@ default_extract_options(const zipy_extract_options_t *options) {
   out.flags = ZIPY_EXTRACT_DEFAULT;
   out.password = NULL;
   out.jobs = 0;
+  out.progress = NULL;
+  out.userdata = NULL;
 
   if (!options)
     return out;
@@ -3641,6 +3643,25 @@ default_extract_options(const zipy_extract_options_t *options) {
     out.on_conflict = ZIPY_CONFLICT_OVERWRITE;
 
   return out;
+}
+
+static uint64_t
+entry_progress_size(const entry_info_t *info) {
+  if (!info || info->entry.is_directory)
+    return 0;
+  return info->entry.uncompressed_size;
+}
+
+static int
+report_progress(const zipy_extract_options_t *options,
+                const zipy_entry_t *entry,
+                uint64_t done,
+                uint64_t total) {
+  if (!options || !options->progress)
+    return ZIPY_ZIP_OK;
+  return options->progress(options->userdata, entry, done, total)
+       ? ZIPY_ZIP_OK
+       : ZIPY_ZIP_ECANCEL;
 }
 
 static int
@@ -5109,7 +5130,7 @@ zipy_extract_to(zipy_archive_t * __restrict zipy,
                                             &save_dir);
   if (conflictRet == ZIPY_ZIP_SKIPPED) {
     ret = ZIPY_ZIP_SKIPPED;
-    goto done;
+    goto report;
   }
   if (conflictRet < ZIPY_ZIP_OK) {
     ret = conflictRet;
@@ -5128,6 +5149,15 @@ zipy_extract_to(zipy_archive_t * __restrict zipy,
                            destdir);
   if (ret == ZIPY_ZIP_OK && conflictRet == ZIPY_ZIP_SAVED)
     ret = ZIPY_ZIP_SAVED;
+
+report:
+  if (ret >= ZIPY_ZIP_OK && !info->entry.is_directory) {
+    uint64_t done = entry_progress_size(info);
+    int progressRet = report_progress(&opts, &info->entry, done, done);
+
+    if (progressRet < ZIPY_ZIP_OK)
+      ret = progressRet;
+  }
 
 done:
   free(save_dir);
@@ -5161,13 +5191,14 @@ zipy_extract_named(zipy_archive_t * __restrict zipy,
 typedef struct extract_all_context_t {
   zipy_archive_t *source;
   const char *destdir;
-  const char *password;
+  const zipy_extract_options_t *options;
   const char *state_path;
   const unsigned char *skip;
-  uint32_t    flags;
   mutex_handle_t    lock;
   size_t      count;
   size_t      next;
+  uint64_t    done;
+  uint64_t    total;
   int         result;
 } extract_all_context_t;
 
@@ -5222,13 +5253,68 @@ extract_clamp_jobs(const zipy_archive_t *zipy, size_t jobs) {
 }
 
 static int
+extract_all_report(const zipy_extract_options_t *options,
+                   const entry_info_t *info,
+                   uint64_t *done,
+                   uint64_t total) {
+  uint64_t size;
+
+  if (!options || !options->progress || !info || info->entry.is_directory)
+    return ZIPY_ZIP_OK;
+
+  size = entry_progress_size(info);
+  if (UINT64_MAX - *done < size)
+    *done = UINT64_MAX;
+  else
+    *done += size;
+
+  return report_progress(options, &info->entry, *done, total);
+}
+
+static int
+extract_all_report_locked(extract_all_context_t *ctx,
+                          const entry_info_t *info) {
+  const zipy_extract_options_t *options;
+  uint64_t done;
+  uint64_t total;
+  uint64_t size;
+  int ret;
+
+  if (!ctx
+      || !ctx->options
+      || !ctx->options->progress
+      || !info
+      || info->entry.is_directory)
+    return ZIPY_ZIP_OK;
+
+  size = entry_progress_size(info);
+  mutex_lock(&ctx->lock);
+  if (UINT64_MAX - ctx->done < size)
+    ctx->done = UINT64_MAX;
+  else
+    ctx->done += size;
+  done = ctx->done;
+  total = ctx->total;
+  options = ctx->options;
+  ret = report_progress(options, &info->entry, done, total);
+  if (ret < ZIPY_ZIP_OK) {
+    if (ctx->result == ZIPY_ZIP_OK)
+      ctx->result = ret;
+  }
+  mutex_unlock(&ctx->lock);
+
+  return ret;
+}
+
+static int
 extract_all_serial(zipy_archive_t *zipy,
                         const char *destdir,
                         const unsigned char *skip,
-                        uint32_t flags,
-                        const char *password,
+                        const zipy_extract_options_t *options,
                         const char *state_path) {
   size_t i, prefixLen;
+  uint64_t done = 0;
+  uint64_t total = zipy ? zipy->extract_uncompressed_size : 0;
 
   if (!path_buf_set_archive_dir(zipy, destdir, &prefixLen))
     return ZIPY_ZIP_ERR;
@@ -5238,10 +5324,14 @@ extract_all_serial(zipy_archive_t *zipy,
     const char *path;
     int ret;
 
-    if (skip && skip[i])
-      continue;
-
     info = &zipy->files[i];
+    if (skip && skip[i]) {
+      ret = extract_all_report(options, info, &done, total);
+      if (ret < ZIPY_ZIP_OK)
+        return ret;
+      continue;
+    }
+
     path = path_buf_append_name(&zipy->path_buf,
                                      prefixLen,
                                      info->entry.name,
@@ -5254,10 +5344,14 @@ extract_all_serial(zipy_archive_t *zipy,
                              info,
                              path,
                              extract_parent_len(info, prefixLen),
-                             flags | EXTRACT_DELAY_DIR_METADATA,
-                             password,
+                             options->flags | EXTRACT_DELAY_DIR_METADATA,
+                             options->password,
                              state_path,
                              destdir);
+    if (ret < ZIPY_ZIP_OK)
+      return ret;
+
+    ret = extract_all_report(options, info, &done, total);
     if (ret < ZIPY_ZIP_OK)
       return ret;
   }
@@ -5308,14 +5402,18 @@ extract_all_worker(void *arg) {
     mutex_unlock(&ctx->lock);
 
     for (; index < end; index++) {
-      if (ctx->skip && ctx->skip[index])
-        continue;
-
       if (index >= zipy->file_count) {
         ret = ZIPY_ZIP_EFILE;
         goto fail;
       }
       info = &zipy->files[index];
+
+      if (ctx->skip && ctx->skip[index]) {
+        ret = extract_all_report_locked(ctx, info);
+        if (ret < ZIPY_ZIP_OK)
+          goto fail;
+        continue;
+      }
 
       path = path_buf_append_name(&zipy->path_buf,
                                        prefixLen,
@@ -5331,10 +5429,14 @@ extract_all_worker(void *arg) {
                                info,
                                path,
                                extract_parent_len(info, prefixLen),
-                               ctx->flags | EXTRACT_DELAY_DIR_METADATA,
-                               ctx->password,
+                               ctx->options->flags | EXTRACT_DELAY_DIR_METADATA,
+                               ctx->options->password,
                                ctx->state_path,
                                ctx->destdir);
+      if (ret < ZIPY_ZIP_OK)
+        goto fail;
+
+      ret = extract_all_report_locked(ctx, info);
       if (ret < ZIPY_ZIP_OK)
         goto fail;
     }
@@ -5357,8 +5459,7 @@ extract_all_parallel(zipy_archive_t *zipy,
                           const char *destdir,
                           size_t jobs,
                           const unsigned char *skip,
-                          uint32_t flags,
-                          const char *password,
+                          const zipy_extract_options_t *options,
                           const char *state_path) {
   extract_all_context_t ctx;
   thread_handle_t stack_threads[ZIP_STACK_THREADS];
@@ -5367,24 +5468,24 @@ extract_all_parallel(zipy_archive_t *zipy,
   int result;
 
   if (!zipy->path || jobs <= 1)
-    return extract_all_serial(zipy, destdir, skip, flags, password, state_path);
+    return extract_all_serial(zipy, destdir, skip, options, state_path);
 
   if (jobs <= ZIP_STACK_THREADS) {
     threads = stack_threads;
   } else {
     threads = calloc(jobs, sizeof(*threads));
     if (!threads)
-      return extract_all_serial(zipy, destdir, skip, flags, password, state_path);
+      return extract_all_serial(zipy, destdir, skip, options, state_path);
   }
 
   memset(&ctx, 0, sizeof(ctx));
   ctx.source = zipy;
   ctx.destdir = destdir;
-  ctx.password = password;
+  ctx.options = options;
   ctx.state_path = state_path;
   ctx.skip = skip;
-  ctx.flags = flags;
   ctx.count = zipy->file_count;
+  ctx.total = zipy->extract_uncompressed_size;
   ctx.result = ZIPY_ZIP_OK;
   mutex_init(&ctx.lock);
 
@@ -5399,7 +5500,7 @@ extract_all_parallel(zipy_archive_t *zipy,
     mutex_destroy(&ctx.lock);
     if (threads != stack_threads)
       free(threads);
-    return extract_all_serial(zipy, destdir, skip, flags, password, state_path);
+    return extract_all_serial(zipy, destdir, skip, options, state_path);
   }
 
   for (i = 0; i < started; i++)
@@ -5541,8 +5642,7 @@ zipy_extract_all(zipy_archive_t * __restrict zipy,
                                destdir,
                                jobs,
                                skip,
-                               opts.flags,
-                               opts.password,
+                               &opts,
                                state_path);
   }
   if (ret == ZIPY_ZIP_OK && !(opts.flags & ZIPY_EXTRACT_NO_METADATA))
@@ -5569,6 +5669,7 @@ zipy_extract_stream(const char * __restrict path,
   uint8_t *extra_buf = NULL;
   size_t extra_cap = 0;
   const char *state_path = NULL;
+  uint64_t progress_done = 0;
   size_t prefixLen;
   int ret = ZIPY_ZIP_OK;
 
@@ -5795,6 +5896,9 @@ zipy_extract_stream(const char * __restrict path,
         if (ret < ZIPY_ZIP_OK)
           break;
       }
+      ret = extract_all_report(&opts, &info, &progress_done, 0);
+      if (ret < ZIPY_ZIP_OK)
+        break;
       continue;
     }
     if (conflictRet < ZIPY_ZIP_OK) {
@@ -5830,6 +5934,9 @@ zipy_extract_stream(const char * __restrict path,
                           state_path,
                           destdir);
     }
+    if (ret < ZIPY_ZIP_OK)
+      break;
+    ret = extract_all_report(&opts, &info, &progress_done, 0);
     if (ret < ZIPY_ZIP_OK)
       break;
     if (unknownDataDesc)

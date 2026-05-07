@@ -137,7 +137,9 @@ zipy_extract_options_t options = {
   .save_dir = NULL,
   .flags = ZIPY_EXTRACT_FAST,
   .password = NULL,
-  .jobs = 0
+  .jobs = 0,
+  .progress = NULL,
+  .userdata = NULL
 };
 
 zipy_archive_t *zip = zipy_open("archive.zip");
@@ -147,6 +149,26 @@ zipy_close(zip);
 
 `ask` is CLI-only. Apps should show their own UI and pass `save`,
 `overwrite`, `skip`, or `fail`.
+
+Set `progress` to receive cumulative extracted-byte updates after each file.
+Return zero from the callback to cancel extraction; zipy returns
+`ZIPY_ZIP_ECANCEL`. `zipy_extract_stream()` reports `total = 0` because the
+central directory may not be available yet. With `jobs > 1`, callbacks may run
+from worker threads.
+
+```c
+static int
+on_progress(void *userdata,
+            const zipy_entry_t *entry,
+            uint64_t done,
+            uint64_t total) {
+  (void)userdata;
+  (void)entry;
+  (void)done;
+  (void)total;
+  return 1; /* nonzero continues */
+}
+```
 
 Use `zipy_extract_stream(path, target, options)` to walk local file headers
 instead of opening the central directory first. This is the first streaming

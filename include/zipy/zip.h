@@ -29,7 +29,8 @@ typedef enum zipy_zip_result_t {
   ZIPY_ZIP_EEXIST   = -7,
   ZIPY_ZIP_EPASS    = -8,
   ZIPY_ZIP_EAUTH    = -9,
-  ZIPY_ZIP_ENOSPC   = -10
+  ZIPY_ZIP_ENOSPC   = -10,
+  ZIPY_ZIP_ECANCEL  = -11
 } zipy_zip_result_t;
 
 typedef enum zipy_zip_method_t {
@@ -60,15 +61,6 @@ typedef enum zipy_extract_flags_t {
   ZIPY_EXTRACT_FAST        = ZIPY_EXTRACT_NO_CRC | ZIPY_EXTRACT_NO_METADATA
 } zipy_extract_flags_t;
 
-typedef struct zipy_extract_options_t {
-  zipy_conflict_policy_t on_conflict;
-  zipy_save_location_t save_to;
-  const char       *save_dir;
-  uint32_t          flags;
-  const char       *password;
-  size_t            jobs;
-} zipy_extract_options_t;
-
 typedef struct zipy_entry_t {
   const char *name;
   size_t      name_len;
@@ -79,6 +71,23 @@ typedef struct zipy_entry_t {
   bool        is_directory;
   bool        encrypted;
 } zipy_entry_t;
+
+typedef int
+(*zipy_progress_t)(void *userdata,
+                   const zipy_entry_t *entry,
+                   uint64_t done,
+                   uint64_t total);
+
+typedef struct zipy_extract_options_t {
+  zipy_conflict_policy_t on_conflict;
+  zipy_save_location_t save_to;
+  const char       *save_dir;
+  uint32_t          flags;
+  const char       *password;
+  size_t            jobs;
+  zipy_progress_t   progress;
+  void             *userdata;
+} zipy_extract_options_t;
 
 ZIPY_EXPORT zipy_archive_t *
 zipy_open(const char * __restrict path);
