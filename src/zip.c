@@ -374,6 +374,42 @@ zipy_read(FILE * ZIPY_RESTRICT fp, void * ZIPY_RESTRICT buf, size_t len) {
 }
 
 static int
+zipy_write_file(FILE * ZIPY_RESTRICT fp,
+                const void * ZIPY_RESTRICT buf,
+                size_t len) {
+#if defined(_WIN32)
+  return len == 0 || fwrite(buf, 1, len, fp) == len;
+#else
+  const uint8_t *p = buf;
+  int fd;
+
+  if (len == 0)
+    return 1;
+
+  fd = fileno(fp);
+  if (fd < 0)
+    return 0;
+
+  while (len > 0) {
+    ssize_t n = write(fd, p, len);
+
+    if (n < 0) {
+      if (errno == EINTR)
+        continue;
+      return 0;
+    }
+    if (n == 0)
+      return 0;
+
+    p += (size_t)n;
+    len -= (size_t)n;
+  }
+
+  return 1;
+#endif
+}
+
+static int
 zipy_seek_set(FILE * ZIPY_RESTRICT fp, uint64_t off) {
 #if defined(_WIN32)
   if (off > (uint64_t)INT64_MAX)
@@ -1894,7 +1930,7 @@ zipy_write_chunk(FILE * ZIPY_RESTRICT out,
   if (dec)
     dec_decrypt(dec, buf, len);
 
-  if (fwrite(buf, 1, len, out) != len)
+  if (!zipy_write_file(out, buf, len))
     return ZIPY_ZIP_EFILE;
 
   if (check_crc)
@@ -1966,7 +2002,7 @@ zipy_copy_store_mapped(FILE * ZIPY_RESTRICT out,
   while (remaining > 0) {
     size_t n = zipy_chunk_size(remaining);
 
-    if (fwrite(src, 1, n, out) != n)
+    if (!zipy_write_file(out, src, n))
       return ZIPY_ZIP_EFILE;
 
     if (check_crc)
@@ -2069,7 +2105,7 @@ zipy_inflate_raw(zipy_archive_t * ZIPY_RESTRICT zipy,
 
   if (!mapped_out
       && uncompressed_size > 0
-      && fwrite(outbuf, 1, (size_t)uncompressed_size, out) != (size_t)uncompressed_size) {
+      && !zipy_write_file(out, outbuf, (size_t)uncompressed_size)) {
     ret = ZIPY_ZIP_EFILE;
     goto done;
   }
