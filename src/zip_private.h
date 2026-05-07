@@ -16,4 +16,10 @@
 zipy_archive_t *
 zipy_clone(zipy_archive_t *zipy);
 
+int
+zipy_has_encrypted(const zipy_archive_t *zipy);
+
+int
+zipy_has_symlink(const zipy_archive_t *zipy);
+
 #endif /* zipy_private_h */

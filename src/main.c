@@ -1591,7 +1591,9 @@ main(int argc, char *argv[]) {
                && !policies
                && !save_dir
                && config.options.on_conflict == ZIPY_CONFLICT_OVERWRITE
-               && !config.options.password;
+               && !config.options.password
+               && !zipy_has_encrypted(zip)
+               && !zipy_has_symlink(zip);
   if (directExtract) {
     directRet = zipy_extract_all_options(zip, extractdir, &config.options);
     success = directRet < ZIPY_ZIP_OK;

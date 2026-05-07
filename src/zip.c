@@ -3220,6 +3220,16 @@ zipy_clone(zipy_archive_t *zipy) {
   return clone;
 }
 
+int
+zipy_has_encrypted(const zipy_archive_t *zipy) {
+  return zipy && zipy->has_encrypted;
+}
+
+int
+zipy_has_symlink(const zipy_archive_t *zipy) {
+  return zipy && zipy->has_symlink;
+}
+
 static int
 zipy_extract_entry(zipy_archive_t * ZIPY_RESTRICT zipy,
                    zipy_file_t * ZIPY_RESTRICT info,
