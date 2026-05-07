@@ -174,6 +174,14 @@ typedef struct zipy_out_map_t {
 #endif
 } zipy_out_map_t;
 
+typedef struct zipy_out_file_t {
+#if defined(_WIN32)
+  FILE *fp;
+#else
+  int fd;
+#endif
+} zipy_out_file_t;
+
 static uint16_t
 zipy_le16(const uint8_t * ZIPY_RESTRICT p) {
   return (uint16_t)((uint16_t)p[0] | ((uint16_t)p[1] << 8));
@@ -376,24 +384,21 @@ zipy_read(FILE * ZIPY_RESTRICT fp, void * ZIPY_RESTRICT buf, size_t len) {
 }
 
 static int
-zipy_write_file(FILE * ZIPY_RESTRICT fp,
+zipy_write_file(zipy_out_file_t * ZIPY_RESTRICT out,
                 const void * ZIPY_RESTRICT buf,
                 size_t len) {
 #if defined(_WIN32)
-  return len == 0 || fwrite(buf, 1, len, fp) == len;
+  return out && out->fp && (len == 0 || fwrite(buf, 1, len, out->fp) == len);
 #else
   const uint8_t *p = buf;
-  int fd;
 
   if (len == 0)
     return 1;
-
-  fd = fileno(fp);
-  if (fd < 0)
+  if (!out || out->fd < 0)
     return 0;
 
   while (len > 0) {
-    ssize_t n = write(fd, p, len);
+    ssize_t n = write(out->fd, p, len);
 
     if (n < 0) {
       if (errno == EINTR)
@@ -412,11 +417,11 @@ zipy_write_file(FILE * ZIPY_RESTRICT fp,
 }
 
 static int
-zipy_flush_output(FILE *fp) {
+zipy_flush_output(zipy_out_file_t *out) {
 #if defined(_WIN32)
-  return fflush(fp) == 0;
+  return out && out->fp && fflush(out->fp) == 0;
 #else
-  (void)fp;
+  (void)out;
   return 1;
 #endif
 }
@@ -451,15 +456,19 @@ zipy_tell(FILE * ZIPY_RESTRICT fp, uint64_t * ZIPY_RESTRICT pos) {
 }
 
 static int
-zipy_set_file_size(FILE *fp, uint64_t size) {
+zipy_set_output_size(zipy_out_file_t *out, uint64_t size) {
 #if defined(_WIN32)
+  if (!out || !out->fp)
+    return -1;
   if (size > (uint64_t)INT64_MAX)
     return -1;
-  return _chsize_s(_fileno(fp), (__int64)size);
+  return _chsize_s(_fileno(out->fp), (__int64)size);
 #else
+  if (!out || out->fd < 0)
+    return -1;
   if (size > (uint64_t)INT64_MAX)
     return -1;
-  return ftruncate(fileno(fp), (off_t)size);
+  return ftruncate(out->fd, (off_t)size);
 #endif
 }
 
@@ -572,20 +581,20 @@ zipy_mapped_range(const zipy_archive_t *zipy, uint64_t offset, uint64_t len) {
 }
 
 static int
-zipy_map_output(FILE *out, uint64_t len, zipy_out_map_t *map) {
+zipy_map_output(zipy_out_file_t *out, uint64_t len, zipy_out_map_t *map) {
   if (!out || !map || len == 0 || len > (uint64_t)SIZE_MAX)
     return 0;
   memset(map, 0, sizeof(*map));
   map->len = (size_t)len;
 
-  if (zipy_set_file_size(out, len) != 0)
+  if (zipy_set_output_size(out, len) != 0)
     return 0;
 
 #if defined(_WIN32)
   {
     HANDLE file;
 
-    file = (HANDLE)_get_osfhandle(_fileno(out));
+    file = (HANDLE)_get_osfhandle(_fileno(out->fp));
     if (file == INVALID_HANDLE_VALUE)
       return 0;
 
@@ -609,7 +618,7 @@ zipy_map_output(FILE *out, uint64_t len, zipy_out_map_t *map) {
                 map->len,
                 PROT_READ | PROT_WRITE,
                 MAP_SHARED,
-                fileno(out),
+                out->fd,
                 0);
     if (view == MAP_FAILED) {
       map->data = NULL;
@@ -1371,12 +1380,14 @@ zipy_unlink_symlink(const char *path) {
 }
 #endif
 
-static FILE *
-zipy_open_output_file(const char *path, int *ret) {
-  FILE *fp;
-
+static int
+zipy_open_output_file(const char *path,
+                      zipy_out_file_t *out,
+                      int *ret) {
   if (ret)
     *ret = ZIPY_ZIP_EFILE;
+  if (!out)
+    return 0;
 
 #if !defined(_WIN32) && defined(O_NOFOLLOW)
   {
@@ -1390,33 +1401,41 @@ zipy_open_output_file(const char *path, int *ret) {
     fd = open(path, flags, 0666);
     if (fd < 0 && errno == ELOOP) {
       if (unlink(path) != 0)
-        return NULL;
+        return 0;
       fd = open(path, flags, 0666);
     }
     if (fd < 0)
-      return NULL;
+      return 0;
 
-    fp = fdopen(fd, "wb");
-    if (!fp) {
-      close(fd);
-      return NULL;
-    }
-
+    out->fd = fd;
     if (ret)
       *ret = ZIPY_ZIP_OK;
-    return fp;
+    return 1;
   }
 #else
   if (!zipy_unlink_symlink(path))
-    return NULL;
+    return 0;
 
-  fp = fopen(path, "wb");
-  if (!fp)
-    return NULL;
+  out->fp = fopen(path, "wb");
+  if (!out->fp)
+    return 0;
 
   if (ret)
     *ret = ZIPY_ZIP_OK;
-  return fp;
+  return 1;
+#endif
+}
+
+static int
+zipy_close_output_file(zipy_out_file_t *out) {
+#if defined(_WIN32)
+  if (!out || !out->fp)
+    return 0;
+  return fclose(out->fp) == 0;
+#else
+  if (!out || out->fd < 0)
+    return 0;
+  return close(out->fd) == 0;
 #endif
 }
 
@@ -1610,7 +1629,7 @@ zipy_apply_metadata(const char *path, const zipy_file_t *info) {
 }
 
 static int
-zipy_apply_open_file_metadata(FILE *out, const zipy_file_t *info) {
+zipy_apply_open_file_metadata(zipy_out_file_t *out, const zipy_file_t *info) {
 #if defined(_WIN32)
   (void)out;
   (void)info;
@@ -1618,10 +1637,10 @@ zipy_apply_open_file_metadata(FILE *out, const zipy_file_t *info) {
 #else
   uint32_t mode = zipy_unix_mode(info);
 
-  if (!out || !info || zipy_is_symlink(info))
+  if (!out || out->fd < 0 || !info || zipy_is_symlink(info))
     return 0;
 
-  if (mode != 0 && fchmod(fileno(out), (mode_t)(mode & 07777u)) != 0)
+  if (mode != 0 && fchmod(out->fd, (mode_t)(mode & 07777u)) != 0)
     return 0;
 
   if (info->has_mtime) {
@@ -1631,7 +1650,7 @@ zipy_apply_open_file_metadata(FILE *out, const zipy_file_t *info) {
     times[0].tv_nsec = 0;
     times[1].tv_sec = info->mtime;
     times[1].tv_nsec = 0;
-    if (futimens(fileno(out), times) != 0)
+    if (futimens(out->fd, times) != 0)
       return 0;
   }
 
@@ -1929,7 +1948,7 @@ zipy_crc32_update(uint32_t crc,
 }
 
 static int
-zipy_write_chunk(FILE * ZIPY_RESTRICT out,
+zipy_write_chunk(zipy_out_file_t * ZIPY_RESTRICT out,
                  uint8_t * ZIPY_RESTRICT buf,
                  size_t len,
                  uint32_t * ZIPY_RESTRICT crc,
@@ -1953,7 +1972,7 @@ zipy_write_chunk(FILE * ZIPY_RESTRICT out,
 
 static int
 zipy_copy_store(zipy_archive_t * ZIPY_RESTRICT zipy,
-                FILE * ZIPY_RESTRICT out,
+                zipy_out_file_t * ZIPY_RESTRICT out,
                 uint64_t len,
                 uint32_t expectedCrc,
                 int check_crc,
@@ -2000,7 +2019,7 @@ zipy_copy_store(zipy_archive_t * ZIPY_RESTRICT zipy,
 }
 
 static int
-zipy_copy_store_mapped(FILE * ZIPY_RESTRICT out,
+zipy_copy_store_mapped(zipy_out_file_t * ZIPY_RESTRICT out,
                        const uint8_t * ZIPY_RESTRICT src,
                        uint64_t len,
                        uint32_t expectedCrc,
@@ -2032,7 +2051,7 @@ zipy_copy_store_mapped(FILE * ZIPY_RESTRICT out,
 
 static int
 zipy_inflate_raw(zipy_archive_t * ZIPY_RESTRICT zipy,
-                 FILE * ZIPY_RESTRICT out,
+                 zipy_out_file_t * ZIPY_RESTRICT out,
                  const uint8_t * ZIPY_RESTRICT mapped,
                  uint64_t compressed_size,
                  uint64_t uncompressed_size,
@@ -3043,11 +3062,16 @@ zipy_extract_entry(zipy_archive_t * ZIPY_RESTRICT zipy,
   uint64_t compressed_size;
   dec_t dec;
   dec_t *dec_ptr = NULL;
-  FILE *outfp;
+  zipy_out_file_t outfile;
   int check_crc = (extract_flags & ZIPY_EXTRACT_NO_CRC) == 0;
   int encrypted;
   int metadata_done = 0;
   int ret = ZIPY_ZIP_ERR;
+
+  memset(&outfile, 0, sizeof(outfile));
+#if !defined(_WIN32)
+  outfile.fd = -1;
+#endif
 
   if (!zipy || !info || !destpath)
     return ZIPY_ZIP_ERR;
@@ -3183,28 +3207,27 @@ zipy_extract_entry(zipy_archive_t * ZIPY_RESTRICT zipy,
     return ret;
   }
 
-  outfp = zipy_open_output_file(destpath, &ret);
-  if (!outfp)
+  if (!zipy_open_output_file(destpath, &outfile, &ret))
     return ret;
 
   if (info->entry.method == ZIPY_ZIP_STORE) {
     if (compressed_size != info->entry.uncompressed_size)
       ret = ZIPY_ZIP_ESIZE;
     else if (mapped_data)
-      ret = zipy_copy_store_mapped(outfp,
+      ret = zipy_copy_store_mapped(&outfile,
                                    mapped_data,
                                    info->entry.uncompressed_size,
                                    info->entry.crc32,
                                    check_crc);
     else
-      ret = zipy_copy_store(zipy, outfp,
+      ret = zipy_copy_store(zipy, &outfile,
                            info->entry.uncompressed_size,
                            info->entry.crc32,
                            check_crc,
                            dec_ptr);
   } else {
     ret = zipy_inflate_raw(zipy,
-                          outfp,
+                          &outfile,
                           mapped_data,
                           compressed_size,
                           info->entry.uncompressed_size,
@@ -3214,12 +3237,12 @@ zipy_extract_entry(zipy_archive_t * ZIPY_RESTRICT zipy,
   }
 
   if (ret == ZIPY_ZIP_OK) {
-    if (!zipy_flush_output(outfp))
+    if (!zipy_flush_output(&outfile))
       ret = ZIPY_ZIP_EFILE;
     else
-      metadata_done = zipy_apply_open_file_metadata(outfp, info);
+      metadata_done = zipy_apply_open_file_metadata(&outfile, info);
   }
-  if (fclose(outfp) != 0 && ret == ZIPY_ZIP_OK)
+  if (!zipy_close_output_file(&outfile) && ret == ZIPY_ZIP_OK)
     ret = ZIPY_ZIP_EFILE;
   if (ret == ZIPY_ZIP_OK && !metadata_done && !zipy_apply_metadata(destpath, info))
     ret = ZIPY_ZIP_EFILE;
