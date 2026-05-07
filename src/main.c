@@ -85,6 +85,7 @@ print_usage(void) {
   printf("  --no-crc    Skip CRC32 validation\n");
   printf("  --no-metadata  Skip mode and timestamp restoration\n");
   printf("  --no-progress  Disable interactive progress output\n");
+  printf("  --fast      Alias for --no-crc --no-metadata --no-progress\n");
   printf("  --config [key=value ...]  Show or update ~/.zipy/config\n");
 }
 
@@ -1535,6 +1536,9 @@ main(int argc, char *argv[]) {
                || strcmp(argv[i], "--no-meta") == 0) {
       config.options.flags |= ZIPY_EXTRACT_NO_METADATA;
     } else if (strcmp(argv[i], "--no-progress") == 0) {
+      noProgress = 1;
+    } else if (strcmp(argv[i], "--fast") == 0) {
+      config.options.flags |= ZIPY_EXTRACT_NO_CRC | ZIPY_EXTRACT_NO_METADATA;
       noProgress = 1;
     } else if (!zipfile) {
       zipfile = argv[i];

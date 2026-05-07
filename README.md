@@ -25,6 +25,7 @@ zipy archive.zip -d target -p password
 zipy archive.zip -d target --no-crc
 zipy archive.zip -d target --no-metadata
 zipy archive.zip -d target --no-progress
+zipy archive.zip -d target --fast
 ```
 
 `-j auto` and `-j cpu` use one worker per CPU core, capped by the number of
@@ -141,6 +142,9 @@ lower latency matters more than detecting corrupted archive data.
 Mode and timestamp restoration is enabled by default. Set
 `ZIPY_EXTRACT_NO_METADATA` when raw extraction latency matters more than
 preserving file metadata.
+
+For CLI-only raw speed, `--fast` combines `--no-crc`, `--no-metadata`, and
+`--no-progress`. It does not change conflict handling.
 
 ## Status
 
