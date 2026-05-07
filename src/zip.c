@@ -35,6 +35,7 @@
 #  include <windows.h>
 #  define zipy_getcwd _getcwd
 #else
+#  include <dirent.h>
 #  include <fcntl.h>
 #  include <sys/mman.h>
 #  include <sys/stat.h>
@@ -895,6 +896,77 @@ zipy_path_is_dir(const char *path) {
   if (!zipy_path_info(path, &exists, &isDir))
     return 0;
   return exists && isDir;
+}
+
+static char *
+zipy_join_path(const char *dir, const char *name);
+
+static int
+zipy_target_empty_or_missing(const char *path, int *emptyOrMissing) {
+  int exists, isDir;
+
+  *emptyOrMissing = 0;
+  if (!zipy_path_info(path, &exists, &isDir))
+    return 0;
+  if (!exists) {
+    *emptyOrMissing = 1;
+    return 1;
+  }
+  if (!isDir)
+    return 1;
+
+#if defined(_WIN32)
+  {
+    char *pattern;
+    WIN32_FIND_DATAA data;
+    HANDLE handle;
+
+    pattern = zipy_join_path(path, "*");
+    if (!pattern)
+      return 0;
+
+    handle = FindFirstFileA(pattern, &data);
+    free(pattern);
+    if (handle == INVALID_HANDLE_VALUE) {
+      if (GetLastError() == ERROR_FILE_NOT_FOUND) {
+        *emptyOrMissing = 1;
+        return 1;
+      }
+      return 0;
+    }
+
+    do {
+      if (strcmp(data.cFileName, ".") != 0 && strcmp(data.cFileName, "..") != 0) {
+        FindClose(handle);
+        return 1;
+      }
+    } while (FindNextFileA(handle, &data));
+
+    FindClose(handle);
+    *emptyOrMissing = 1;
+  }
+#else
+  {
+    DIR *dir;
+    struct dirent *entry;
+
+    dir = opendir(path);
+    if (!dir)
+      return 0;
+
+    while ((entry = readdir(dir))) {
+      if (strcmp(entry->d_name, ".") != 0 && strcmp(entry->d_name, "..") != 0) {
+        closedir(dir);
+        return 1;
+      }
+    }
+
+    closedir(dir);
+    *emptyOrMissing = 1;
+  }
+#endif
+
+  return 1;
 }
 
 static int
@@ -3046,6 +3118,13 @@ zipy_extract_all_options(zipy_archive_t *zipy,
     return ZIPY_ZIP_ERR;
 
   opts = zipy_default_extract_options(options);
+  if (opts.on_conflict != ZIPY_CONFLICT_OVERWRITE) {
+    int fastNoConflict = 0;
+
+    if (zipy_target_empty_or_missing(destdir, &fastNoConflict) && fastNoConflict)
+      opts.on_conflict = ZIPY_CONFLICT_OVERWRITE;
+  }
+
   ret = zipy_prepare_extract_all(zipy, destdir, &opts, &skip);
   if (ret >= ZIPY_ZIP_OK)
     ret = zipy_extract_all_parallel(zipy,
