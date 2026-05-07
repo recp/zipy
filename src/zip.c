@@ -101,7 +101,9 @@
 typedef struct zipy_file_t {
   zipy_entry_t entry;
   uint64_t local_header_offset;
+  uint64_t data_offset;
   uint16_t flags;
+  uint16_t local_flags;
   uint16_t mod_time;
   uint16_t mod_date;
   uint32_t external_attr;
@@ -113,6 +115,7 @@ typedef struct zipy_file_t {
   uint8_t  has_mtime;
   uint8_t  is_symlink;
   uint8_t  safe_name;
+  uint8_t  has_data_offset;
 } zipy_file_t;
 
 typedef struct zipy_path_buf_t {
@@ -1091,6 +1094,41 @@ zipy_verify_local_aes_extra(zipy_archive_t * ZIPY_RESTRICT zipy,
 
   free(heap_extra);
   return ok;
+}
+
+static void
+zipy_cache_local_header(zipy_archive_t * ZIPY_RESTRICT zipy,
+                        zipy_file_t * ZIPY_RESTRICT info) {
+  const uint8_t *localp;
+  uint16_t flags, method, nameLen, extraLen;
+  uint64_t dataOffset;
+
+  if (!zipy || !info)
+    return;
+
+  localp = zipy_mapped_range(zipy, info->local_header_offset, ZIP_LOCAL_FIXED);
+  if (!localp || zipy_le32(localp) != ZIP_SIGN_LOCAL_FILE)
+    return;
+
+  flags = zipy_le16(localp + 6);
+  method = zipy_le16(localp + 8);
+  nameLen = zipy_le16(localp + 26);
+  extraLen = zipy_le16(localp + 28);
+
+  if (method != info->zip_method || (flags & ZIP_FLAG_STRONG_ENC))
+    return;
+  if (UINT64_MAX - info->local_header_offset
+      < ZIP_LOCAL_FIXED + (uint64_t)nameLen + (uint64_t)extraLen)
+    return;
+
+  dataOffset = info->local_header_offset + ZIP_LOCAL_FIXED + nameLen + extraLen;
+  if (dataOffset > zipy->file_size
+      || info->entry.compressed_size > zipy->file_size - dataOffset)
+    return;
+
+  info->data_offset = dataOffset;
+  info->local_flags = flags;
+  info->has_data_offset = 1;
 }
 
 static bool
@@ -2970,6 +3008,7 @@ zipy_open(const char *path) {
         || info->entry.compressed_size > zipy->file_size
         || UINT64_MAX - info->local_header_offset < ZIP_LOCAL_FIXED)
       goto err;
+    zipy_cache_local_header(zipy, info);
 
     if (central) {
       cd_pos += record_len;
@@ -3093,40 +3132,49 @@ zipy_extract_entry(zipy_archive_t * ZIPY_RESTRICT zipy,
   if (info->entry.method != ZIPY_ZIP_STORE && info->entry.method != ZIPY_ZIP_DEFLATE)
     return ZIPY_ZIP_EUNSUP;
 
-  localp = zipy_mapped_range(zipy, info->local_header_offset, sizeof(local));
-  if (!localp) {
-    if (!zipy->fp
-        || zipy_seek_set(zipy->fp, info->local_header_offset) != 0
-        || !zipy_read(zipy->fp, local, sizeof(local)))
+  if (info->has_data_offset && info->zip_method != ZIP_METHOD_AES) {
+    flags = info->local_flags;
+    method = info->zip_method;
+    nameLen = 0;
+    extraLen = 0;
+    dataOffset = info->data_offset;
+  } else {
+    localp = zipy_mapped_range(zipy, info->local_header_offset, sizeof(local));
+    if (!localp) {
+      if (!zipy->fp
+          || zipy_seek_set(zipy->fp, info->local_header_offset) != 0
+          || !zipy_read(zipy->fp, local, sizeof(local)))
+        return ZIPY_ZIP_EFILE;
+      localp = local;
+    }
+
+    if (zipy_le32(localp) != ZIP_SIGN_LOCAL_FILE)
       return ZIPY_ZIP_EFILE;
-    localp = local;
+
+    flags = zipy_le16(localp + 6);
+    method = zipy_le16(localp + 8);
+    nameLen = zipy_le16(localp + 26);
+    extraLen = zipy_le16(localp + 28);
+
+    if (method != info->zip_method || (flags & ZIP_FLAG_STRONG_ENC))
+      return ZIPY_ZIP_EUNSUP;
+
+    if (UINT64_MAX - info->local_header_offset
+        < ZIP_LOCAL_FIXED + (uint64_t)nameLen + (uint64_t)extraLen)
+      return ZIPY_ZIP_ESIZE;
+
+    dataOffset = info->local_header_offset + ZIP_LOCAL_FIXED + nameLen + extraLen;
+    if (dataOffset > zipy->file_size
+        || info->entry.compressed_size > zipy->file_size - dataOffset)
+      return ZIPY_ZIP_ESIZE;
+
+    if (method == ZIP_METHOD_AES
+        && !zipy_verify_local_aes_extra(zipy,
+                                        info,
+                                        info->local_header_offset + ZIP_LOCAL_FIXED + nameLen,
+                                        extraLen))
+      return ZIPY_ZIP_EUNSUP;
   }
-
-  if (zipy_le32(localp) != ZIP_SIGN_LOCAL_FILE)
-    return ZIPY_ZIP_EFILE;
-
-  flags = zipy_le16(localp + 6);
-  method = zipy_le16(localp + 8);
-  nameLen = zipy_le16(localp + 26);
-  extraLen = zipy_le16(localp + 28);
-
-  if (method != info->zip_method || (flags & ZIP_FLAG_STRONG_ENC))
-    return ZIPY_ZIP_EUNSUP;
-
-  if (UINT64_MAX - info->local_header_offset
-      < ZIP_LOCAL_FIXED + (uint64_t)nameLen + (uint64_t)extraLen)
-    return ZIPY_ZIP_ESIZE;
-
-  dataOffset = info->local_header_offset + ZIP_LOCAL_FIXED + nameLen + extraLen;
-  if (dataOffset > zipy->file_size || info->entry.compressed_size > zipy->file_size - dataOffset)
-    return ZIPY_ZIP_ESIZE;
-
-  if (method == ZIP_METHOD_AES
-      && !zipy_verify_local_aes_extra(zipy,
-                                      info,
-                                      info->local_header_offset + ZIP_LOCAL_FIXED + nameLen,
-                                      extraLen))
-    return ZIPY_ZIP_EUNSUP;
 
   compressed_size = info->entry.compressed_size;
   encrypted = ((flags | info->flags) & ZIP_FLAG_ENCRYPTED) != 0;
