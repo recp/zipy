@@ -4076,14 +4076,18 @@ extract_deflate_data_descriptor(zipy_archive_t * __restrict zipy,
                                 const char * __restrict destpath,
                                 size_t parent_len,
                                 uint32_t extract_flags,
+                                const char * __restrict password,
                                 int zip64_descriptor) {
   out_file_t outfile;
   out_map_t outmap;
+  dec_t dec;
+  dec_t *dec_ptr = NULL;
   uint8_t *inbuf;
   const char *part_path;
   uint64_t remaining;
   uint64_t supplied = 0;
   uint64_t descriptor_offset;
+  uint64_t encrypted_header_size = 0;
   uint32_t descriptor_crc = 0;
   uint32_t output_crc;
   int check_crc = (extract_flags & ZIPY_EXTRACT_NO_CRC) == 0;
@@ -4101,14 +4105,32 @@ extract_deflate_data_descriptor(zipy_archive_t * __restrict zipy,
   if (!zipy || !zipy->fp || !info || !destpath)
     return ZIPY_ZIP_ERR;
   if (zip64_descriptor
-      || info->entry.encrypted
       || info->entry.method != ZIPY_ZIP_DEFLATE
       || (extract_flags & ZIPY_EXTRACT_RESUME))
+    return ZIPY_ZIP_EUNSUP;
+  if (info->entry.encrypted && info->zip_method == ZIP_METHOD_AES)
     return ZIPY_ZIP_EUNSUP;
   if ((uint64_t)UINT32_MAX > (uint64_t)SIZE_MAX)
     return ZIPY_ZIP_EUNSUP;
   if (info->data_offset > zipy->file_size)
     return ZIPY_ZIP_ESIZE;
+
+  remaining = zipy->file_size - info->data_offset;
+  dec_init(&dec);
+  if (info->entry.encrypted) {
+    if (seek_set(zipy->fp, info->data_offset) != 0)
+      return ZIPY_ZIP_EFILE;
+
+    ret = dec_open_zipcrypto(&dec,
+                             zipy->fp,
+                             password,
+                             (uint8_t)(info->mod_time >> 8),
+                             &remaining);
+    if (ret != ZIPY_ZIP_OK)
+      return ret;
+    encrypted_header_size = ZIPCRYPTO_HEADER_SIZE;
+    dec_ptr = &dec;
+  }
 
   if (parent_len == SIZE_MAX) {
     if (!prepare_parent_dir(zipy, destpath))
@@ -4146,12 +4168,11 @@ extract_deflate_data_descriptor(zipy_archive_t * __restrict zipy,
     infl_reset(zipy->inflate_stream, outmap.data, UINT32_MAX, 0);
   }
 
-  if (seek_set(zipy->fp, info->data_offset) != 0) {
+  if (!dec_ptr && seek_set(zipy->fp, info->data_offset) != 0) {
     ret = ZIPY_ZIP_EFILE;
     goto done;
   }
 
-  remaining = zipy->file_size - info->data_offset;
   while (remaining > 0) {
     size_t n = remaining > ZIP_INFLATE_STREAM_CHUNK
              ? ZIP_INFLATE_STREAM_CHUNK
@@ -4164,6 +4185,8 @@ extract_deflate_data_descriptor(zipy_archive_t * __restrict zipy,
 
     supplied += n;
     remaining -= n;
+    if (dec_ptr)
+      dec_decrypt(dec_ptr, inbuf, n);
     zret = infl_stream(zipy->inflate_stream, inbuf, (uint32_t)n);
     if (zret < UNZ_OK) {
       ret = zret == UNZ_EFULL ? ZIPY_ZIP_EUNSUP : ZIPY_ZIP_EINFLATE;
@@ -4178,9 +4201,10 @@ extract_deflate_data_descriptor(zipy_archive_t * __restrict zipy,
     goto done;
   }
 
-  info->entry.compressed_size = infl_input_pos(zipy->inflate_stream);
+  info->entry.compressed_size = encrypted_header_size
+                              + infl_input_pos(zipy->inflate_stream);
   info->entry.uncompressed_size = infl_output_pos(zipy->inflate_stream);
-  if (info->entry.compressed_size > supplied) {
+  if (info->entry.compressed_size - encrypted_header_size > supplied) {
     ret = ZIPY_ZIP_ESIZE;
     goto done;
   }
@@ -5376,7 +5400,7 @@ zipy_extract_stream(const char * __restrict path,
         && !info.entry.is_directory
         && unknownDataDesc
         && (info.entry.method != ZIPY_ZIP_DEFLATE
-            || info.entry.encrypted
+            || (info.entry.encrypted && info.zip_method == ZIP_METHOD_AES)
             || zip64Desc
             || (opts.flags & ZIPY_EXTRACT_RESUME))) {
       ret = ZIPY_ZIP_EUNSUP;
@@ -5454,6 +5478,7 @@ zipy_extract_stream(const char * __restrict path,
                                             destpath,
                                             parentLen,
                                             opts.flags | EXTRACT_DELAY_DIR_METADATA,
+                                            opts.password,
                                             zip64Desc);
     } else {
       ret = extract_entry(&zipy,
