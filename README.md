@@ -37,8 +37,9 @@ By default, the CLI asks what to do when an extracted entry would replace an
 existing file. Non-interactive runs fall back to saving existing files before
 writing new files.
 
-When the target folder is empty or does not exist yet, the CLI checks available
-disk space against the archive's uncompressed size before extraction starts.
+With default conflict handling, when the target folder is empty or does not
+exist yet, the CLI checks available disk space against the archive's
+uncompressed size before extraction starts.
 
 ## Conflicts
 
