@@ -70,6 +70,7 @@
 #define ZIP_MAPPED_WRITE_CHUNK (16u * 1024u * 1024u)
 #define ZIP_FAST_WRITE_CHUNK  (128u * 1024u * 1024u)
 #define ZIP_OUTPUT_MMAP_MIN   (8u * 1024u * 1024u)
+#define ZIP_UNKNOWN_OUTPUT_INITIAL (8u * 1024u * 1024u)
 #define ZIP_PATH_STACK        512u
 #define ZIP_PARALLEL_MIN_ENTRIES 8u
 #define ZIP_PARALLEL_MIN_BYTES (8u * 1024u * 1024u)
@@ -919,6 +920,30 @@ unmap_output(out_map_t *map) {
 
   map->data = NULL;
   map->len = 0;
+}
+
+static uint64_t
+grow_output_cap(uint64_t cap) {
+  uint64_t next;
+
+  if (cap < ZIP_UNKNOWN_OUTPUT_INITIAL)
+    return ZIP_UNKNOWN_OUTPUT_INITIAL;
+  if (cap >= UINT32_MAX)
+    return UINT32_MAX;
+
+  next = cap * 2u;
+  if (next < cap || next > UINT32_MAX)
+    next = UINT32_MAX;
+  return next;
+}
+
+static int
+resize_output_map(out_file_t *out, out_map_t *map, uint64_t len) {
+  if (!out || !map || len == 0 || len > UINT32_MAX)
+    return 0;
+
+  unmap_output(map);
+  return map_output(out, len, map);
 }
 
 static int
@@ -4751,6 +4776,7 @@ extract_deflate_data_descriptor(zipy_archive_t * __restrict zipy,
   uint64_t descriptor_offset;
   uint64_t encrypted_header_size = 0;
   uint64_t encrypted_footer_size = 0;
+  uint64_t output_cap;
   uint32_t descriptor_crc = 0;
   uint32_t output_crc;
   uint32_t produced = 0;
@@ -4825,7 +4851,8 @@ extract_deflate_data_descriptor(zipy_archive_t * __restrict zipy,
 
   if (!open_output_file_seek(part_path, &outfile, &ret, 0, 1))
     return ret;
-  if (!map_output(&outfile, UINT32_MAX, &outmap)) {
+  output_cap = grow_output_cap(0);
+  if (!map_output(&outfile, output_cap, &outmap)) {
     ret = ZIPY_ZIP_EUNSUP;
     goto done;
   }
@@ -4847,13 +4874,13 @@ extract_deflate_data_descriptor(zipy_archive_t * __restrict zipy,
   }
 
   if (!zipy->inflate_stream) {
-    zipy->inflate_stream = infl_init(outmap.data, UINT32_MAX, 0);
+    zipy->inflate_stream = infl_init(outmap.data, (uint32_t)output_cap, 0);
     if (!zipy->inflate_stream) {
       ret = ZIPY_ZIP_ERR;
       goto done;
     }
   } else {
-    infl_reset(zipy->inflate_stream, outmap.data, UINT32_MAX, 0);
+    infl_reset(zipy->inflate_stream, outmap.data, (uint32_t)output_cap, 0);
   }
 
   if (!dec_ptr && seek_set(zipy->fp, info->data_offset) != 0) {
@@ -4886,21 +4913,43 @@ extract_deflate_data_descriptor(zipy_archive_t * __restrict zipy,
     }
 
     zret = infl_stream(zipy->inflate_stream, feed, (uint32_t)n);
-    if (zret < UNZ_OK) {
-      ret = zret == UNZ_EFULL ? ZIPY_ZIP_EUNSUP : ZIPY_ZIP_EINFLATE;
-      goto done;
-    }
-    if (progress && progress->options && progress->options->progress) {
-      uint32_t now = infl_output_pos(zipy->inflate_stream);
+    for (;;) {
+      if (progress && progress->options && progress->options->progress) {
+        uint32_t now = infl_output_pos(zipy->inflate_stream);
 
-      if (now < produced) {
-        ret = ZIPY_ZIP_ESIZE;
+        if (now < produced) {
+          ret = ZIPY_ZIP_ESIZE;
+          goto done;
+        }
+        ret = progress_advance(progress, (uint64_t)(now - produced));
+        if (ret != ZIPY_ZIP_OK)
+          goto done;
+        produced = now;
+      }
+
+      if (zret != UNZ_EFULL)
+        break;
+
+      output_cap = grow_output_cap(output_cap);
+      if (output_cap <= outmap.len) {
+        ret = ZIPY_ZIP_EUNSUP;
         goto done;
       }
-      ret = progress_advance(progress, (uint64_t)(now - produced));
-      if (ret != ZIPY_ZIP_OK)
+      if (!resize_output_map(&outfile, &outmap, output_cap)) {
+        ret = ZIPY_ZIP_EUNSUP;
         goto done;
-      produced = now;
+      }
+      if (infl_resize_output(zipy->inflate_stream,
+                             outmap.data,
+                             (uint32_t)output_cap) != UNZ_OK) {
+        ret = ZIPY_ZIP_ERR;
+        goto done;
+      }
+      zret = infl_stream(zipy->inflate_stream, NULL, 0);
+    }
+    if (zret < UNZ_OK) {
+      ret = ZIPY_ZIP_EINFLATE;
+      goto done;
     }
     if (zret == UNZ_OK) {
       if (dec.kind == DEC_AES_WG) {
