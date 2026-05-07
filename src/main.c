@@ -34,6 +34,7 @@
 #else
 #  include <dirent.h>
 #  include <sys/stat.h>
+#  include <sys/statvfs.h>
 #  include <sys/types.h>
 #  include <termios.h>
 #  include <unistd.h>
@@ -158,6 +159,25 @@ format_duration(char *buf, size_t len, uint64_t ms) {
   } else {
     snprintf(buf, len, "%llus", (unsigned long long)(ms / 1000));
   }
+}
+
+static void
+format_bytes(char *buf, size_t len, uint64_t bytes) {
+  static const char *units[] = {"B", "KiB", "MiB", "GiB", "TiB"};
+  double value = (double)bytes;
+  size_t unit = 0;
+
+  while (value >= 1024.0 && unit + 1u < sizeof(units) / sizeof(units[0])) {
+    value /= 1024.0;
+    unit++;
+  }
+
+  if (unit == 0)
+    snprintf(buf, len, "%llu %s", (unsigned long long)bytes, units[unit]);
+  else if (value < 10.0)
+    snprintf(buf, len, "%.2f %s", value, units[unit]);
+  else
+    snprintf(buf, len, "%.1f %s", value, units[unit]);
 }
 
 static const char *
@@ -944,6 +964,135 @@ trim_trailing_seps_path(const char *path) {
 }
 
 static int
+strip_last_path_part(char *path) {
+  size_t len;
+
+  if (!path || !*path)
+    return 0;
+
+  len = strlen(path);
+  while (len > 1 && (path[len - 1] == '/' || path[len - 1] == '\\'))
+    path[--len] = '\0';
+
+#if defined(_WIN32)
+  if (len <= 3 && isalpha((unsigned char)path[0]) && path[1] == ':')
+    return 0;
+#endif
+  if (len == 1 && (path[0] == '/' || path[0] == '\\'))
+    return 0;
+
+  while (len > 0 && path[len - 1] != '/' && path[len - 1] != '\\')
+    len--;
+  if (len == 0)
+    return 0;
+
+  while (len > 1 && (path[len - 1] == '/' || path[len - 1] == '\\')) {
+#if defined(_WIN32)
+    if (len == 3 && isalpha((unsigned char)path[0]) && path[1] == ':')
+      break;
+#endif
+    len--;
+  }
+
+  path[len] = '\0';
+  return 1;
+}
+
+static char *
+existing_space_path(const char *path) {
+  char *probe;
+  int exists;
+
+  probe = trim_trailing_seps_path(path && *path ? path : ".");
+  if (!probe)
+    return NULL;
+
+  for (;;) {
+    if (path_info(probe, &exists, NULL) && exists)
+      return probe;
+    if (!strip_last_path_part(probe))
+      break;
+  }
+
+  free(probe);
+  return dup_text(".");
+}
+
+static int
+available_space_for_path(const char *path, uint64_t *available, char **checkedPath) {
+  char *probe;
+
+  *available = 0;
+  *checkedPath = NULL;
+  probe = existing_space_path(path);
+  if (!probe)
+    return 0;
+
+#if defined(_WIN32)
+  {
+    ULARGE_INTEGER freeBytes;
+
+    if (!GetDiskFreeSpaceExA(probe, &freeBytes, NULL, NULL)) {
+      free(probe);
+      return 0;
+    }
+    *available = freeBytes.QuadPart;
+  }
+#else
+  {
+    struct statvfs st;
+    uint64_t blocks, blockSize;
+
+    if (statvfs(probe, &st) != 0) {
+      free(probe);
+      return 0;
+    }
+
+    blocks = (uint64_t)st.f_bavail;
+    blockSize = st.f_frsize != 0 ? (uint64_t)st.f_frsize : (uint64_t)st.f_bsize;
+    if (blockSize != 0 && blocks > UINT64_MAX / blockSize)
+      *available = UINT64_MAX;
+    else
+      *available = blocks * blockSize;
+  }
+#endif
+
+  *checkedPath = probe;
+  return 1;
+}
+
+static int
+preflight_space(zipy_archive_t *zip, const char *extractdir) {
+  uint64_t needed, available;
+  char *checkedPath = NULL;
+  char needText[32], availableText[32];
+  int emptyOrMissing = 0;
+
+  if (!target_is_empty_or_missing(extractdir, &emptyOrMissing) || !emptyOrMissing)
+    return 1;
+
+  needed = zipy_uncompressed_size(zip);
+  if (needed == 0)
+    return 1;
+  if (!available_space_for_path(extractdir, &available, &checkedPath))
+    return 1;
+
+  if (available >= needed) {
+    free(checkedPath);
+    return 1;
+  }
+
+  format_bytes(needText, sizeof(needText), needed);
+  format_bytes(availableText, sizeof(availableText), available);
+  print_error("Error: Not enough free space in '%s' (need %s, available %s)\n",
+              checkedPath,
+              needText,
+              availableText);
+  free(checkedPath);
+  return 0;
+}
+
+static int
 path_is_absolute(const char *path) {
   if (!path || !*path)
     return 0;
@@ -1626,6 +1775,11 @@ main(int argc, char *argv[]) {
   }
   progress_init(&progress, noProgress ? NULL : stderr, count);
   if (!prepare_ask_plan(zip, extractdir, &config, &policies, &needsSaveDir)) {
+    zipy_close(zip);
+    free(policies);
+    return 1;
+  }
+  if (!preflight_space(zip, extractdir)) {
     zipy_close(zip);
     free(policies);
     return 1;
