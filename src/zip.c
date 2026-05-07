@@ -1820,6 +1820,9 @@ zipy_prepare_parent_dir_len(zipy_archive_t * ZIPY_RESTRICT zipy,
     return !zipy->parent_cache_has_symlink;
   }
 
+  if (zipy_parent_has_symlink_buf(path, &zipy->parent_buf))
+    return 0;
+
   if (!zipy_path_buf_reserve(&zipy->parent_buf, parent_len + 1u))
     return 0;
   memcpy(zipy->parent_buf.data, path, parent_len);
@@ -1829,6 +1832,8 @@ zipy_prepare_parent_dir_len(zipy_archive_t * ZIPY_RESTRICT zipy,
     return 0;
 
   has_symlink = zipy_parent_has_symlink_buf(path, &zipy->parent_buf);
+  if (has_symlink)
+    return 0;
   if (!zipy_path_buf_reserve(&zipy->parent_cache, parent_len + 1u))
     return 0;
 
@@ -3436,6 +3441,13 @@ zipy_extract_entry(zipy_archive_t * ZIPY_RESTRICT zipy,
   if (zipy_is_symlink(info)) {
     uint8_t *target = NULL;
     size_t target_len = 0;
+
+    if (parent_len == SIZE_MAX) {
+      if (!zipy_prepare_parent_dir(zipy, destpath))
+        return ZIPY_ZIP_EFILE;
+    } else if (!zipy_prepare_parent_dir_len(zipy, destpath, parent_len)) {
+      return ZIPY_ZIP_EFILE;
+    }
 
     if (mapped_data && zipy_seek_set(zipy->fp, dataOffset) != 0)
       return ZIPY_ZIP_EFILE;
