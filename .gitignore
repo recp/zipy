@@ -62,3 +62,4 @@ build/
 # zipy extraction state
 .zipy/
 *.part
+.build/

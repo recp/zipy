@@ -223,6 +223,49 @@ Deflated entries use mmap input when available; the non-mmap path feeds defl
 incrementally with `infl_stream()` instead of buffering the full compressed
 member.
 
+## Swift Package
+
+The Swift package lives in this repository and builds the same C sources. The
+package manifest is at the repository root; Swift sources are under
+`swift/Sources/Zipy`.
+
+```swift
+import Foundation
+import Zipy
+
+try await Zipy.extract(
+  archiveURL,
+  to: targetURL,
+  options: .fast,
+  conflict: .overwrite
+)
+```
+
+`extract()` is async by default and runs the blocking C extraction on a
+detached task so it does not inherit `MainActor`. Use `extractSync()` when the
+caller already owns the background thread and wants no Swift task hop.
+
+Progress is optional. When no `Progress`, actor, or callback is passed, the
+Swift wrapper does not install a progress callback.
+
+```swift
+let progress = Progress(totalUnitCount: 0)
+let observer = ZipyProgressActor()
+
+try await Zipy.extract(
+  archiveURL,
+  to: targetURL,
+  options: .fast,
+  progress: progress,
+  observer: observer
+) { state in
+  state.fractionCompleted.map { print($0) }
+  return true
+}
+
+let latest = await observer.latest
+```
+
 ## Status
 
 - [x] open ZIP central directory
