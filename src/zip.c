@@ -65,7 +65,7 @@
 #define ZIP64_LOCATOR_FIXED   20u
 #define ZIP_MAX_EOCD_SEARCH   (ZIP_EOCD_FIXED + 65535u)
 #define ZIP_IO_CHUNK          (256u * 1024u)
-#define ZIP_MAPPED_WRITE_CHUNK (4u * 1024u * 1024u)
+#define ZIP_MAPPED_WRITE_CHUNK (16u * 1024u * 1024u)
 #define ZIP_OUTPUT_MMAP_MIN   (8u * 1024u * 1024u)
 #define ZIP_PATH_STACK        512u
 #define ZIP_PARALLEL_MIN_ENTRIES 8u
