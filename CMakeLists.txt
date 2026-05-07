@@ -152,6 +152,12 @@ install(EXPORT zipyTargets
 )
 
 include(CMakePackageConfigHelpers)
+configure_package_config_file(
+    "${CMAKE_CURRENT_SOURCE_DIR}/cmake/zipyConfig.cmake.in"
+    "${CMAKE_CURRENT_BINARY_DIR}/zipyConfig.cmake"
+    INSTALL_DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/zipy
+)
+
 write_basic_package_version_file(
     "zipyConfigVersion.cmake"
     VERSION ${PROJECT_VERSION}
@@ -159,6 +165,7 @@ write_basic_package_version_file(
 )
 
 install(FILES
+        "${CMAKE_CURRENT_BINARY_DIR}/zipyConfig.cmake"
         "${CMAKE_CURRENT_BINARY_DIR}/zipyConfigVersion.cmake"
         DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/zipy
 )
