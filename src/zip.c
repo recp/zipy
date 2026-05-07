@@ -2551,6 +2551,8 @@ zipy_open(const char *path) {
   uint8_t extra_stack[512];
   uint8_t *extra_buf = NULL;
   size_t extra_cap = 0;
+  const uint8_t *central;
+  size_t cd_pos = 0;
   size_t i, count;
 
   if (!path || !(fp = fopen(path, "rb")))
@@ -2574,6 +2576,7 @@ zipy_open(const char *path) {
   zipy->file_count = count;
   zipy->file_size = dir.file_size;
   zipy_map_archive(zipy);
+  central = zipy_mapped_range(zipy, dir.central_dir_offset, dir.central_dir_size);
 
   if (count > 0) {
     zipy->files = calloc(count, sizeof(*zipy->files));
@@ -2582,41 +2585,71 @@ zipy_open(const char *path) {
     zipy->owns_files = 1;
   }
 
-  if (zipy_seek_set(fp, dir.central_dir_offset) != 0)
+  if (!central && zipy_seek_set(fp, dir.central_dir_offset) != 0)
     goto err;
 
   for (i = 0; i < count; i++) {
     uint8_t hdr[ZIP_CENTRAL_FIXED];
-    uint8_t *extra = NULL;
+    const uint8_t *hdrp;
+    const uint8_t *name_src = NULL;
+    const uint8_t *extra = NULL;
     zipy_file_t *info = &zipy->files[i];
     uint16_t nameLen, extraLen, commentLen, diskStart;
     uint32_t comp32, uncomp32, offset32;
+    size_t record_len;
 
-    if (!zipy_read(fp, hdr, sizeof(hdr)) || zipy_le32(hdr) != ZIP_SIGN_CENTRAL_DIR)
+    if (central) {
+      if (cd_pos > dir.central_dir_size
+          || dir.central_dir_size - cd_pos < ZIP_CENTRAL_FIXED)
+        goto err;
+      hdrp = central + cd_pos;
+    } else {
+      if (!zipy_read(fp, hdr, sizeof(hdr)))
+        goto err;
+      hdrp = hdr;
+    }
+
+    if (zipy_le32(hdrp) != ZIP_SIGN_CENTRAL_DIR)
       goto err;
 
-    info->flags = zipy_le16(hdr + 8);
-    info->entry.method = zipy_le16(hdr + 10);
-    info->mod_time = zipy_le16(hdr + 12);
-    info->mod_date = zipy_le16(hdr + 14);
-    info->entry.crc32 = zipy_le32(hdr + 16);
-    comp32 = zipy_le32(hdr + 20);
-    uncomp32 = zipy_le32(hdr + 24);
-    nameLen = zipy_le16(hdr + 28);
-    extraLen = zipy_le16(hdr + 30);
-    commentLen = zipy_le16(hdr + 32);
-    diskStart = zipy_le16(hdr + 34);
-    info->external_attr = zipy_le32(hdr + 38);
-    offset32 = zipy_le32(hdr + 42);
+    info->flags = zipy_le16(hdrp + 8);
+    info->entry.method = zipy_le16(hdrp + 10);
+    info->mod_time = zipy_le16(hdrp + 12);
+    info->mod_date = zipy_le16(hdrp + 14);
+    info->entry.crc32 = zipy_le32(hdrp + 16);
+    comp32 = zipy_le32(hdrp + 20);
+    uncomp32 = zipy_le32(hdrp + 24);
+    nameLen = zipy_le16(hdrp + 28);
+    extraLen = zipy_le16(hdrp + 30);
+    commentLen = zipy_le16(hdrp + 32);
+    diskStart = zipy_le16(hdrp + 34);
+    info->external_attr = zipy_le32(hdrp + 38);
+    offset32 = zipy_le32(hdrp + 42);
 
     if (nameLen == 0
         || (diskStart != 0 && diskStart != ZIP64_MAGIC_UINT16))
       goto err;
 
+    record_len = ZIP_CENTRAL_FIXED
+               + (size_t)nameLen
+               + (size_t)extraLen
+               + (size_t)commentLen;
+    if (central) {
+      if (record_len > dir.central_dir_size - cd_pos)
+        goto err;
+      name_src = central + cd_pos + ZIP_CENTRAL_FIXED;
+      extra = name_src + nameLen;
+    }
+
     char *name = zipy_alloc_name(zipy, (size_t)nameLen + 1u);
 
-    if (!name || !zipy_read(fp, name, nameLen))
+    if (!name)
       goto err;
+    if (central) {
+      memcpy(name, name_src, nameLen);
+    } else if (!zipy_read(fp, name, nameLen)) {
+      goto err;
+    }
     if (memchr(name, '\0', nameLen))
       goto err;
     name[nameLen] = '\0';
@@ -2634,21 +2667,23 @@ zipy_open(const char *path) {
     info->has_mtime = info->mtime != (time_t)0;
 
     if (extraLen > 0) {
-      if (extraLen <= sizeof(extra_stack)) {
-        extra = extra_stack;
-      } else {
-        if (extraLen > extra_cap) {
-          uint8_t *new_extra = realloc(extra_buf, extraLen);
-          if (!new_extra)
-            goto err;
-          extra_buf = new_extra;
-          extra_cap = extraLen;
+      if (!central) {
+        if (extraLen <= sizeof(extra_stack)) {
+          extra = extra_stack;
+        } else {
+          if (extraLen > extra_cap) {
+            uint8_t *new_extra = realloc(extra_buf, extraLen);
+            if (!new_extra)
+              goto err;
+            extra_buf = new_extra;
+            extra_cap = extraLen;
+          }
+          extra = extra_buf;
         }
-        extra = extra_buf;
-      }
 
-      if (!extra || !zipy_read(fp, extra, extraLen))
-        goto err;
+        if (!extra || !zipy_read(fp, (void *)extra, extraLen))
+          goto err;
+      }
 
       if (!zipy_parse_zip64_extra(info, extra, extraLen,
                                  comp32, uncomp32, offset32, diskStart))
@@ -2675,9 +2710,15 @@ zipy_open(const char *path) {
         || UINT64_MAX - info->local_header_offset < ZIP_LOCAL_FIXED)
       goto err;
 
-    if (commentLen > 0 && zipy_skip(fp, commentLen) != 0)
+    if (central) {
+      cd_pos += record_len;
+    } else if (commentLen > 0 && zipy_skip(fp, commentLen) != 0) {
       goto err;
+    }
   }
+
+  if (central && cd_pos != dir.central_dir_size)
+    goto err;
 
   free(extra_buf);
   return zipy;
