@@ -3038,6 +3038,7 @@ inflate_raw(zipy_archive_t * __restrict zipy,
   size_t inlen, outlen;
   uint32_t crc;
   int mapped_out = 0;
+  int zret;
   int ret;
 
   if (!zipy)
@@ -3070,6 +3071,99 @@ inflate_raw(zipy_archive_t * __restrict zipy,
   }
 
   src = mapped;
+  if (mapped && progress && progress->options && progress->options->progress) {
+    uint64_t remaining;
+    uint32_t produced = 0;
+
+    ret = dec_finish(dec, fp);
+    if (ret != ZIPY_ZIP_OK)
+      goto done;
+
+    if (!zipy->inflate_stream) {
+      zipy->inflate_stream = infl_init(outbuf, (uint32_t)uncompressed_size, 0);
+      if (!zipy->inflate_stream) {
+        ret = ZIPY_ZIP_ERR;
+        goto done;
+      }
+    } else {
+      infl_reset(zipy->inflate_stream, outbuf, (uint32_t)uncompressed_size, 0);
+    }
+
+    remaining = compressed_size;
+    zret = UNZ_UNFINISHED;
+    while (remaining > 0) {
+      size_t n = remaining > ZIP_INFLATE_STREAM_CHUNK
+               ? ZIP_INFLATE_STREAM_CHUNK
+               : (size_t)remaining;
+
+      zret = infl_stream(zipy->inflate_stream, src, (uint32_t)n);
+      if (zret < UNZ_OK) {
+        ret = ZIPY_ZIP_EINFLATE;
+        goto done;
+      }
+      {
+        uint32_t now = infl_output_pos(zipy->inflate_stream);
+
+        if (now < produced) {
+          ret = ZIPY_ZIP_ESIZE;
+          goto done;
+        }
+        ret = progress_advance(progress, (uint64_t)(now - produced));
+        if (ret != ZIPY_ZIP_OK)
+          goto done;
+        produced = now;
+      }
+      if (zret == UNZ_OK && remaining != n) {
+        ret = ZIPY_ZIP_ESIZE;
+        goto done;
+      }
+
+      src += n;
+      remaining -= n;
+    }
+
+    if (zret == UNZ_UNFINISHED)
+      zret = infl_stream(zipy->inflate_stream, NULL, 0);
+    if (zret != UNZ_OK) {
+      ret = ZIPY_ZIP_EINFLATE;
+      goto done;
+    }
+    {
+      uint32_t now = infl_output_pos(zipy->inflate_stream);
+
+      if (now < produced) {
+        ret = ZIPY_ZIP_ESIZE;
+        goto done;
+      }
+      ret = progress_advance(progress, (uint64_t)(now - produced));
+      if (ret != ZIPY_ZIP_OK)
+        goto done;
+    }
+
+    if (infl_output_pos(zipy->inflate_stream) != (uint32_t)uncompressed_size
+        || infl_input_pos(zipy->inflate_stream) != (uint32_t)compressed_size) {
+      ret = ZIPY_ZIP_ESIZE;
+      goto done;
+    }
+
+    if (check_crc) {
+      crc = crc32_update(0, outbuf, (size_t)uncompressed_size);
+      if (crc != expectedCrc) {
+        ret = ZIPY_ZIP_ECRC;
+        goto done;
+      }
+    }
+
+    if (!mapped_out && uncompressed_size > 0) {
+      ret = write_file(out, outbuf, (size_t)uncompressed_size);
+      if (ret != ZIPY_ZIP_OK)
+        goto done;
+    }
+
+    ret = ZIPY_ZIP_OK;
+    goto done;
+  }
+
   if (!src) {
     if (!fp) {
       ret = ZIPY_ZIP_EFILE;

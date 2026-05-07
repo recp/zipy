@@ -150,12 +150,12 @@ zipy_close(zip);
 `ask` is CLI-only. Apps should show their own UI and pass `save`,
 `overwrite`, `skip`, or `fail`.
 
-Set `progress` to receive cumulative extracted-byte updates. Stored streaming
-paths report chunk-level progress; mapped and deflated paths may report in
-larger steps. Return zero from the callback to cancel extraction; zipy returns
-`ZIPY_ZIP_ECANCEL`. `zipy_extract_stream()` reports `total = 0` because the
-central directory may not be available yet. With `jobs > 1`, callbacks may run
-from worker threads.
+Set `progress` to receive cumulative extracted-byte updates. Stored paths and
+streamed or mapped Deflate paths report chunk-level progress when a callback is
+set; small in-memory paths may report in one step. Return zero from the
+callback to cancel extraction; zipy returns `ZIPY_ZIP_ECANCEL`.
+`zipy_extract_stream()` reports `total = 0` because the central directory may
+not be available yet. With `jobs > 1`, callbacks may run from worker threads.
 
 ```c
 static int
