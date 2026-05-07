@@ -46,6 +46,8 @@
 #  define PATH_MAX 4096
 #endif
 
+#define ZIPY_STACK_THREADS 64u
+
 typedef struct zipy_progress_t {
   FILE  *out;
   size_t count;
@@ -1360,6 +1362,7 @@ extract_parallel(const char *zipfile,
                  size_t *saved,
                  size_t *skipped) {
   ExtractContext ctx;
+  zipy_thread_t stack_threads[ZIPY_STACK_THREADS];
   zipy_thread_t *threads;
   size_t i, started;
 
@@ -1373,11 +1376,15 @@ extract_parallel(const char *zipfile,
   ctx.count = count;
   zipy_mutex_init(&ctx.lock);
 
-  threads = calloc(jobs, sizeof(*threads));
-  if (!threads) {
-    zipy_mutex_destroy(&ctx.lock);
-    return extract_serial(entries, extractdir, options, policies, progress, count,
-                          extracted, saved, skipped);
+  if (jobs <= ZIPY_STACK_THREADS) {
+    threads = stack_threads;
+  } else {
+    threads = calloc(jobs, sizeof(*threads));
+    if (!threads) {
+      zipy_mutex_destroy(&ctx.lock);
+      return extract_serial(entries, extractdir, options, policies, progress, count,
+                            extracted, saved, skipped);
+    }
   }
 
   started = 0;
@@ -1388,7 +1395,8 @@ extract_parallel(const char *zipfile,
   }
 
   if (started == 0) {
-    free(threads);
+    if (threads != stack_threads)
+      free(threads);
     zipy_mutex_destroy(&ctx.lock);
     return extract_serial(entries, extractdir, options, policies, progress, count,
                           extracted, saved, skipped);
@@ -1397,7 +1405,8 @@ extract_parallel(const char *zipfile,
   for (i = 0; i < started; i++)
     zipy_thread_join(&threads[i]);
 
-  free(threads);
+  if (threads != stack_threads)
+    free(threads);
   zipy_mutex_destroy(&ctx.lock);
 
   *extracted = ctx.extracted;

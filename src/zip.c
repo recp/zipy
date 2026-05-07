@@ -66,6 +66,7 @@
 #define ZIP_MAX_EOCD_SEARCH   (ZIP_EOCD_FIXED + 65535u)
 #define ZIP_IO_CHUNK          (256u * 1024u)
 #define ZIP_OUTPUT_MMAP_MIN   (8u * 1024u * 1024u)
+#define ZIP_STACK_THREADS     64u
 
 #define ZIP_EXTRA_ZIP64       0x0001u
 #define ZIP_EXTRA_EXT_TIME    0x5455u
@@ -2715,10 +2716,6 @@ zipy_clone(zipy_archive_t *zipy) {
   if (!clone->fp)
     goto err;
 
-  clone->path = zipy_strdup(zipy->path);
-  if (!clone->path)
-    goto err;
-
   clone->files = zipy->files;
   clone->file_count = zipy->file_count;
   clone->file_size = zipy->file_size;
@@ -3167,6 +3164,7 @@ zipy_extract_all_parallel(zipy_archive_t *zipy,
                           uint32_t flags,
                           const char *password) {
   zipy_extract_all_context_t ctx;
+  zipy_thread_t stack_threads[ZIP_STACK_THREADS];
   zipy_thread_t *threads;
   size_t i, started;
   int result;
@@ -3174,9 +3172,13 @@ zipy_extract_all_parallel(zipy_archive_t *zipy,
   if (!zipy->path || jobs <= 1)
     return zipy_extract_all_serial(zipy, destdir, skip, flags, password);
 
-  threads = calloc(jobs, sizeof(*threads));
-  if (!threads)
-    return zipy_extract_all_serial(zipy, destdir, skip, flags, password);
+  if (jobs <= ZIP_STACK_THREADS) {
+    threads = stack_threads;
+  } else {
+    threads = calloc(jobs, sizeof(*threads));
+    if (!threads)
+      return zipy_extract_all_serial(zipy, destdir, skip, flags, password);
+  }
 
   memset(&ctx, 0, sizeof(ctx));
   ctx.source = zipy;
@@ -3197,7 +3199,8 @@ zipy_extract_all_parallel(zipy_archive_t *zipy,
 
   if (started == 0) {
     zipy_mutex_destroy(&ctx.lock);
-    free(threads);
+    if (threads != stack_threads)
+      free(threads);
     return zipy_extract_all_serial(zipy, destdir, skip, flags, password);
   }
 
@@ -3206,7 +3209,8 @@ zipy_extract_all_parallel(zipy_archive_t *zipy,
 
   result = ctx.result;
   zipy_mutex_destroy(&ctx.lock);
-  free(threads);
+  if (threads != stack_threads)
+    free(threads);
   return result;
 }
 
