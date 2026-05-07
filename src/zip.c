@@ -150,7 +150,10 @@ struct zipy_archive_t {
   zipy_path_buf_t path_buf;
   zipy_path_buf_t parent_buf;
   zipy_path_buf_t parent_cache;
+  size_t   path_prefix_len;
+  size_t   path_prefix_dir_len;
   size_t   parent_cache_len;
+  int      path_prefix_valid;
   int      parent_cache_valid;
   int      parent_cache_has_symlink;
   uint8_t *copy_buf;
@@ -2463,6 +2466,33 @@ zipy_path_buf_set_dir(zipy_path_buf_t * ZIPY_RESTRICT buf,
   return 1;
 }
 
+static int
+zipy_path_buf_set_archive_dir(zipy_archive_t * ZIPY_RESTRICT zipy,
+                              const char * ZIPY_RESTRICT dir,
+                              size_t * ZIPY_RESTRICT prefixLen) {
+  size_t dirLen;
+
+  if (!zipy || !dir || !prefixLen)
+    return 0;
+
+  dirLen = strlen(dir);
+  if (zipy->path_prefix_valid
+      && zipy->path_prefix_dir_len == dirLen
+      && zipy->path_buf.data
+      && memcmp(zipy->path_buf.data, dir, dirLen) == 0) {
+    *prefixLen = zipy->path_prefix_len;
+    return 1;
+  }
+
+  if (!zipy_path_buf_set_dir(&zipy->path_buf, dir, prefixLen))
+    return 0;
+
+  zipy->path_prefix_dir_len = dirLen;
+  zipy->path_prefix_len = *prefixLen;
+  zipy->path_prefix_valid = 1;
+  return 1;
+}
+
 static const char *
 zipy_path_buf_append_name(zipy_path_buf_t * ZIPY_RESTRICT buf,
                           size_t prefixLen,
@@ -3462,7 +3492,7 @@ zipy_extract_to(zipy_archive_t *zipy,
 
   opts = zipy_default_extract_options(options);
   info = &zipy->files[index];
-  if (!zipy_path_buf_set_dir(&zipy->path_buf, destdir, &prefixLen))
+  if (!zipy_path_buf_set_archive_dir(zipy, destdir, &prefixLen))
     return ZIPY_ZIP_ERR;
   destpath = zipy_path_buf_append_name(&zipy->path_buf,
                                        prefixLen,
@@ -3557,7 +3587,7 @@ zipy_extract_all_serial(zipy_archive_t *zipy,
                         const char *password) {
   size_t i, prefixLen;
 
-  if (!zipy_path_buf_set_dir(&zipy->path_buf, destdir, &prefixLen))
+  if (!zipy_path_buf_set_archive_dir(zipy, destdir, &prefixLen))
     return ZIPY_ZIP_ERR;
 
   for (i = 0; i < zipy->file_count; i++) {
@@ -3605,7 +3635,7 @@ zipy_extract_all_worker(void *arg) {
     zipy_unlock(&ctx->lock);
     return;
   }
-  if (!zipy_path_buf_set_dir(&zipy->path_buf, ctx->destdir, &prefixLen)) {
+  if (!zipy_path_buf_set_archive_dir(zipy, ctx->destdir, &prefixLen)) {
     zipy_lock(&ctx->lock);
     if (ctx->result == ZIPY_ZIP_OK)
       ctx->result = ZIPY_ZIP_ERR;
@@ -3739,7 +3769,7 @@ zipy_apply_directory_metadata(zipy_archive_t *zipy,
                               const unsigned char *skip) {
   size_t i, prefixLen;
 
-  if (!zipy_path_buf_set_dir(&zipy->path_buf, destdir, &prefixLen))
+  if (!zipy_path_buf_set_archive_dir(zipy, destdir, &prefixLen))
     return ZIPY_ZIP_ERR;
 
   for (i = zipy->file_count; i > 0; i--) {
@@ -3779,7 +3809,7 @@ zipy_prepare_extract_all(zipy_archive_t *zipy,
 
   if (options->on_conflict == ZIPY_CONFLICT_OVERWRITE)
     return ZIPY_ZIP_OK;
-  if (!zipy_path_buf_set_dir(&zipy->path_buf, destdir, &prefixLen))
+  if (!zipy_path_buf_set_archive_dir(zipy, destdir, &prefixLen))
     return ZIPY_ZIP_ERR;
 
   for (i = 0; i < zipy->file_count; i++) {
