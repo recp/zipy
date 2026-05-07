@@ -90,6 +90,12 @@
 #  define ZIPY_RESTRICT
 #endif
 
+#if defined(_WIN32) \
+    || defined(__LITTLE_ENDIAN__) \
+    || (defined(__BYTE_ORDER__) && __BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__)
+#  define ZIPY_LITTLE_ENDIAN 1
+#endif
+
 typedef struct zipy_file_t {
   zipy_entry_t entry;
   uint64_t local_header_offset;
@@ -169,6 +175,18 @@ zipy_le32(const uint8_t * ZIPY_RESTRICT p) {
 static uint64_t
 zipy_le64(const uint8_t * ZIPY_RESTRICT p) {
   return ((uint64_t)zipy_le32(p)) | ((uint64_t)zipy_le32(p + 4) << 32);
+}
+
+static uint64_t
+zipy_load_le64(const uint8_t * ZIPY_RESTRICT p) {
+#if ZIPY_LITTLE_ENDIAN
+  uint64_t value;
+
+  memcpy(&value, p, sizeof(value));
+  return value;
+#else
+  return zipy_le64(p);
+#endif
 }
 
 static void
@@ -1520,8 +1538,8 @@ zipy_crc32_update(uint32_t crc,
 
   crc = ~crc;
   while (len >= 16u) {
-    uint64_t word0 = zipy_le64(buf) ^ crc;
-    uint64_t word1 = zipy_le64(buf + 8u);
+    uint64_t word0 = zipy_load_le64(buf) ^ crc;
+    uint64_t word1 = zipy_load_le64(buf + 8u);
 
     crc = table[15][ word0        & 0xFFu]
         ^ table[14][(word0 >>  8) & 0xFFu]
@@ -1544,7 +1562,7 @@ zipy_crc32_update(uint32_t crc,
   }
 
   while (len >= 8u) {
-    uint64_t word = zipy_le64(buf) ^ crc;
+    uint64_t word = zipy_load_le64(buf) ^ crc;
 
     crc = table[7][ word        & 0xFFu]
         ^ table[6][(word >>  8) & 0xFFu]
