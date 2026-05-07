@@ -68,6 +68,7 @@
 #define ZIP_OUTPUT_MMAP_MIN   (8u * 1024u * 1024u)
 #define ZIP_PATH_STACK        512u
 #define ZIP_PARALLEL_MIN_ENTRIES 8u
+#define ZIP_PARALLEL_MIN_BYTES (8u * 1024u * 1024u)
 #define ZIP_STACK_THREADS     64u
 #define ZIP_WORK_BATCH        8u
 
@@ -3575,17 +3576,35 @@ typedef struct zipy_extract_all_context_t {
 } zipy_extract_all_context_t;
 
 static size_t
-zipy_extract_default_jobs(size_t count) {
+zipy_extract_default_jobs(const zipy_archive_t *zipy) {
+  uint64_t total_size = 0;
+  size_t i, count, files = 0;
   size_t jobs;
 
-  if (count < ZIP_PARALLEL_MIN_ENTRIES)
+  if (!zipy)
+    return 1;
+
+  count = zipy->file_count;
+  for (i = 0; i < count; i++) {
+    const zipy_file_t *info = &zipy->files[i];
+
+    if (info->entry.is_directory)
+      continue;
+    files++;
+    if (total_size < ZIP_PARALLEL_MIN_BYTES)
+      total_size += info->entry.uncompressed_size;
+  }
+
+  if (files <= 1
+      || (files < ZIP_PARALLEL_MIN_ENTRIES
+          && total_size < ZIP_PARALLEL_MIN_BYTES))
     return 1;
 
   jobs = zipy_cpu_count();
   if (jobs < 1)
     jobs = 1;
-  if (jobs > count)
-    jobs = count;
+  if (jobs > files)
+    jobs = files;
 
   return jobs;
 }
@@ -3896,7 +3915,7 @@ zipy_extract_all_options(zipy_archive_t *zipy,
   if (ret >= ZIPY_ZIP_OK)
     ret = zipy_extract_all_parallel(zipy,
                                     destdir,
-                                    zipy_extract_default_jobs(zipy->file_count),
+                                    zipy_extract_default_jobs(zipy),
                                     skip,
                                     opts.flags,
                                     opts.password);
