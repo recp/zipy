@@ -49,10 +49,10 @@
 
 #define STACK_THREADS 64u
 #define WORK_BATCH    8u
-#define PARALLEL_MIN_ENTRIES 8u
 #define PARALLEL_MIN_BYTES (8u * 1024u * 1024u)
 #define PARALLEL_MIN_STORE_ENTRIES 16u
 #define PARALLEL_MIN_STORE_BYTES (64u * 1024u * 1024u)
+#define PARALLEL_MAX_IO_JOBS 2u
 #define PROGRESS_INTERVAL_MS 33u
 
 typedef struct progress_t {
@@ -389,6 +389,28 @@ clamp_jobs(size_t jobs, size_t count) {
 }
 
 static size_t
+io_jobs(size_t count) {
+  size_t jobs;
+
+  jobs = cpu_jobs(count);
+  if (jobs > PARALLEL_MAX_IO_JOBS)
+    jobs = PARALLEL_MAX_IO_JOBS;
+  return jobs;
+}
+
+static uint64_t
+entry_parallel_work(const zipy_entry_t *entry) {
+  if (!entry || entry->is_directory)
+    return 0;
+  if (entry->encrypted)
+    return entry->uncompressed_size;
+  if (entry->method == ZIPY_ZIP_DEFLATE
+      && entry->uncompressed_size > entry->compressed_size)
+    return entry->uncompressed_size - entry->compressed_size;
+  return 0;
+}
+
+static size_t
 adaptive_jobs(zipy_archive_t *zip, size_t count, size_t *filesOut) {
   uint64_t workSize = 0, totalSize = 0;
   size_t i, files = 0, workFiles = 0;
@@ -413,15 +435,19 @@ adaptive_jobs(zipy_archive_t *zip, size_t count, size_t *filesOut) {
       else
         totalSize += entry->uncompressed_size;
     }
-    if (entry->method == ZIPY_ZIP_STORE && !entry->encrypted)
-      continue;
+    {
+      uint64_t work = entry_parallel_work(entry);
 
-    workFiles++;
-    if (workSize < PARALLEL_MIN_BYTES) {
-      if (entry->uncompressed_size > PARALLEL_MIN_BYTES - workSize)
-        workSize = PARALLEL_MIN_BYTES;
-      else
-        workSize += entry->uncompressed_size;
+      if (work == 0)
+        continue;
+
+      workFiles++;
+      if (workSize < PARALLEL_MIN_BYTES) {
+        if (work > PARALLEL_MIN_BYTES - workSize)
+          workSize = PARALLEL_MIN_BYTES;
+        else
+          workSize += work;
+      }
     }
   }
 
@@ -431,9 +457,7 @@ adaptive_jobs(zipy_archive_t *zip, size_t count, size_t *filesOut) {
   if (files <= 1)
     return 1;
 
-  if (workFiles > 1
-      && (workFiles >= PARALLEL_MIN_ENTRIES
-          || workSize >= PARALLEL_MIN_BYTES)) {
+  if (workFiles > 1 && workSize >= PARALLEL_MIN_BYTES) {
     jobs = cpu_jobs(workFiles);
     return jobs > 0 ? jobs : 1;
   }
@@ -442,7 +466,7 @@ adaptive_jobs(zipy_archive_t *zip, size_t count, size_t *filesOut) {
       || totalSize < PARALLEL_MIN_STORE_BYTES)
     return 1;
 
-  jobs = cpu_jobs(files);
+  jobs = io_jobs(files);
   return jobs > 0 ? jobs : 1;
 }
 
