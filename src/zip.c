@@ -5508,6 +5508,7 @@ zipy_extract_to(zipy_archive_t * __restrict zipy,
   const char *destpath;
   char *save_dir = NULL;
   progress_state_t progress;
+  progress_state_t *progress_ptr = NULL;
   uint64_t done = 0;
   size_t prefixLen, parentLen;
   int ret, conflictRet;
@@ -5517,13 +5518,16 @@ zipy_extract_to(zipy_archive_t * __restrict zipy,
 
   opts = default_extract_options(options);
   info = &zipy->files[index];
-  progress_init_entry(&progress,
-                      &opts,
-                      &info->entry,
-                      &done,
-                      entry_progress_size(info),
-                      NULL,
-                      NULL);
+  if (opts.progress) {
+    progress_init_entry(&progress,
+                        &opts,
+                        &info->entry,
+                        &done,
+                        entry_progress_size(info),
+                        NULL,
+                        NULL);
+    progress_ptr = &progress;
+  }
   if (!path_buf_set_archive_dir(zipy, destdir, &prefixLen))
     return ZIPY_ZIP_ERR;
   destpath = path_buf_append_name(&zipy->path_buf,
@@ -5559,13 +5563,13 @@ zipy_extract_to(zipy_archive_t * __restrict zipy,
                          ? resume_state_path(zipy, destdir)
                          : NULL,
                            destdir,
-                           opts.progress ? &progress : NULL);
+                           progress_ptr);
   if (ret == ZIPY_ZIP_OK && conflictRet == ZIPY_ZIP_SAVED)
     ret = ZIPY_ZIP_SAVED;
 
 report:
-  if (ret >= ZIPY_ZIP_OK) {
-    int progressRet = progress_finish_entry(&progress, info);
+  if (ret >= ZIPY_ZIP_OK && progress_ptr) {
+    int progressRet = progress_finish_entry(progress_ptr, info);
 
     if (progressRet < ZIPY_ZIP_OK)
       ret = progressRet;
