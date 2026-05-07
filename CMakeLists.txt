@@ -61,7 +61,7 @@ else()
     find_package(Threads REQUIRED)
 endif()
 
-add_library(${PROJECT_NAME}
+add_library(${PROJECT_NAME} STATIC
         src/zip.c
         src/crypto/dec.c
         src/crypto/aes_wg.c
@@ -93,8 +93,9 @@ target_include_directories(zipy
 )
 
 target_compile_definitions(zipy
-    PRIVATE
+    PUBLIC
         ZIPY_STATIC=1
+    PRIVATE
         ZIPY_EXPORTS=1
         UNZ_STATIC=1
         UNZ_EXPORTS=1
