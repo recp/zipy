@@ -6106,6 +6106,7 @@ zipy_extract_stream(const char * __restrict path,
     const uint8_t *extra = NULL;
     const char *destpath;
     progress_state_t progress;
+    progress_state_t *progress_ptr = NULL;
     uint64_t offset, dataOffset;
     uint32_t sig, comp32, uncomp32;
     uint16_t flags, method, nameLen, extraLen;
@@ -6277,13 +6278,16 @@ zipy_extract_stream(const char * __restrict path,
       ret = ZIPY_ZIP_ERR;
       break;
     }
-    progress_init_entry(&progress,
-                        &opts,
-                        &info.entry,
-                        &progress_done,
-                        0,
-                        NULL,
-                        NULL);
+    if (opts.progress) {
+      progress_init_entry(&progress,
+                          &opts,
+                          &info.entry,
+                          &progress_done,
+                          0,
+                          NULL,
+                          NULL);
+      progress_ptr = &progress;
+    }
 
     conflictRet = prepare_entry_conflict(destdir,
                                          &info.entry,
@@ -6311,9 +6315,11 @@ zipy_extract_stream(const char * __restrict path,
           break;
         }
       }
-      ret = progress_finish_entry(&progress, &info);
-      if (ret < ZIPY_ZIP_OK)
-        break;
+      if (progress_ptr) {
+        ret = progress_finish_entry(progress_ptr, &info);
+        if (ret < ZIPY_ZIP_OK)
+          break;
+      }
       continue;
     }
     if (conflictRet < ZIPY_ZIP_OK) {
@@ -6332,7 +6338,7 @@ zipy_extract_stream(const char * __restrict path,
                                             zip64Desc,
                                             state_path,
                                             destdir,
-                                            opts.progress ? &progress : NULL);
+                                            progress_ptr);
         if (ret < ZIPY_ZIP_OK && (opts.flags & ZIPY_EXTRACT_RESUME))
           keep_entry_state = 1;
       } else {
@@ -6343,7 +6349,7 @@ zipy_extract_stream(const char * __restrict path,
                                               opts.flags | EXTRACT_DELAY_DIR_METADATA,
                                               opts.password,
                                               zip64Desc,
-                                              opts.progress ? &progress : NULL);
+                                              progress_ptr);
       }
     } else {
       ret = extract_entry(&zipy,
@@ -6354,15 +6360,17 @@ zipy_extract_stream(const char * __restrict path,
                           opts.password,
                           state_path,
                           destdir,
-                          opts.progress ? &progress : NULL);
+                          progress_ptr);
     }
     if (ret < ZIPY_ZIP_OK) {
       ret = stream_incomplete_result(&zipy, ret);
       break;
     }
-    ret = progress_finish_entry(&progress, &info);
-    if (ret < ZIPY_ZIP_OK)
-      break;
+    if (progress_ptr) {
+      ret = progress_finish_entry(progress_ptr, &info);
+      if (ret < ZIPY_ZIP_OK)
+        break;
+    }
     if (unknownDataDesc)
       continue;
     if (info.entry.is_directory
