@@ -79,41 +79,46 @@ typedef struct zipy_entry_t {
 } zipy_entry_t;
 
 ZIPY_EXPORT zipy_archive_t *
-zipy_open(const char *path);
+zipy_open(const char * __restrict path);
 
 ZIPY_EXPORT size_t
-zipy_count(const zipy_archive_t *zipy);
+zipy_count(const zipy_archive_t * __restrict zipy);
 
 ZIPY_EXPORT size_t
-zipy_file_count(const zipy_archive_t *zipy);
+zipy_file_count(const zipy_archive_t * __restrict zipy);
 
 ZIPY_EXPORT uint64_t
-zipy_uncompressed_size(const zipy_archive_t *zipy);
+zipy_uncompressed_size(const zipy_archive_t * __restrict zipy);
 
 ZIPY_EXPORT const zipy_entry_t *
-zipy_entry(const zipy_archive_t *zipy, size_t index);
+zipy_entry(const zipy_archive_t * __restrict zipy, size_t index);
 
 ZIPY_EXPORT int
-zipy_extract(zipy_archive_t *zipy, size_t index, const char *destpath);
+zipy_extract(zipy_archive_t * __restrict zipy,
+             size_t index,
+             const char * __restrict destpath);
 
 ZIPY_EXPORT int
-zipy_extract_to(zipy_archive_t *zipy,
+zipy_extract_to(zipy_archive_t * __restrict zipy,
                 size_t index,
-                const char *destdir,
-                const zipy_extract_options_t *options);
+                const char * __restrict destdir,
+                const zipy_extract_options_t * __restrict options);
 
 ZIPY_EXPORT int
-zipy_extract_named(zipy_archive_t *zipy, const char *name, const char *destpath);
+zipy_extract_named(zipy_archive_t * __restrict zipy,
+                   const char * __restrict name,
+                   const char * __restrict destpath);
 
 ZIPY_EXPORT int
-zipy_extract_all(zipy_archive_t *zipy, const char *destdir);
+zipy_extract_all(zipy_archive_t * __restrict zipy,
+                 const char * __restrict destdir);
 
 ZIPY_EXPORT int
-zipy_extract_all_options(zipy_archive_t *zipy,
-                         const char *destdir,
-                         const zipy_extract_options_t *options);
+zipy_extract_all_options(zipy_archive_t * __restrict zipy,
+                         const char * __restrict destdir,
+                         const zipy_extract_options_t * __restrict options);
 
 ZIPY_EXPORT void
-zipy_close(zipy_archive_t *zipy);
+zipy_close(zipy_archive_t * __restrict zipy);
 
 #endif /* zipy_zip_h */

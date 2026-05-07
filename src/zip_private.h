@@ -14,15 +14,15 @@
 #include <zipy/zip.h>
 
 zipy_archive_t *
-zipy_clone(zipy_archive_t *zipy);
+zipy_clone(zipy_archive_t * __restrict zipy);
 
 int
-zipy_has_encrypted(const zipy_archive_t *zipy);
+zipy_has_encrypted(const zipy_archive_t * __restrict zipy);
 
 int
-zipy_has_symlink(const zipy_archive_t *zipy);
+zipy_has_symlink(const zipy_archive_t * __restrict zipy);
 
 int
-zipy_has_unsupported_method(const zipy_archive_t *zipy);
+zipy_has_unsupported_method(const zipy_archive_t * __restrict zipy);
 
 #endif /* zipy_private_h */

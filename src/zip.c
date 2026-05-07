@@ -90,15 +90,6 @@
 #else
 #  define ZIPY_PATH_SEP '/'
 #endif
-
-#if defined(_MSC_VER)
-#  define ZIPY_RESTRICT __restrict
-#elif defined(__GNUC__) || defined(__clang__)
-#  define ZIPY_RESTRICT __restrict__
-#else
-#  define ZIPY_RESTRICT
-#endif
-
 #if defined(_WIN32) \
     || defined(__LITTLE_ENDIAN__) \
     || (defined(__BYTE_ORDER__) && __BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__)
@@ -205,12 +196,12 @@ typedef struct zipy_out_file_t {
 } zipy_out_file_t;
 
 static uint16_t
-zipy_le16(const uint8_t * ZIPY_RESTRICT p) {
+zipy_le16(const uint8_t * __restrict p) {
   return (uint16_t)((uint16_t)p[0] | ((uint16_t)p[1] << 8));
 }
 
 static uint32_t
-zipy_le32(const uint8_t * ZIPY_RESTRICT p) {
+zipy_le32(const uint8_t * __restrict p) {
   return ((uint32_t)p[0])
        | ((uint32_t)p[1] << 8)
        | ((uint32_t)p[2] << 16)
@@ -218,12 +209,12 @@ zipy_le32(const uint8_t * ZIPY_RESTRICT p) {
 }
 
 static uint64_t
-zipy_le64(const uint8_t * ZIPY_RESTRICT p) {
+zipy_le64(const uint8_t * __restrict p) {
   return ((uint64_t)zipy_le32(p)) | ((uint64_t)zipy_le32(p + 4) << 32);
 }
 
 static uint64_t
-zipy_load_le64(const uint8_t * ZIPY_RESTRICT p) {
+zipy_load_le64(const uint8_t * __restrict p) {
 #if ZIPY_LITTLE_ENDIAN
   uint64_t value;
 
@@ -413,7 +404,7 @@ zipy_reserve_bytes(uint8_t **buf, size_t *cap, size_t len) {
 }
 
 static int
-zipy_read(FILE * ZIPY_RESTRICT fp, void * ZIPY_RESTRICT buf, size_t len) {
+zipy_read(FILE * __restrict fp, void * __restrict buf, size_t len) {
   return len == 0 || fread(buf, 1, len, fp) == len;
 }
 
@@ -423,8 +414,8 @@ zipy_file_error_result(void) {
 }
 
 static int
-zipy_write_file(zipy_out_file_t * ZIPY_RESTRICT out,
-                const void * ZIPY_RESTRICT buf,
+zipy_write_file(zipy_out_file_t * __restrict out,
+                const void * __restrict buf,
                 size_t len) {
 #if defined(_WIN32)
   if (len == 0)
@@ -473,7 +464,7 @@ zipy_flush_output(zipy_out_file_t *out) {
 }
 
 static int
-zipy_seek_set(FILE * ZIPY_RESTRICT fp, uint64_t off) {
+zipy_seek_set(FILE * __restrict fp, uint64_t off) {
 #if defined(_WIN32)
   if (off > (uint64_t)INT64_MAX)
     return -1;
@@ -486,7 +477,7 @@ zipy_seek_set(FILE * ZIPY_RESTRICT fp, uint64_t off) {
 }
 
 static int
-zipy_tell(FILE * ZIPY_RESTRICT fp, uint64_t * ZIPY_RESTRICT pos) {
+zipy_tell(FILE * __restrict fp, uint64_t * __restrict pos) {
 #if defined(_WIN32)
   __int64 p = _ftelli64(fp);
   if (p < 0)
@@ -1095,8 +1086,8 @@ zipy_parse_ext_time_extra(zipy_file_t *info, const uint8_t *extra, size_t len) {
 }
 
 static int
-zipy_verify_local_aes_extra(zipy_archive_t * ZIPY_RESTRICT zipy,
-                            const zipy_file_t * ZIPY_RESTRICT info,
+zipy_verify_local_aes_extra(zipy_archive_t * __restrict zipy,
+                            const zipy_file_t * __restrict info,
                             uint64_t extra_offset,
                             uint16_t extra_len) {
   uint8_t stack_extra[512];
@@ -1140,8 +1131,8 @@ zipy_verify_local_aes_extra(zipy_archive_t * ZIPY_RESTRICT zipy,
 }
 
 static void
-zipy_cache_local_header(zipy_archive_t * ZIPY_RESTRICT zipy,
-                        zipy_file_t * ZIPY_RESTRICT info) {
+zipy_cache_local_header(zipy_archive_t * __restrict zipy,
+                        zipy_file_t * __restrict info) {
   const uint8_t *localp;
   uint16_t flags, method, nameLen, extraLen;
   uint64_t dataOffset;
@@ -1180,8 +1171,8 @@ zipy_is_zip_sep(char c) {
 }
 
 static void
-zipy_record_extract_metrics(zipy_archive_t * ZIPY_RESTRICT zipy,
-                            const zipy_file_t * ZIPY_RESTRICT info) {
+zipy_record_extract_metrics(zipy_archive_t * __restrict zipy,
+                            const zipy_file_t * __restrict info) {
   if (!zipy || !info)
     return;
   if (info->entry.is_directory) {
@@ -1221,11 +1212,11 @@ zipy_is_dir_name_len(const char *path, size_t len) {
 }
 
 static int
-zipy_scan_member_name(const char * ZIPY_RESTRICT path,
+zipy_scan_member_name(const char * __restrict path,
                       size_t len,
-                      uint8_t * ZIPY_RESTRICT safe,
-                      uint8_t * ZIPY_RESTRICT has_backslash,
-                      uint16_t * ZIPY_RESTRICT parent_len) {
+                      uint8_t * __restrict safe,
+                      uint8_t * __restrict has_backslash,
+                      uint16_t * __restrict parent_len) {
   size_t i, seg = 0, parent = 0;
   int is_safe;
 
@@ -1811,8 +1802,8 @@ zipy_mkdir_parent(const char *path) {
 }
 
 static int
-zipy_prepare_parent_dir_len(zipy_archive_t * ZIPY_RESTRICT zipy,
-                            const char * ZIPY_RESTRICT path,
+zipy_prepare_parent_dir_len(zipy_archive_t * __restrict zipy,
+                            const char * __restrict path,
                             size_t parent_len) {
   int has_symlink;
 
@@ -1854,8 +1845,8 @@ zipy_prepare_parent_dir_len(zipy_archive_t * ZIPY_RESTRICT zipy,
 }
 
 static int
-zipy_prepare_parent_dir(zipy_archive_t * ZIPY_RESTRICT zipy,
-                        const char * ZIPY_RESTRICT path) {
+zipy_prepare_parent_dir(zipy_archive_t * __restrict zipy,
+                        const char * __restrict path) {
   const char *p, *last = NULL;
   size_t parent_len;
 
@@ -2074,7 +2065,7 @@ zipy_crc32_init_tables(void) {
 
 static uint32_t
 zipy_crc32_update(uint32_t crc,
-                  const uint8_t * ZIPY_RESTRICT buf,
+                  const uint8_t * __restrict buf,
                   size_t len) {
   const uint32_t (*table)[256] = zipy_crc32_tables;
 
@@ -2126,13 +2117,13 @@ zipy_crc32_update(uint32_t crc,
 }
 
 static int
-zipy_write_chunk(zipy_out_file_t * ZIPY_RESTRICT out,
-                 uint8_t * ZIPY_RESTRICT buf,
+zipy_write_chunk(zipy_out_file_t * __restrict out,
+                 uint8_t * __restrict buf,
                  size_t len,
-                 uint32_t * ZIPY_RESTRICT crc,
+                 uint32_t * __restrict crc,
                  int check_crc,
-                 dec_t * ZIPY_RESTRICT dec,
-                 uint64_t * ZIPY_RESTRICT written) {
+                 dec_t * __restrict dec,
+                 uint64_t * __restrict written) {
   int ret;
 
   if (len == 0)
@@ -2152,12 +2143,12 @@ zipy_write_chunk(zipy_out_file_t * ZIPY_RESTRICT out,
 }
 
 static int
-zipy_copy_store(zipy_archive_t * ZIPY_RESTRICT zipy,
-                zipy_out_file_t * ZIPY_RESTRICT out,
+zipy_copy_store(zipy_archive_t * __restrict zipy,
+                zipy_out_file_t * __restrict out,
                 uint64_t len,
                 uint32_t expectedCrc,
                 int check_crc,
-                dec_t * ZIPY_RESTRICT dec) {
+                dec_t * __restrict dec) {
   FILE *fp;
   uint8_t *buf;
   uint64_t remaining = len, written = 0;
@@ -2200,8 +2191,8 @@ zipy_copy_store(zipy_archive_t * ZIPY_RESTRICT zipy,
 }
 
 static int
-zipy_copy_store_mapped(zipy_out_file_t * ZIPY_RESTRICT out,
-                       const uint8_t * ZIPY_RESTRICT src,
+zipy_copy_store_mapped(zipy_out_file_t * __restrict out,
+                       const uint8_t * __restrict src,
                        uint64_t len,
                        uint32_t expectedCrc,
                        int check_crc) {
@@ -2235,14 +2226,14 @@ zipy_copy_store_mapped(zipy_out_file_t * ZIPY_RESTRICT out,
 }
 
 static int
-zipy_inflate_raw(zipy_archive_t * ZIPY_RESTRICT zipy,
-                 zipy_out_file_t * ZIPY_RESTRICT out,
-                 const uint8_t * ZIPY_RESTRICT mapped,
+zipy_inflate_raw(zipy_archive_t * __restrict zipy,
+                 zipy_out_file_t * __restrict out,
+                 const uint8_t * __restrict mapped,
                  uint64_t compressed_size,
                  uint64_t uncompressed_size,
                  uint32_t expectedCrc,
                  int check_crc,
-                 dec_t * ZIPY_RESTRICT dec) {
+                 dec_t * __restrict dec) {
   FILE *fp;
   uint8_t *inbuf = NULL;
   uint8_t *outbuf;
@@ -2519,9 +2510,9 @@ zipy_extract_path(const char *dir, const char *name) {
 }
 
 static int
-zipy_path_buf_set_dir(zipy_path_buf_t * ZIPY_RESTRICT buf,
-                      const char * ZIPY_RESTRICT dir,
-                      size_t * ZIPY_RESTRICT prefixLen) {
+zipy_path_buf_set_dir(zipy_path_buf_t * __restrict buf,
+                      const char * __restrict dir,
+                      size_t * __restrict prefixLen) {
   size_t dirLen;
 
   if (!buf || !dir || !prefixLen)
@@ -2543,9 +2534,9 @@ zipy_path_buf_set_dir(zipy_path_buf_t * ZIPY_RESTRICT buf,
 }
 
 static int
-zipy_path_buf_set_archive_dir(zipy_archive_t * ZIPY_RESTRICT zipy,
-                              const char * ZIPY_RESTRICT dir,
-                              size_t * ZIPY_RESTRICT prefixLen) {
+zipy_path_buf_set_archive_dir(zipy_archive_t * __restrict zipy,
+                              const char * __restrict dir,
+                              size_t * __restrict prefixLen) {
   size_t dirLen;
 
   if (!zipy || !dir || !prefixLen)
@@ -2570,9 +2561,9 @@ zipy_path_buf_set_archive_dir(zipy_archive_t * ZIPY_RESTRICT zipy,
 }
 
 static const char *
-zipy_path_buf_append_name(zipy_path_buf_t * ZIPY_RESTRICT buf,
+zipy_path_buf_append_name(zipy_path_buf_t * __restrict buf,
                           size_t prefixLen,
-                          const char * ZIPY_RESTRICT name,
+                          const char * __restrict name,
                           size_t nameLen,
                           int nameHasBackslash) {
   size_t i;
@@ -2596,7 +2587,7 @@ zipy_path_buf_append_name(zipy_path_buf_t * ZIPY_RESTRICT buf,
 }
 
 static size_t
-zipy_extract_parent_len(const zipy_file_t * ZIPY_RESTRICT info,
+zipy_extract_parent_len(const zipy_file_t * __restrict info,
                         size_t prefixLen) {
   if (info && info->name_parent_len > 0)
     return prefixLen + info->name_parent_len;
@@ -3028,7 +3019,7 @@ zipy_prepare_entry_conflict(const char *destdir,
 
 ZIPY_EXPORT
 zipy_archive_t *
-zipy_open(const char *path) {
+zipy_open(const char * __restrict path) {
   zipy_archive_t *zipy = NULL;
   zipy_dir_info_t dir;
   FILE *fp;
@@ -3249,7 +3240,8 @@ err:
 }
 
 static int
-zipy_clone_init(zipy_archive_t *clone, zipy_archive_t *zipy) {
+zipy_clone_init(zipy_archive_t * __restrict clone,
+                zipy_archive_t * __restrict zipy) {
   int needs_fp;
 
   if (!clone || !zipy)
@@ -3295,7 +3287,7 @@ err:
 }
 
 zipy_archive_t *
-zipy_clone(zipy_archive_t *zipy) {
+zipy_clone(zipy_archive_t * __restrict zipy) {
   zipy_archive_t *clone;
 
   clone = malloc(sizeof(*clone));
@@ -3310,27 +3302,27 @@ zipy_clone(zipy_archive_t *zipy) {
 }
 
 int
-zipy_has_encrypted(const zipy_archive_t *zipy) {
+zipy_has_encrypted(const zipy_archive_t * __restrict zipy) {
   return zipy && zipy->has_encrypted;
 }
 
 int
-zipy_has_symlink(const zipy_archive_t *zipy) {
+zipy_has_symlink(const zipy_archive_t * __restrict zipy) {
   return zipy && zipy->has_symlink;
 }
 
 int
-zipy_has_unsupported_method(const zipy_archive_t *zipy) {
+zipy_has_unsupported_method(const zipy_archive_t * __restrict zipy) {
   return zipy && zipy->has_unsupported_method;
 }
 
 static int
-zipy_extract_entry(zipy_archive_t * ZIPY_RESTRICT zipy,
-                   zipy_file_t * ZIPY_RESTRICT info,
-                   const char * ZIPY_RESTRICT destpath,
+zipy_extract_entry(zipy_archive_t * __restrict zipy,
+                   zipy_file_t * __restrict info,
+                   const char * __restrict destpath,
                    size_t parent_len,
                    uint32_t extract_flags,
-                   const char * ZIPY_RESTRICT password) {
+                   const char * __restrict password) {
   uint8_t local[ZIP_LOCAL_FIXED];
   const uint8_t *localp;
   const uint8_t *mapped_data = NULL;
@@ -3558,25 +3550,25 @@ zipy_extract_entry(zipy_archive_t * ZIPY_RESTRICT zipy,
 
 ZIPY_EXPORT
 size_t
-zipy_count(const zipy_archive_t *zipy) {
+zipy_count(const zipy_archive_t * __restrict zipy) {
   return zipy ? zipy->file_count : 0;
 }
 
 ZIPY_EXPORT
 size_t
-zipy_file_count(const zipy_archive_t *zipy) {
+zipy_file_count(const zipy_archive_t * __restrict zipy) {
   return zipy ? zipy->extract_file_count : 0;
 }
 
 ZIPY_EXPORT
 uint64_t
-zipy_uncompressed_size(const zipy_archive_t *zipy) {
+zipy_uncompressed_size(const zipy_archive_t * __restrict zipy) {
   return zipy ? zipy->extract_uncompressed_size : 0;
 }
 
 ZIPY_EXPORT
 const zipy_entry_t *
-zipy_entry(const zipy_archive_t *zipy, size_t index) {
+zipy_entry(const zipy_archive_t * __restrict zipy, size_t index) {
   if (!zipy || index >= zipy->file_count)
     return NULL;
 
@@ -3585,7 +3577,9 @@ zipy_entry(const zipy_archive_t *zipy, size_t index) {
 
 ZIPY_EXPORT
 int
-zipy_extract(zipy_archive_t *zipy, size_t index, const char *destpath) {
+zipy_extract(zipy_archive_t * __restrict zipy,
+             size_t index,
+             const char * __restrict destpath) {
   if (!zipy || index >= zipy->file_count)
     return ZIPY_ZIP_EFILE;
 
@@ -3599,10 +3593,10 @@ zipy_extract(zipy_archive_t *zipy, size_t index, const char *destpath) {
 
 ZIPY_EXPORT
 int
-zipy_extract_to(zipy_archive_t *zipy,
+zipy_extract_to(zipy_archive_t * __restrict zipy,
                 size_t index,
-                const char *destdir,
-                const zipy_extract_options_t *options) {
+                const char * __restrict destdir,
+                const zipy_extract_options_t * __restrict options) {
   zipy_extract_options_t opts;
   zipy_file_t *info;
   const char *destpath;
@@ -3656,7 +3650,9 @@ done:
 
 ZIPY_EXPORT
 int
-zipy_extract_named(zipy_archive_t *zipy, const char *name, const char *destpath) {
+zipy_extract_named(zipy_archive_t * __restrict zipy,
+                   const char * __restrict name,
+                   const char * __restrict destpath) {
   zipy_file_t *info;
 
   if (!zipy || !name)
@@ -4016,15 +4012,16 @@ zipy_prepare_extract_all(zipy_archive_t *zipy,
 
 ZIPY_EXPORT
 int
-zipy_extract_all(zipy_archive_t *zipy, const char *destdir) {
+zipy_extract_all(zipy_archive_t * __restrict zipy,
+                 const char * __restrict destdir) {
   return zipy_extract_all_options(zipy, destdir, NULL);
 }
 
 ZIPY_EXPORT
 int
-zipy_extract_all_options(zipy_archive_t *zipy,
-                         const char *destdir,
-                         const zipy_extract_options_t *options) {
+zipy_extract_all_options(zipy_archive_t * __restrict zipy,
+                         const char * __restrict destdir,
+                         const zipy_extract_options_t * __restrict options) {
   zipy_extract_options_t opts;
   unsigned char *skip = NULL;
   size_t jobs;
@@ -4061,7 +4058,7 @@ zipy_extract_all_options(zipy_archive_t *zipy,
 
 ZIPY_EXPORT
 void
-zipy_close(zipy_archive_t *zipy) {
+zipy_close(zipy_archive_t * __restrict zipy) {
   if (!zipy)
     return;
 
