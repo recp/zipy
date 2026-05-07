@@ -1010,7 +1010,7 @@ entry_conflict_path(const char *extractdir,
   if (!entry || !entry->name)
     return -1;
 
-  len = strlen(entry->name);
+  len = entry->name_len;
   rel = malloc(len + 1);
   if (!rel)
     return -1;

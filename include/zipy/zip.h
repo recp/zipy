@@ -64,6 +64,7 @@ typedef struct zipy_extract_options_t {
 
 typedef struct zipy_entry_t {
   const char *name;
+  size_t      name_len;
   uint64_t    compressed_size;
   uint64_t    uncompressed_size;
   uint32_t    crc32;
