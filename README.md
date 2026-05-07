@@ -151,8 +151,10 @@ zipy_close(zip);
 Use `zipy_extract_stream(path, target, options)` to walk local file headers
 instead of opening the central directory first. This is the first streaming
 primitive: it works for local headers that already carry compressed and
-uncompressed sizes. Data-descriptor entries, which are common in true
-download-while-writing ZIP streams, still need the next streaming step.
+uncompressed sizes, including data-descriptor entries when those sizes are
+still present in the local header or ZIP64 extra. Data-descriptor entries with
+unknown local sizes, which are common in true download-while-writing ZIP
+streams, still need the next streaming step.
 
 CRC32 validation is enabled by default. Set `ZIPY_EXTRACT_NO_CRC` only when
 lower latency matters more than detecting corrupted archive data.
@@ -198,5 +200,6 @@ member.
 - [x] symlinks, attributes, and timestamps
 - [x] chunked non-mmap deflate input
 - [x] sequential local-header extraction for known-size entries
-- [ ] data-descriptor streaming before central directory
+- [x] known-size data descriptors in local-header streaming
+- [ ] unknown-size data-descriptor streaming before central directory
 - [ ] Deflate64 method 9 extraction
