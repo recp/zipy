@@ -25,4 +25,7 @@ archive_has_symlink(const zipy_archive_t * __restrict zipy);
 int
 archive_has_unsupported_method(const zipy_archive_t * __restrict zipy);
 
+uint16_t
+archive_unsupported_method(const zipy_archive_t * __restrict zipy);
+
 #endif /* ZIP_PRIVATE_H */

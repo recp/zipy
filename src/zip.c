@@ -153,6 +153,7 @@ struct zipy_archive_t {
   int      has_symlink;
   int      has_unsupported_method;
   int      has_root_zipy;
+  uint16_t unsupported_method;
   path_buf_t path_buf;
   path_buf_t parent_buf;
   path_buf_t parent_cache;
@@ -4325,8 +4326,11 @@ zipy_open(const char * __restrict path) {
     }
     if (!info->entry.is_directory
         && info->entry.method != ZIPY_ZIP_STORE
-        && info->entry.method != ZIPY_ZIP_DEFLATE)
+        && info->entry.method != ZIPY_ZIP_DEFLATE) {
       zipy->has_unsupported_method = 1;
+      if (zipy->unsupported_method == 0)
+        zipy->unsupported_method = info->entry.method;
+    }
 
     record_extract_metrics(zipy, info);
 
@@ -4392,6 +4396,7 @@ clone_init(zipy_archive_t * __restrict clone,
   clone->has_symlink = zipy->has_symlink;
   clone->has_unsupported_method = zipy->has_unsupported_method;
   clone->has_root_zipy = zipy->has_root_zipy;
+  clone->unsupported_method = zipy->unsupported_method;
 
   if (zipy->map) {
     clone->map = zipy->map;
@@ -4436,6 +4441,11 @@ archive_has_symlink(const zipy_archive_t * __restrict zipy) {
 int
 archive_has_unsupported_method(const zipy_archive_t * __restrict zipy) {
   return zipy && zipy->has_unsupported_method;
+}
+
+uint16_t
+archive_unsupported_method(const zipy_archive_t * __restrict zipy) {
+  return zipy ? zipy->unsupported_method : 0u;
 }
 
 static int

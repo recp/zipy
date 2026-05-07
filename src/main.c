@@ -1904,7 +1904,13 @@ main(int argc, char *argv[]) {
     config.options.jobs = 0;
   }
   if (archive_has_unsupported_method(zip)) {
-    print_error("Error: Unsupported ZIP method in archive\n");
+    unsigned method = (unsigned)archive_unsupported_method(zip);
+
+    if (method == ZIPY_ZIP_DEFLATE64)
+      print_error("Error: Unsupported ZIP method %u (Deflate64) in archive\n",
+                  method);
+    else
+      print_error("Error: Unsupported ZIP method %u in archive\n", method);
     zipy_close(zip);
     return 1;
   }
