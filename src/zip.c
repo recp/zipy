@@ -150,6 +150,7 @@ struct zipy_archive_t {
   int      has_encrypted;
   int      has_symlink;
   int      has_unsupported_method;
+  int      has_root_zipy;
   path_buf_t path_buf;
   path_buf_t parent_buf;
   path_buf_t parent_cache;
@@ -1257,29 +1258,84 @@ scan_member_name(const char * __restrict path,
   return 1;
 }
 
-static int
-name_is_zipy_segment(const char *name, size_t len) {
-  return len == 5u
-      && name[0] == '.'
-      && tolower((unsigned char)name[1]) == 'z'
-      && tolower((unsigned char)name[2]) == 'i'
-      && tolower((unsigned char)name[3]) == 'p'
-      && tolower((unsigned char)name[4]) == 'y';
-}
-
-static int
-is_internal_state_name(const char *name, size_t len) {
+static size_t
+segment_len(const char *name, size_t len, size_t pos) {
   size_t i;
 
-  if (!name || len < 5u)
+  if (!name || pos >= len)
     return 0;
 
-  for (i = 0; i < len; i++) {
+  for (i = pos; i < len; i++) {
     if (is_zip_sep(name[i]))
       break;
   }
 
-  return name_is_zipy_segment(name, i);
+  return i - pos;
+}
+
+static int
+segment_eq(const char *name, size_t len, const char *lit) {
+  size_t i;
+
+  if (!name || !lit)
+    return 0;
+
+  for (i = 0; i < len; i++) {
+    if (!lit[i]
+        || tolower((unsigned char)name[i]) != tolower((unsigned char)lit[i]))
+      return 0;
+  }
+
+  return lit[i] == '\0';
+}
+
+static int
+prefix_eq(const char *name, size_t len, const char *prefix) {
+  size_t i;
+
+  if (!name || !prefix)
+    return 0;
+
+  for (i = 0; prefix[i]; i++) {
+    if (i >= len
+        || tolower((unsigned char)name[i]) != tolower((unsigned char)prefix[i]))
+      return 0;
+  }
+
+  return 1;
+}
+
+static int
+has_root_zipy_segment(const char *name, size_t len) {
+  return segment_eq(name, segment_len(name, len, 0), ".zipy");
+}
+
+static int
+is_internal_state_name(const char *name, size_t len) {
+  size_t firstLen, pos, secondLen, restLen;
+
+  if (!name || len < 7u)
+    return 0;
+
+  firstLen = segment_len(name, len, 0);
+  if (!segment_eq(name, firstLen, ".zipy"))
+    return 0;
+  if (firstLen >= len || !is_zip_sep(name[firstLen]))
+    return 0;
+
+  pos = firstLen + 1u;
+  secondLen = segment_len(name, len, pos);
+  if (segment_eq(name + pos, secondLen, "parts"))
+    return 1;
+
+  restLen = len - pos;
+  if (segment_eq(name + pos, restLen, "resume_state.txt")
+      || segment_eq(name + pos, restLen, "resume_options.txt"))
+    return 1;
+  if (prefix_eq(name + pos, restLen, "resume_state.txt.tmp"))
+    return 1;
+
+  return 0;
 }
 
 static int
@@ -1788,6 +1844,15 @@ cleanup_empty_parts_dirs(zipy_archive_t * __restrict zipy,
     return;
   if (!path_buf_set_dir(&zipy->state_buf, destdir, &stopLen))
     return;
+  if (zipy->has_root_zipy) {
+    if (!path_buf_append_name(&zipy->state_buf,
+                              stopLen,
+                              ".zipy",
+                              5u,
+                              0))
+      return;
+    stopLen = strlen(zipy->state_buf.data);
+  }
 
   len = strlen(partpath);
   if (len <= stopLen || strncmp(partpath, zipy->state_buf.data, stopLen) != 0)
@@ -3624,6 +3689,8 @@ zipy_open(const char * __restrict path) {
                                &info->name_has_backslash,
                                &info->name_parent_len))
       goto err;
+    if (has_root_zipy_segment(name, nameLen))
+      zipy->has_root_zipy = 1;
 
     info->zip_method = info->entry.method;
     info->entry.compressed_size = comp32;
@@ -3745,6 +3812,7 @@ clone_init(zipy_archive_t * __restrict clone,
   clone->has_encrypted = zipy->has_encrypted;
   clone->has_symlink = zipy->has_symlink;
   clone->has_unsupported_method = zipy->has_unsupported_method;
+  clone->has_root_zipy = zipy->has_root_zipy;
 
   if (zipy->map) {
     clone->map = zipy->map;
