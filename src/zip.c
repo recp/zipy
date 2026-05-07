@@ -65,6 +65,7 @@
 #define ZIP64_LOCATOR_FIXED   20u
 #define ZIP_MAX_EOCD_SEARCH   (ZIP_EOCD_FIXED + 65535u)
 #define ZIP_IO_CHUNK          (256u * 1024u)
+#define ZIP_MAPPED_WRITE_CHUNK (4u * 1024u * 1024u)
 #define ZIP_OUTPUT_MMAP_MIN   (8u * 1024u * 1024u)
 #define ZIP_PATH_STACK        512u
 #define ZIP_PARALLEL_MIN_ENTRIES 8u
@@ -1892,6 +1893,13 @@ zipy_chunk_size(uint64_t remaining) {
   return remaining > ZIP_IO_CHUNK ? ZIP_IO_CHUNK : (size_t)remaining;
 }
 
+static size_t
+zipy_mapped_write_chunk_size(uint64_t remaining) {
+  return remaining > ZIP_MAPPED_WRITE_CHUNK
+       ? ZIP_MAPPED_WRITE_CHUNK
+       : (size_t)remaining;
+}
+
 static const uint32_t zipy_crc32_base_table[256] = {
     0x00000000u, 0x77073096u, 0xEE0E612Cu, 0x990951BAu,
     0x076DC419u, 0x706AF48Fu, 0xE963A535u, 0x9E6495A3u,
@@ -2141,7 +2149,8 @@ zipy_copy_store_mapped(zipy_out_file_t * ZIPY_RESTRICT out,
     return ZIPY_ZIP_EFILE;
 
   while (remaining > 0) {
-    size_t n = zipy_chunk_size(remaining);
+    size_t n = check_crc ? zipy_chunk_size(remaining)
+                         : zipy_mapped_write_chunk_size(remaining);
 
     if (!zipy_write_file(out, src, n))
       return ZIPY_ZIP_EFILE;
