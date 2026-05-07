@@ -1326,11 +1326,7 @@ zipy_chunk_size(uint64_t remaining) {
   return remaining > ZIP_IO_CHUNK ? ZIP_IO_CHUNK : (size_t)remaining;
 }
 
-static uint32_t
-zipy_crc32_update(uint32_t crc,
-                  const uint8_t * ZIPY_RESTRICT buf,
-                  size_t len) {
-  static const uint32_t table[256] = {
+static const uint32_t zipy_crc32_base_table[256] = {
     0x00000000u, 0x77073096u, 0xEE0E612Cu, 0x990951BAu,
     0x076DC419u, 0x706AF48Fu, 0xE963A535u, 0x9E6495A3u,
     0x0EDB8832u, 0x79DCB8A4u, 0xE0D5E91Eu, 0x97D2D988u,
@@ -1397,9 +1393,77 @@ zipy_crc32_update(uint32_t crc,
     0xB40BBE37u, 0xC30C8EA1u, 0x5A05DF1Bu, 0x2D02EF8Du
   };
 
+static uint32_t zipy_crc32_tables[8][256];
+
+static void
+zipy_crc32_make_tables(void) {
+  size_t i, j;
+
+  memcpy(zipy_crc32_tables[0],
+         zipy_crc32_base_table,
+         sizeof(zipy_crc32_base_table));
+
+  for (i = 0; i < 256u; i++) {
+    uint32_t crc = zipy_crc32_tables[0][i];
+
+    for (j = 1; j < 8u; j++) {
+      crc = zipy_crc32_tables[0][crc & 0xFFu] ^ (crc >> 8);
+      zipy_crc32_tables[j][i] = crc;
+    }
+  }
+}
+
+#if defined(_WIN32)
+static INIT_ONCE zipy_crc32_once = INIT_ONCE_STATIC_INIT;
+
+static BOOL CALLBACK
+zipy_crc32_init_once(PINIT_ONCE once, PVOID param, PVOID *context) {
+  (void)once;
+  (void)param;
+  (void)context;
+  zipy_crc32_make_tables();
+  return TRUE;
+}
+
+static void
+zipy_crc32_init_tables(void) {
+  InitOnceExecuteOnce(&zipy_crc32_once, zipy_crc32_init_once, NULL, NULL);
+}
+#else
+static pthread_once_t zipy_crc32_once = PTHREAD_ONCE_INIT;
+
+static void
+zipy_crc32_init_tables(void) {
+  (void)pthread_once(&zipy_crc32_once, zipy_crc32_make_tables);
+}
+#endif
+
+static uint32_t
+zipy_crc32_update(uint32_t crc,
+                  const uint8_t * ZIPY_RESTRICT buf,
+                  size_t len) {
+  const uint32_t (*table)[256] = zipy_crc32_tables;
+
+  zipy_crc32_init_tables();
+
   crc = ~crc;
+  while (len >= 8u) {
+    uint64_t word = zipy_le64(buf) ^ crc;
+
+    crc = table[7][ word        & 0xFFu]
+        ^ table[6][(word >>  8) & 0xFFu]
+        ^ table[5][(word >> 16) & 0xFFu]
+        ^ table[4][(word >> 24) & 0xFFu]
+        ^ table[3][(word >> 32) & 0xFFu]
+        ^ table[2][(word >> 40) & 0xFFu]
+        ^ table[1][(word >> 48) & 0xFFu]
+        ^ table[0][(word >> 56) & 0xFFu];
+    buf += 8;
+    len -= 8u;
+  }
+
   while (len--)
-    crc = (crc >> 8) ^ table[(crc ^ *buf++) & 0xFFu];
+    crc = (crc >> 8) ^ table[0][(crc ^ *buf++) & 0xFFu];
   return ~crc;
 }
 
