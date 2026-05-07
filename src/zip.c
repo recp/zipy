@@ -67,6 +67,7 @@
 #define ZIP_IO_CHUNK          (256u * 1024u)
 #define ZIP_OUTPUT_MMAP_MIN   (8u * 1024u * 1024u)
 #define ZIP_STACK_THREADS     64u
+#define ZIP_WORK_BATCH        8u
 
 #define ZIP_EXTRA_ZIP64       0x0001u
 #define ZIP_EXTRA_EXT_TIME    0x5455u
@@ -3109,6 +3110,7 @@ zipy_extract_all_worker(void *arg) {
   for (;;) {
     const zipy_entry_t *entry;
     const char *path;
+    size_t end;
     int ret;
 
     zipy_lock(&ctx->lock);
@@ -3117,33 +3119,41 @@ zipy_extract_all_worker(void *arg) {
       break;
     }
     index = ctx->next++;
+    end = index + ZIP_WORK_BATCH;
+    if (end > ctx->count)
+      end = ctx->count;
+    ctx->next = end;
     zipy_unlock(&ctx->lock);
 
-    if (ctx->skip && ctx->skip[index])
-      continue;
+    for (; index < end; index++) {
+      if (ctx->skip && ctx->skip[index])
+        continue;
 
-    entry = zipy_entry(zipy, index);
-    if (!entry) {
-      ret = ZIPY_ZIP_EFILE;
-      goto fail;
+      entry = zipy_entry(zipy, index);
+      if (!entry) {
+        ret = ZIPY_ZIP_EFILE;
+        goto fail;
+      }
+
+      path = zipy_path_buf_extract_len(&zipy->path_buf,
+                                       ctx->destdir,
+                                       entry->name,
+                                       entry->name_len);
+      if (!path) {
+        ret = ZIPY_ZIP_ERR;
+        goto fail;
+      }
+
+      ret = zipy_extract_entry(zipy,
+                               &zipy->files[index],
+                               path,
+                               ctx->flags | ZIPY_EXTRACT_DELAY_DIR_METADATA,
+                               ctx->password);
+      if (ret < ZIPY_ZIP_OK)
+        goto fail;
     }
 
-    path = zipy_path_buf_extract_len(&zipy->path_buf,
-                                     ctx->destdir,
-                                     entry->name,
-                                     entry->name_len);
-    if (!path) {
-      ret = ZIPY_ZIP_ERR;
-      goto fail;
-    }
-
-    ret = zipy_extract_entry(zipy,
-                             &zipy->files[index],
-                             path,
-                             ctx->flags | ZIPY_EXTRACT_DELAY_DIR_METADATA,
-                             ctx->password);
-    if (ret >= ZIPY_ZIP_OK)
-      continue;
+    continue;
 
   fail:
     zipy_lock(&ctx->lock);

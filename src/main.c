@@ -47,6 +47,7 @@
 #endif
 
 #define ZIPY_STACK_THREADS 64u
+#define ZIPY_WORK_BATCH    8u
 
 typedef struct zipy_progress_t {
   FILE  *out;
@@ -1303,15 +1304,22 @@ extract_worker(void *arg) {
   }
 
   for (;;) {
+    size_t end;
+
     zipy_lock(&ctx->lock);
     if (ctx->next >= ctx->count) {
       zipy_unlock(&ctx->lock);
       break;
     }
-    index = ctx->next++;
+    index = ctx->next;
+    end = index + ZIPY_WORK_BATCH;
+    if (end > ctx->count)
+      end = ctx->count;
+    ctx->next = end;
     zipy_unlock(&ctx->lock);
 
-    extract_one(ctx, zip, index);
+    for (; index < end; index++)
+      extract_one(ctx, zip, index);
   }
 
   zipy_close(zip);
