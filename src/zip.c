@@ -2149,8 +2149,7 @@ zipy_copy_store_mapped(zipy_out_file_t * ZIPY_RESTRICT out,
     return ZIPY_ZIP_EFILE;
 
   while (remaining > 0) {
-    size_t n = check_crc ? zipy_chunk_size(remaining)
-                         : zipy_mapped_write_chunk_size(remaining);
+    size_t n = zipy_mapped_write_chunk_size(remaining);
 
     if (!zipy_write_file(out, src, n))
       return ZIPY_ZIP_EFILE;
