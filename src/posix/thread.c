@@ -10,41 +10,23 @@
 
 #include "thread.h"
 
-#include <stdlib.h>
-#include <string.h>
 #include <unistd.h>
-
-typedef struct zipy_thread_entry_t {
-  void (*func)(void *);
-  void *arg;
-} zipy_thread_entry_t;
 
 static void *
 zipy_thread_entry(void *arg) {
-  zipy_thread_entry_t entry;
+  zipy_thread_t *thread = arg;
 
-  memcpy(&entry, arg, sizeof(entry));
-  free(arg);
-
-  entry.func(entry.arg);
+  thread->func(thread->arg);
   return NULL;
 }
 
 int
 zipy_thread_start(zipy_thread_t *thread, void (*func)(void *), void *arg) {
-  zipy_thread_entry_t *entry;
+  thread->func = func;
+  thread->arg = arg;
 
-  entry = calloc(1, sizeof(*entry));
-  if (!entry)
+  if (pthread_create(&thread->id, NULL, zipy_thread_entry, thread) != 0)
     return -1;
-
-  entry->func = func;
-  entry->arg = arg;
-
-  if (pthread_create(&thread->id, NULL, zipy_thread_entry, entry) != 0) {
-    free(entry);
-    return -1;
-  }
 
   return 0;
 }

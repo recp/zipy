@@ -16,6 +16,8 @@
 
 typedef struct zipy_thread_t {
   pthread_t id;
+  void (*func)(void *);
+  void *arg;
 } zipy_thread_t;
 
 typedef struct zipy_mutex_t {
