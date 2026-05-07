@@ -1538,7 +1538,7 @@ main(int argc, char *argv[]) {
     } else if (strcmp(argv[i], "--no-progress") == 0) {
       noProgress = 1;
     } else if (strcmp(argv[i], "--fast") == 0) {
-      config.options.flags |= ZIPY_EXTRACT_NO_CRC | ZIPY_EXTRACT_NO_METADATA;
+      config.options.flags |= ZIPY_EXTRACT_FAST;
       noProgress = 1;
     } else if (!zipfile) {
       zipfile = argv[i];

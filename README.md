@@ -18,6 +18,7 @@ The build creates `libzipy.a` and the `zipy` command line tool.
 
 ```sh
 zipy archive.zip -d target
+zipy archive.zip -d target --fast
 zipy archive.zip -d target -j auto
 zipy archive.zip -d target -j cpu
 zipy archive.zip -d target -j 1
@@ -25,7 +26,6 @@ zipy archive.zip -d target -p password
 zipy archive.zip -d target --no-crc
 zipy archive.zip -d target --no-metadata
 zipy archive.zip -d target --no-progress
-zipy archive.zip -d target --fast
 ```
 
 `-j auto` and `-j cpu` use one worker per CPU core, capped by the number of
@@ -124,7 +124,7 @@ zipy_extract_options_t options = {
   .on_conflict = ZIPY_CONFLICT_SAVE,
   .save_to = ZIPY_SAVE_TARGET,
   .save_dir = NULL,
-  .flags = ZIPY_EXTRACT_DEFAULT,
+  .flags = ZIPY_EXTRACT_FAST,
   .password = NULL
 };
 
@@ -143,8 +143,9 @@ Mode and timestamp restoration is enabled by default. Set
 `ZIPY_EXTRACT_NO_METADATA` when raw extraction latency matters more than
 preserving file metadata.
 
-For CLI-only raw speed, `--fast` combines `--no-crc`, `--no-metadata`, and
-`--no-progress`. It does not change conflict handling.
+For raw speed, use `ZIPY_EXTRACT_FAST` in the library. It combines
+`ZIPY_EXTRACT_NO_CRC` and `ZIPY_EXTRACT_NO_METADATA`. In the CLI, `--fast`
+also disables progress output. It does not change conflict handling.
 
 ## Status
 
