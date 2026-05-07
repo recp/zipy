@@ -76,6 +76,7 @@ static void
 print_usage(void) {
   printf("Usage: zipy <zipfile> [-d extractdir]\n");
   printf("Options:\n");
+  printf("  -h, --help  Show this help\n");
   printf("  -d <dir>    Extract files into <dir>\n");
   printf("  -j <jobs>   Extract with N workers, auto, or cpu (default: cpu)\n");
   printf("  --on-conflict <ask|save|overwrite|skip|fail>\n");
@@ -1491,6 +1492,10 @@ main(int argc, char *argv[]) {
   char elapsed[32];
   zipy_progress_t progress;
 
+  if (argc > 1 && (strcmp(argv[1], "-h") == 0 || strcmp(argv[1], "--help") == 0)) {
+    print_usage();
+    return 0;
+  }
   if (argc > 1 && strcmp(argv[1], "--config") == 0)
     return handle_config_command(argc, argv);
 
@@ -1500,7 +1505,10 @@ main(int argc, char *argv[]) {
   
   /* Parse command line arguments */
   for (i = 1; i < argc; i++) {
-    if (strcmp(argv[i], "-d") == 0 && i + 1 < argc) {
+    if (strcmp(argv[i], "-h") == 0 || strcmp(argv[i], "--help") == 0) {
+      print_usage();
+      return 0;
+    } else if (strcmp(argv[i], "-d") == 0 && i + 1 < argc) {
       extractdir = argv[++i];
     } else if (strcmp(argv[i], "-j") == 0 && i + 1 < argc) {
       if (!parse_jobs(argv[++i], &jobs)) {
