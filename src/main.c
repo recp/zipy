@@ -1640,7 +1640,6 @@ main(int argc, char *argv[]) {
                && !policies
                && !save_dir
                && config.options.on_conflict == ZIPY_CONFLICT_OVERWRITE
-               && !config.options.password
                && !zipy_has_encrypted(zip)
                && !zipy_has_symlink(zip);
   if (directExtract) {
