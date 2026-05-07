@@ -1162,55 +1162,52 @@ zipy_is_fs_sep(char c) {
 }
 
 static bool
-zipy_is_safe_member_name(const char *path) {
-  const char *seg;
-  const char *p;
-
-  if (!path || !*path || zipy_is_zip_sep(path[0]))
-    return false;
-
-  if (isalpha((unsigned char)path[0]) && path[1] == ':')
-    return false;
-
-  seg = path;
-  for (p = path; ; p++) {
-    unsigned char c = (unsigned char)*p;
-
-    if (c != '\0' && (c < 32 || c == '<' || c == '>' || c == '|'
-        || c == '"'))
-      return false;
-
-    if (c == '\0' || zipy_is_zip_sep((char)c)) {
-      size_t len = (size_t)(p - seg);
-      if (len == 2 && seg[0] == '.' && seg[1] == '.')
-        return false;
-
-      if (c == '\0')
-        break;
-
-      seg = p + 1;
-    }
-  }
-
-  return true;
-}
-
-static bool
 zipy_is_dir_name_len(const char *path, size_t len) {
   return path && len > 0 && zipy_is_zip_sep(path[len - 1]);
 }
 
-static uint16_t
-zipy_name_parent_len(const char *path, size_t len) {
-  size_t i, parent_len = 0;
+static int
+zipy_scan_member_name(const char * ZIPY_RESTRICT path,
+                      size_t len,
+                      uint8_t * ZIPY_RESTRICT safe,
+                      uint8_t * ZIPY_RESTRICT has_backslash,
+                      uint16_t * ZIPY_RESTRICT parent_len) {
+  size_t i, seg = 0, parent = 0;
+  int is_safe;
 
-  if (!path)
+  if (!path || !safe || !has_backslash || !parent_len)
     return 0;
+
+  is_safe = len > 0 && !zipy_is_zip_sep(path[0]);
+  if (len > 1 && isalpha((unsigned char)path[0]) && path[1] == ':')
+    is_safe = 0;
+  *has_backslash = 0;
+
   for (i = 0; i < len; i++) {
-    if (zipy_is_zip_sep(path[i]))
-      parent_len = i;
+    unsigned char c = (unsigned char)path[i];
+
+    if (c == '\0')
+      return 0;
+    if (c < 32 || c == '<' || c == '>' || c == '|' || c == '"')
+      is_safe = 0;
+    if (c == '\\')
+      *has_backslash = 1;
+    if (zipy_is_zip_sep((char)c)) {
+      size_t seg_len = i - seg;
+
+      parent = i;
+      if (seg_len == 2 && path[seg] == '.' && path[seg + 1] == '.')
+        is_safe = 0;
+      seg = i + 1u;
+    }
   }
-  return parent_len > UINT16_MAX ? UINT16_MAX : (uint16_t)parent_len;
+
+  if (len - seg == 2 && path[seg] == '.' && path[seg + 1] == '.')
+    is_safe = 0;
+
+  *safe = (uint8_t)is_safe;
+  *parent_len = parent > UINT16_MAX ? UINT16_MAX : (uint16_t)parent;
+  return 1;
 }
 
 static int
@@ -3041,14 +3038,15 @@ zipy_open(const char *path) {
     } else if (!zipy_read(fp, name, nameLen)) {
       goto err;
     }
-    if (memchr(name, '\0', nameLen))
-      goto err;
     name[nameLen] = '\0';
     info->entry.name = name;
     info->entry.name_len = nameLen;
-    info->safe_name = zipy_is_safe_member_name(name);
-    info->name_has_backslash = memchr(name, '\\', nameLen) != NULL;
-    info->name_parent_len = zipy_name_parent_len(name, nameLen);
+    if (!zipy_scan_member_name(name,
+                               nameLen,
+                               &info->safe_name,
+                               &info->name_has_backslash,
+                               &info->name_parent_len))
+      goto err;
 
     info->zip_method = info->entry.method;
     info->entry.compressed_size = comp32;
