@@ -1492,6 +1492,8 @@ main(int argc, char *argv[]) {
   uint64_t startMs, elapsedMs;
   char elapsed[32];
   zipy_progress_t progress;
+  int directExtract = 0;
+  int directRet = ZIPY_ZIP_OK;
 
   if (argc > 1 && (strcmp(argv[1], "-h") == 0 || strcmp(argv[1], "--help") == 0)) {
     print_usage();
@@ -1585,19 +1587,31 @@ main(int argc, char *argv[]) {
   }
 
   startMs = now_ms();
-  if (jobs > 1)
+  directExtract = noProgress
+               && !policies
+               && !save_dir
+               && config.options.on_conflict == ZIPY_CONFLICT_OVERWRITE
+               && !config.options.password;
+  if (directExtract) {
+    directRet = zipy_extract_all_options(zip, extractdir, &config.options);
+    success = directRet < ZIPY_ZIP_OK;
+    extracted = success ? 0 : count;
+  } else if (jobs > 1) {
     success = extract_parallel(zipfile, zip, extractdir, &config.options, policies,
                                &progress, count, jobs,
                                &extracted, &saved, &skipped);
-  else
+  } else {
     success = extract_serial(zip, extractdir, &config.options, policies, &progress,
                              count, &extracted, &saved, &skipped);
-  if (!success)
+  }
+  if (!success && !directExtract)
     success = apply_directory_entries(zip, extractdir, &config.options, policies, count);
 
   elapsedMs = now_ms() - startMs;
   format_duration(elapsed, sizeof(elapsed), elapsedMs);
   progress_clear(&progress);
+  if (directExtract && success)
+    print_error("  Error: Extraction failed (%d)\n", directRet);
   if (save_dir && saved == 0) {
     zipy_rmdir(save_dir);
   }
