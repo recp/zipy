@@ -2860,6 +2860,39 @@ crc32_update(uint32_t crc,
 }
 
 static int
+dup_mem_nul(const uint8_t * __restrict src,
+            uint64_t len,
+            uint32_t expectedCrc,
+            int check_crc,
+            uint8_t ** __restrict out,
+            size_t * __restrict out_len) {
+  uint8_t *dst;
+  size_t size;
+
+  if (!out || !out_len)
+    return ZIPY_ZIP_ERR;
+
+  *out = NULL;
+  *out_len = 0;
+
+  if (!src || !u64_to_size(len, &size) || size == SIZE_MAX)
+    return ZIPY_ZIP_EUNSUP;
+  if (check_crc && crc32_update(0, src, size) != expectedCrc)
+    return ZIPY_ZIP_ECRC;
+
+  dst = malloc(size + 1u);
+  if (!dst)
+    return ZIPY_ZIP_ERR;
+  if (size > 0)
+    memcpy(dst, src, size);
+  dst[size] = '\0';
+
+  *out = dst;
+  *out_len = size;
+  return ZIPY_ZIP_OK;
+}
+
+static int
 account_inflate_output(infl_stream_t * __restrict stream,
                        const uint8_t * __restrict outbuf,
                        uint32_t * __restrict produced,
@@ -5344,6 +5377,13 @@ extract_entry(zipy_archive_t * __restrict zipy,
     if (info->entry.method == ZIPY_ZIP_STORE) {
       if (compressed_size != info->entry.uncompressed_size)
         ret = ZIPY_ZIP_ESIZE;
+      else if (mapped_data)
+        ret = dup_mem_nul(mapped_data,
+                          info->entry.uncompressed_size,
+                          info->entry.crc32,
+                          check_crc,
+                          &target,
+                          &target_len);
       else
         ret = read_store_mem(zipy->fp,
                                   compressed_size,
