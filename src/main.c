@@ -1337,6 +1337,10 @@ extract_one(ExtractContext *ctx, zipy_archive_t *zip, size_t index) {
       print_error("  Error: Missing or incorrect password for '%s'\n", name);
     else if (ret == ZIPY_ZIP_EAUTH)
       print_error("  Error: Authentication failed for '%s'\n", name);
+    else if (ret == ZIPY_ZIP_EUNSUP)
+      print_error("  Error: Unsupported ZIP method %u for '%s'\n",
+                  (unsigned)entry->method,
+                  name);
     else
       print_error("  Error: Failed to extract '%s' (%d)\n", name, ret);
     ctx->failed = 1;
@@ -1642,7 +1646,8 @@ main(int argc, char *argv[]) {
                && !save_dir
                && config.options.on_conflict == ZIPY_CONFLICT_OVERWRITE
                && !zipy_has_encrypted(zip)
-               && !zipy_has_symlink(zip);
+               && !zipy_has_symlink(zip)
+               && !zipy_has_unsupported_method(zip);
   if (directExtract) {
     directRet = zipy_extract_all_options(zip, extractdir, &config.options);
     success = directRet < ZIPY_ZIP_OK;

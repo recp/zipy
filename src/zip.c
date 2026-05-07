@@ -154,6 +154,7 @@ struct zipy_archive_t {
   int      owns_map;
   int      has_encrypted;
   int      has_symlink;
+  int      has_unsupported_method;
   zipy_path_buf_t path_buf;
   zipy_path_buf_t parent_buf;
   zipy_path_buf_t parent_cache;
@@ -3168,6 +3169,10 @@ zipy_open(const char *path) {
     } else if (info->aes_strength != 0) {
       goto err;
     }
+    if (!info->entry.is_directory
+        && info->entry.method != ZIPY_ZIP_STORE
+        && info->entry.method != ZIPY_ZIP_DEFLATE)
+      zipy->has_unsupported_method = 1;
 
     zipy_record_extract_metrics(zipy, info);
 
@@ -3229,6 +3234,7 @@ zipy_clone_init(zipy_archive_t *clone, zipy_archive_t *zipy) {
   clone->owns_files = 0;
   clone->has_encrypted = zipy->has_encrypted;
   clone->has_symlink = zipy->has_symlink;
+  clone->has_unsupported_method = zipy->has_unsupported_method;
 
   if (zipy->map) {
     clone->map = zipy->map;
@@ -3268,6 +3274,11 @@ zipy_has_encrypted(const zipy_archive_t *zipy) {
 int
 zipy_has_symlink(const zipy_archive_t *zipy) {
   return zipy && zipy->has_symlink;
+}
+
+int
+zipy_has_unsupported_method(const zipy_archive_t *zipy) {
+  return zipy && zipy->has_unsupported_method;
 }
 
 static int
