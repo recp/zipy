@@ -83,6 +83,7 @@ print_usage(void) {
   printf("  -p, --password <password>\n");
   printf("  --no-crc    Skip CRC32 validation\n");
   printf("  --no-metadata  Skip mode and timestamp restoration\n");
+  printf("  --no-progress  Disable interactive progress output\n");
   printf("  --config [key=value ...]  Show or update ~/.zipy/config\n");
 }
 
@@ -1483,6 +1484,7 @@ main(int argc, char *argv[]) {
   int summaryColor;
   int summaryTty;
   int needsSaveDir = 0;
+  int noProgress = 0;
   size_t jobs = 0;
   size_t count = 0, extracted = 0, saved = 0, skipped = 0;
   uint64_t startMs, elapsedMs;
@@ -1524,6 +1526,8 @@ main(int argc, char *argv[]) {
     } else if (strcmp(argv[i], "--no-metadata") == 0
                || strcmp(argv[i], "--no-meta") == 0) {
       config.options.flags |= ZIPY_EXTRACT_NO_METADATA;
+    } else if (strcmp(argv[i], "--no-progress") == 0) {
+      noProgress = 1;
     } else if (!zipfile) {
       zipfile = argv[i];
     } else {
@@ -1550,7 +1554,7 @@ main(int argc, char *argv[]) {
   /* Extract all files */
   count = zipy_count(zip);
   jobs = clamp_jobs(jobs, count);
-  progress_init(&progress, stderr, count);
+  progress_init(&progress, noProgress ? NULL : stderr, count);
   if (!prepare_ask_plan(zip, extractdir, &config, &policies, &needsSaveDir)) {
     zipy_close(zip);
     free(policies);

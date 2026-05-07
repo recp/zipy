@@ -24,6 +24,7 @@ zipy archive.zip -d target -j 1
 zipy archive.zip -d target -p password
 zipy archive.zip -d target --no-crc
 zipy archive.zip -d target --no-metadata
+zipy archive.zip -d target --no-progress
 ```
 
 `-j auto` and `-j cpu` use one worker per CPU core, capped by the number of
