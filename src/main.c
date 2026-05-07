@@ -136,6 +136,29 @@ print_error(const char *fmt, ...) {
   fflush(stderr);
 }
 
+static void
+print_extract_error(int ret,
+                    const char *name,
+                    const zipy_entry_t *entry) {
+  const char *msg = zipy_strerror(ret);
+  int first = msg && msg[0] ? toupper((unsigned char)msg[0]) : '?';
+  const char *rest = msg && msg[0] ? msg + 1 : "";
+
+  if (name && ret == ZIPY_ZIP_EUNSUP && entry
+      && entry->method != ZIPY_ZIP_STORE
+      && entry->method != ZIPY_ZIP_DEFLATE) {
+    print_error("  Error: Unsupported ZIP method %u for '%s'\n",
+                (unsigned)entry->method,
+                name);
+    return;
+  }
+
+  if (name)
+    print_error("  Error: %c%s for '%s'\n", first, rest, name);
+  else
+    print_error("  Error: %c%s\n", first, rest);
+}
+
 static uint64_t
 now_ms(void) {
 #if defined(_WIN32)
@@ -1607,18 +1630,7 @@ extract_one(ExtractContext *ctx, zipy_archive_t *zip, size_t index) {
       ctx->saved++;
   } else {
     progress_clear(ctx->progress);
-    if (ret == ZIPY_ZIP_EPASS)
-      print_error("  Error: Missing or incorrect password for '%s'\n", name);
-    else if (ret == ZIPY_ZIP_EAUTH)
-      print_error("  Error: Authentication failed for '%s'\n", name);
-    else if (ret == ZIPY_ZIP_EUNSUP)
-      print_error("  Error: Unsupported ZIP method %u for '%s'\n",
-                  (unsigned)entry->method,
-                  name);
-    else if (ret == ZIPY_ZIP_ENOSPC)
-      print_error("  Error: No space left while extracting '%s'\n", name);
-    else
-      print_error("  Error: Failed to extract '%s' (%d)\n", name, ret);
+    print_extract_error(ret, name, entry);
     ctx->failed = 1;
   }
   progress_update(ctx->progress, ctx->done, name);
@@ -1981,24 +1993,8 @@ main(int argc, char *argv[]) {
   elapsedMs = now_ms() - startMs;
   format_duration(elapsed, sizeof(elapsed), elapsedMs);
   progress_clear(&progress);
-  if (directExtract && success) {
-    if (directRet == ZIPY_ZIP_ENOSPC)
-      print_error("  Error: No space left during extraction\n");
-    else if (directRet == ZIPY_ZIP_EPASS)
-      print_error("  Error: Missing or incorrect password\n");
-    else if (directRet == ZIPY_ZIP_EAUTH)
-      print_error("  Error: Authentication failed\n");
-    else if (directRet == ZIPY_ZIP_EUNSUP)
-      print_error("  Error: Unsupported ZIP feature\n");
-    else if (directRet == ZIPY_ZIP_ECRC)
-      print_error("  Error: CRC check failed\n");
-    else if (directRet == ZIPY_ZIP_ECANCEL)
-      print_error("  Error: Extraction cancelled\n");
-    else if (directRet == ZIPY_ZIP_EINCOMPLETE)
-      print_error("  Error: Incomplete ZIP stream\n");
-    else
-      print_error("  Error: Extraction failed (%d)\n", directRet);
-  }
+  if (directExtract && success)
+    print_extract_error(directRet, NULL, NULL);
   if (save_dir && saved == 0) {
     os_rmdir(save_dir);
   }
