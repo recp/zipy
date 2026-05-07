@@ -67,6 +67,7 @@
 #define ZIP_IO_CHUNK          (256u * 1024u)
 #define ZIP_OUTPUT_MMAP_MIN   (8u * 1024u * 1024u)
 #define ZIP_PATH_STACK        512u
+#define ZIP_PARALLEL_MIN_ENTRIES 8u
 #define ZIP_STACK_THREADS     64u
 #define ZIP_WORK_BATCH        8u
 
@@ -3577,7 +3578,7 @@ static size_t
 zipy_extract_default_jobs(size_t count) {
   size_t jobs;
 
-  if (count <= 1)
+  if (count < ZIP_PARALLEL_MIN_ENTRIES)
     return 1;
 
   jobs = zipy_cpu_count();
