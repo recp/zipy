@@ -186,6 +186,11 @@ public enum Zipy {
     let sendableProgress = SendableProgress(progress)
     let archivePath = canonicalPath(archive)
     let destinationPath = canonicalPath(destination)
+    let wrappedProgress = makeAsyncProgressHandler(
+      progress: progress,
+      observer: observer,
+      handler: onProgress
+    )
 
     try await Task.detached(priority: priority) {
       try extractSync(
@@ -198,8 +203,7 @@ public enum Zipy {
         password: password,
         jobs: jobs,
         progress: sendableProgress.value,
-        observer: observer,
-        onProgress: onProgress
+        onProgress: wrappedProgress
       )
     }.value
   }
@@ -219,6 +223,11 @@ public enum Zipy {
     onProgress: ProgressHandler? = nil
   ) async throws {
     let sendableProgress = SendableProgress(progress)
+    let wrappedProgress = makeAsyncProgressHandler(
+      progress: progress,
+      observer: observer,
+      handler: onProgress
+    )
 
     try await Task.detached(priority: priority) {
       try extractSync(
@@ -231,8 +240,7 @@ public enum Zipy {
         password: password,
         jobs: jobs,
         progress: sendableProgress.value,
-        observer: observer,
-        onProgress: onProgress
+        onProgress: wrappedProgress
       )
     }.value
   }
@@ -247,7 +255,6 @@ public enum Zipy {
     password: String? = nil,
     jobs: Int = 0,
     progress: Progress? = nil,
-    observer: ZipyProgressActor? = nil,
     onProgress: ProgressHandler? = nil
   ) throws {
     try extractSync(
@@ -260,7 +267,6 @@ public enum Zipy {
       password: password,
       jobs: jobs,
       progress: progress,
-      observer: observer,
       onProgress: onProgress
     )
   }
@@ -275,7 +281,6 @@ public enum Zipy {
     password: String? = nil,
     jobs: Int = 0,
     progress: Progress? = nil,
-    observer: ZipyProgressActor? = nil,
     onProgress: ProgressHandler? = nil
   ) throws {
     guard jobs >= 0 else {
@@ -284,7 +289,6 @@ public enum Zipy {
 
     let retained = makeProgressContext(
       progress: progress,
-      observer: observer,
       handler: onProgress
     )
     defer {
@@ -338,6 +342,11 @@ public enum Zipy {
     let sendableProgress = SendableProgress(progress)
     let archivePath = canonicalPath(archive)
     let destinationPath = canonicalPath(destination)
+    let wrappedProgress = makeAsyncProgressHandler(
+      progress: progress,
+      observer: observer,
+      handler: onProgress
+    )
 
     try await Task.detached(priority: priority) {
       try extractStreamSync(
@@ -350,8 +359,7 @@ public enum Zipy {
         password: password,
         jobs: jobs,
         progress: sendableProgress.value,
-        observer: observer,
-        onProgress: onProgress
+        onProgress: wrappedProgress
       )
     }.value
   }
@@ -371,6 +379,11 @@ public enum Zipy {
     onProgress: ProgressHandler? = nil
   ) async throws {
     let sendableProgress = SendableProgress(progress)
+    let wrappedProgress = makeAsyncProgressHandler(
+      progress: progress,
+      observer: observer,
+      handler: onProgress
+    )
 
     try await Task.detached(priority: priority) {
       try extractStreamSync(
@@ -383,8 +396,7 @@ public enum Zipy {
         password: password,
         jobs: jobs,
         progress: sendableProgress.value,
-        observer: observer,
-        onProgress: onProgress
+        onProgress: wrappedProgress
       )
     }.value
   }
@@ -399,7 +411,6 @@ public enum Zipy {
     password: String? = nil,
     jobs: Int = 0,
     progress: Progress? = nil,
-    observer: ZipyProgressActor? = nil,
     onProgress: ProgressHandler? = nil
   ) throws {
     try extractStreamSync(
@@ -412,7 +423,6 @@ public enum Zipy {
       password: password,
       jobs: jobs,
       progress: progress,
-      observer: observer,
       onProgress: onProgress
     )
   }
@@ -427,7 +437,6 @@ public enum Zipy {
     password: String? = nil,
     jobs: Int = 0,
     progress: Progress? = nil,
-    observer: ZipyProgressActor? = nil,
     onProgress: ProgressHandler? = nil
   ) throws {
     guard jobs >= 0 else {
@@ -436,7 +445,6 @@ public enum Zipy {
 
     let retained = makeProgressContext(
       progress: progress,
-      observer: observer,
       handler: onProgress
     )
     defer {
@@ -464,6 +472,31 @@ public enum Zipy {
     }
 
     try check(ret)
+  }
+
+  private static func makeAsyncProgressHandler(
+    progress: Progress?,
+    observer: ZipyProgressActor?,
+    handler: ProgressHandler?
+  ) -> ProgressHandler? {
+    guard progress != nil || observer != nil || handler != nil else {
+      return nil
+    }
+
+    return { state in
+      if let observer {
+        Task {
+          await observer.update(state)
+        }
+      }
+      if Task.isCancelled {
+        return false
+      }
+      if let handler, !handler(state) {
+        return false
+      }
+      return true
+    }
   }
 
   private static func check(_ result: Int32) throws {
@@ -526,17 +559,14 @@ private struct SendableProgress: @unchecked Sendable {
 
 private final class ProgressContext: @unchecked Sendable {
   private let progress: Progress?
-  private let observer: ZipyProgressActor?
   private let handler: Zipy.ProgressHandler?
   private let lock = NSLock()
 
   init(
     progress: Progress?,
-    observer: ZipyProgressActor?,
     handler: Zipy.ProgressHandler?
   ) {
     self.progress = progress
-    self.observer = observer
     self.handler = handler
   }
 
@@ -546,12 +576,6 @@ private final class ProgressContext: @unchecked Sendable {
       completedBytes: done,
       totalBytes: total
     )
-
-    if let observer {
-      Task {
-        await observer.update(state)
-      }
-    }
 
     lock.lock()
     if let progress {
@@ -566,9 +590,6 @@ private final class ProgressContext: @unchecked Sendable {
     }
     lock.unlock()
 
-    if Task.isCancelled {
-      return 0
-    }
     if let handler, !handler(state) {
       return 0
     }
@@ -590,16 +611,14 @@ private final class ProgressContext: @unchecked Sendable {
 
 private func makeProgressContext(
   progress: Progress?,
-  observer: ZipyProgressActor?,
   handler: Zipy.ProgressHandler?
 ) -> Unmanaged<ProgressContext>? {
-  guard progress != nil || observer != nil || handler != nil else {
+  guard progress != nil || handler != nil else {
     return nil
   }
   return Unmanaged.passRetained(
     ProgressContext(
       progress: progress,
-      observer: observer,
       handler: handler
     )
   )
