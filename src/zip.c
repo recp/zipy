@@ -138,6 +138,8 @@ struct zipy_archive_t {
   size_t   map_size;
   int      owns_files;
   int      owns_map;
+  int      has_encrypted;
+  int      has_symlink;
   zipy_path_buf_t path_buf;
   zipy_path_buf_t parent_buf;
   zipy_path_buf_t parent_cache;
@@ -2047,7 +2049,7 @@ zipy_inflate_raw(zipy_archive_t * ZIPY_RESTRICT zipy,
   int mapped_out = 0;
   int ret;
 
-  if (!zipy || !zipy->fp)
+  if (!zipy)
     return ZIPY_ZIP_EFILE;
   if (compressed_size > UINT32_MAX || uncompressed_size > UINT32_MAX)
     return ZIPY_ZIP_EUNSUP;
@@ -2069,6 +2071,10 @@ zipy_inflate_raw(zipy_archive_t * ZIPY_RESTRICT zipy,
 
   src = mapped;
   if (!src) {
+    if (!fp) {
+      ret = ZIPY_ZIP_EFILE;
+      goto done;
+    }
     if (!zipy_reserve_bytes(&zipy->inflate_in, &zipy->inflate_in_cap, inlen)) {
       ret = ZIPY_ZIP_ERR;
       goto done;
@@ -2895,6 +2901,10 @@ zipy_open(const char *path) {
     info->entry.is_directory = zipy_is_dir_name_len(info->entry.name,
                                                     info->entry.name_len);
     info->entry.encrypted = (info->flags & ZIP_FLAG_ENCRYPTED) != 0;
+    if (info->entry.encrypted)
+      zipy->has_encrypted = 1;
+    if (info->is_symlink)
+      zipy->has_symlink = 1;
     info->mtime = zipy_dos_time(info->mod_date, info->mod_time);
     info->has_mtime = info->mtime != (time_t)0;
 
@@ -2978,22 +2988,31 @@ err:
 zipy_archive_t *
 zipy_clone(zipy_archive_t *zipy) {
   zipy_archive_t *clone;
+  int needs_fp;
 
-  if (!zipy || !zipy->path || !zipy->fp)
+  if (!zipy)
+    return NULL;
+
+  needs_fp = !zipy->map || zipy->has_encrypted || zipy->has_symlink;
+  if (needs_fp && (!zipy->path || !zipy->fp))
     return NULL;
 
   clone = calloc(1, sizeof(*clone));
   if (!clone)
     return NULL;
 
-  clone->fp = fopen(zipy->path, "rb");
-  if (!clone->fp)
-    goto err;
+  if (needs_fp) {
+    clone->fp = fopen(zipy->path, "rb");
+    if (!clone->fp)
+      goto err;
+  }
 
   clone->files = zipy->files;
   clone->file_count = zipy->file_count;
   clone->file_size = zipy->file_size;
   clone->owns_files = 0;
+  clone->has_encrypted = zipy->has_encrypted;
+  clone->has_symlink = zipy->has_symlink;
 
   if (zipy->map) {
     clone->map = zipy->map;
@@ -3030,7 +3049,7 @@ zipy_extract_entry(zipy_archive_t * ZIPY_RESTRICT zipy,
   int metadata_done = 0;
   int ret = ZIPY_ZIP_ERR;
 
-  if (!zipy || !zipy->fp || !info || !destpath)
+  if (!zipy || !info || !destpath)
     return ZIPY_ZIP_ERR;
 
   if (!info->safe_name)
@@ -3052,7 +3071,8 @@ zipy_extract_entry(zipy_archive_t * ZIPY_RESTRICT zipy,
 
   localp = zipy_mapped_range(zipy, info->local_header_offset, sizeof(local));
   if (!localp) {
-    if (zipy_seek_set(zipy->fp, info->local_header_offset) != 0
+    if (!zipy->fp
+        || zipy_seek_set(zipy->fp, info->local_header_offset) != 0
         || !zipy_read(zipy->fp, local, sizeof(local)))
       return ZIPY_ZIP_EFILE;
     localp = local;
@@ -3088,7 +3108,8 @@ zipy_extract_entry(zipy_archive_t * ZIPY_RESTRICT zipy,
   encrypted = ((flags | info->flags) & ZIP_FLAG_ENCRYPTED) != 0;
   if (!encrypted)
     mapped_data = zipy_mapped_range(zipy, dataOffset, compressed_size);
-  if ((encrypted || !mapped_data) && zipy_seek_set(zipy->fp, dataOffset) != 0)
+  if ((encrypted || !mapped_data)
+      && (!zipy->fp || zipy_seek_set(zipy->fp, dataOffset) != 0))
     return ZIPY_ZIP_EFILE;
 
   dec_init(&dec);
