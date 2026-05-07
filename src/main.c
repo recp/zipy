@@ -1899,9 +1899,8 @@ main(int argc, char *argv[]) {
     jobs = clamp_jobs(jobs, count);
     config.options.jobs = jobs;
   } else {
-    autoJobs = adaptive_jobs(zip, count, &files);
-    jobs = autoJobs;
     config.options.jobs = 0;
+    jobs = 0;
   }
   if (archive_has_unsupported_method(zip)) {
     unsigned method = (unsigned)archive_unsupported_method(zip);
@@ -1942,6 +1941,17 @@ main(int argc, char *argv[]) {
     config.options.save_dir = save_dir;
   }
 
+  directExtract = noProgress
+               && !policies
+               && !save_dir
+               && config.options.on_conflict == ZIPY_CONFLICT_OVERWRITE
+               && !(config.options.flags & ZIPY_EXTRACT_RESUME)
+               && !archive_has_unsupported_method(zip);
+  if (!directExtract && jobs == 0) {
+    autoJobs = adaptive_jobs(zip, count, &files);
+    jobs = autoJobs;
+  }
+
   if (config.options.flags & ZIPY_EXTRACT_RESUME)
     write_resume_options(extractdir,
                          zipfile,
@@ -1953,12 +1963,6 @@ main(int argc, char *argv[]) {
                          noProgress);
 
   startMs = now_ms();
-  directExtract = noProgress
-               && !policies
-               && !save_dir
-               && config.options.on_conflict == ZIPY_CONFLICT_OVERWRITE
-               && !(config.options.flags & ZIPY_EXTRACT_RESUME)
-               && !archive_has_unsupported_method(zip);
   if (directExtract) {
     directRet = zipy_extract_all(zip, extractdir, &config.options);
     success = directRet < ZIPY_ZIP_OK;
