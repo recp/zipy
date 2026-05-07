@@ -125,7 +125,8 @@ zipy_extract_options_t options = {
   .save_to = ZIPY_SAVE_TARGET,
   .save_dir = NULL,
   .flags = ZIPY_EXTRACT_FAST,
-  .password = NULL
+  .password = NULL,
+  .jobs = 0
 };
 
 zipy_archive_t *zip = zipy_open("archive.zip");
@@ -146,6 +147,8 @@ preserving file metadata.
 For raw speed, use `ZIPY_EXTRACT_FAST` in the library. It combines
 `ZIPY_EXTRACT_NO_CRC` and `ZIPY_EXTRACT_NO_METADATA`. In the CLI, `--fast`
 also disables progress output. It does not change conflict handling.
+
+Set `jobs = 0` for adaptive worker selection, or pass an explicit worker count.
 
 ## Status
 

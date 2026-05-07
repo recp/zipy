@@ -48,6 +48,8 @@
 
 #define ZIPY_STACK_THREADS 64u
 #define ZIPY_WORK_BATCH    8u
+#define ZIPY_PARALLEL_MIN_ENTRIES 8u
+#define ZIPY_PARALLEL_MIN_BYTES (8u * 1024u * 1024u)
 #define ZIPY_PROGRESS_INTERVAL_MS 33u
 
 typedef struct zipy_progress_t {
@@ -78,7 +80,7 @@ print_usage(void) {
   printf("Options:\n");
   printf("  -h, --help  Show this help\n");
   printf("  -d <dir>    Extract files into <dir>\n");
-  printf("  -j <jobs>   Extract with N workers, auto, or cpu (default: cpu)\n");
+  printf("  -j <jobs>   Extract with N workers, auto, or cpu (default: auto)\n");
   printf("  --on-conflict <ask|save|overwrite|skip|fail>\n");
   printf("  --save-to <target|home|trash>\n");
   printf("  -p, --password <password>\n");
@@ -309,7 +311,7 @@ parse_jobs(const char *text, size_t *jobs) {
 }
 
 static size_t
-default_jobs(size_t count) {
+cpu_jobs(size_t count) {
   size_t jobs;
 
   if (count <= 1)
@@ -326,17 +328,47 @@ default_jobs(size_t count) {
 
 static size_t
 clamp_jobs(size_t jobs, size_t count) {
-  if (count <= 1)
-    return 1;
-  if (jobs == 0)
-    jobs = default_jobs(count);
-  else if (jobs == SIZE_MAX)
-    jobs = zipy_cpu_count();
-  if (jobs < 1)
+  if (count <= 1 || jobs <= 1)
     jobs = 1;
+  else if (jobs == SIZE_MAX)
+    jobs = cpu_jobs(count);
   if (jobs > count)
     jobs = count;
   return jobs;
+}
+
+static size_t
+adaptive_jobs(zipy_archive_t *zip, size_t count) {
+  uint64_t workSize = 0;
+  size_t i, files = 0, workFiles = 0;
+  size_t jobs;
+
+  if (!zip || count <= 1)
+    return 1;
+
+  for (i = 0; i < count; i++) {
+    const zipy_entry_t *entry = zipy_entry(zip, i);
+
+    if (!entry || entry->is_directory)
+      continue;
+
+    files++;
+    if (entry->method == ZIPY_ZIP_STORE && !entry->encrypted)
+      continue;
+
+    workFiles++;
+    if (workSize < ZIPY_PARALLEL_MIN_BYTES)
+      workSize += entry->uncompressed_size;
+  }
+
+  if (files <= 1
+      || workFiles <= 1
+      || (workFiles < ZIPY_PARALLEL_MIN_ENTRIES
+          && workSize < ZIPY_PARALLEL_MIN_BYTES))
+    return 1;
+
+  jobs = cpu_jobs(workFiles);
+  return jobs > 0 ? jobs : 1;
 }
 
 static void
@@ -1487,6 +1519,7 @@ main(int argc, char *argv[]) {
   int summaryTty;
   int needsSaveDir = 0;
   int noProgress = 0;
+  int jobsSpecified = 0;
   size_t jobs = 0;
   size_t count = 0, extracted = 0, saved = 0, skipped = 0;
   uint64_t startMs, elapsedMs;
@@ -1518,6 +1551,7 @@ main(int argc, char *argv[]) {
         print_usage();
         return 1;
       }
+      jobsSpecified = 1;
     } else if (strcmp(argv[i], "--on-conflict") == 0 && i + 1 < argc) {
       if (!parse_conflict(argv[++i], &config.on_conflict)) {
         print_usage();
@@ -1567,7 +1601,13 @@ main(int argc, char *argv[]) {
 
   /* Extract all files */
   count = zipy_count(zip);
-  jobs = clamp_jobs(jobs, count);
+  if (jobsSpecified && jobs != 0) {
+    jobs = clamp_jobs(jobs, count);
+    config.options.jobs = jobs;
+  } else {
+    jobs = adaptive_jobs(zip, count);
+    config.options.jobs = 0;
+  }
   progress_init(&progress, noProgress ? NULL : stderr, count);
   if (!prepare_ask_plan(zip, extractdir, &config, &policies, &needsSaveDir)) {
     zipy_close(zip);

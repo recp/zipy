@@ -62,6 +62,7 @@ typedef struct zipy_extract_options_t {
   const char       *save_dir;
   uint32_t          flags;
   const char       *password;
+  size_t            jobs;
 } zipy_extract_options_t;
 
 typedef struct zipy_entry_t {

@@ -2747,6 +2747,7 @@ zipy_default_extract_options(const zipy_extract_options_t *options) {
   out.save_dir = NULL;
   out.flags = ZIPY_EXTRACT_DEFAULT;
   out.password = NULL;
+  out.jobs = 0;
 
   if (!options)
     return out;
@@ -3577,8 +3578,8 @@ typedef struct zipy_extract_all_context_t {
 
 static size_t
 zipy_extract_default_jobs(const zipy_archive_t *zipy) {
-  uint64_t total_size = 0;
-  size_t i, count, files = 0;
+  uint64_t work_size = 0;
+  size_t i, count, files = 0, work_files = 0;
   size_t jobs;
 
   if (!zipy)
@@ -3591,22 +3592,41 @@ zipy_extract_default_jobs(const zipy_archive_t *zipy) {
     if (info->entry.is_directory)
       continue;
     files++;
-    if (total_size < ZIP_PARALLEL_MIN_BYTES)
-      total_size += info->entry.uncompressed_size;
+
+    if (info->entry.method == ZIPY_ZIP_STORE && !(info->flags & ZIP_FLAG_ENCRYPTED))
+      continue;
+
+    work_files++;
+    if (work_size < ZIP_PARALLEL_MIN_BYTES)
+      work_size += info->entry.uncompressed_size;
   }
 
   if (files <= 1
-      || (files < ZIP_PARALLEL_MIN_ENTRIES
-          && total_size < ZIP_PARALLEL_MIN_BYTES))
+      || work_files <= 1
+      || (work_files < ZIP_PARALLEL_MIN_ENTRIES
+          && work_size < ZIP_PARALLEL_MIN_BYTES))
     return 1;
 
   jobs = zipy_cpu_count();
   if (jobs < 1)
     jobs = 1;
-  if (jobs > files)
-    jobs = files;
+  if (jobs > work_files)
+    jobs = work_files;
 
   return jobs;
+}
+
+static size_t
+zipy_extract_clamp_jobs(const zipy_archive_t *zipy, size_t jobs) {
+  size_t count;
+
+  if (!zipy || jobs <= 1)
+    return 1;
+
+  count = zipy->file_count;
+  if (jobs > count)
+    jobs = count;
+  return jobs > 0 ? jobs : 1;
 }
 
 static int
@@ -3898,6 +3918,7 @@ zipy_extract_all_options(zipy_archive_t *zipy,
                          const zipy_extract_options_t *options) {
   zipy_extract_options_t opts;
   unsigned char *skip = NULL;
+  size_t jobs;
   int ret;
 
   if (!zipy || !destdir)
@@ -3912,13 +3933,16 @@ zipy_extract_all_options(zipy_archive_t *zipy,
   }
 
   ret = zipy_prepare_extract_all(zipy, destdir, &opts, &skip);
-  if (ret >= ZIPY_ZIP_OK)
+  if (ret >= ZIPY_ZIP_OK) {
+    jobs = opts.jobs ? zipy_extract_clamp_jobs(zipy, opts.jobs)
+                     : zipy_extract_default_jobs(zipy);
     ret = zipy_extract_all_parallel(zipy,
                                     destdir,
-                                    zipy_extract_default_jobs(zipy),
+                                    jobs,
                                     skip,
                                     opts.flags,
                                     opts.password);
+  }
   if (ret == ZIPY_ZIP_OK && !(opts.flags & ZIPY_EXTRACT_NO_METADATA))
     ret = zipy_apply_directory_metadata(zipy, destdir, skip);
 
