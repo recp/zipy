@@ -3017,7 +3017,7 @@ inflate_raw_streamed(zipy_archive_t * __restrict zipy,
              : (size_t)remaining;
 
     if (fread(inbuf, 1, n, zipy->fp) != n) {
-      ret = ZIPY_ZIP_EFILE;
+      ret = feof(zipy->fp) ? ZIPY_ZIP_EINCOMPLETE : ZIPY_ZIP_EFILE;
       goto done;
     }
     if (dec)
@@ -4925,7 +4925,7 @@ extract_deflate_data_descriptor(zipy_archive_t * __restrict zipy,
   }
 
   if (zret != UNZ_OK) {
-    ret = ZIPY_ZIP_EFILE;
+    ret = ZIPY_ZIP_EINCOMPLETE;
     goto done;
   }
 
@@ -4953,8 +4953,11 @@ extract_deflate_data_descriptor(zipy_archive_t * __restrict zipy,
   }
 
   descriptor_offset = info->data_offset + info->entry.compressed_size;
-  if (descriptor_offset > zipy->file_size
-      || seek_set(zipy->fp, descriptor_offset) != 0) {
+  if (descriptor_offset > zipy->file_size) {
+    ret = ZIPY_ZIP_EINCOMPLETE;
+    goto done;
+  }
+  if (seek_set(zipy->fp, descriptor_offset) != 0) {
     ret = ZIPY_ZIP_EFILE;
     goto done;
   }
@@ -4964,8 +4967,10 @@ extract_deflate_data_descriptor(zipy_archive_t * __restrict zipy,
                              zip64_descriptor,
                              0,
                              &descriptor_crc);
-  if (ret != ZIPY_ZIP_OK)
+  if (ret != ZIPY_ZIP_OK) {
+    ret = stream_incomplete_result(zipy, ret);
     goto done;
+  }
   info->entry.crc32 = descriptor_crc;
 
   if (check_crc) {
