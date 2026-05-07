@@ -2910,6 +2910,8 @@ write_chunk(out_file_t * __restrict out,
   if (check_crc)
     *crc = crc32_update(*crc, buf, len);
   *written += len;
+  if (!progress || !progress->options || !progress->options->progress)
+    return ZIPY_ZIP_OK;
   return progress_advance(progress, len);
 }
 
@@ -2979,6 +2981,7 @@ copy_store_mapped(out_file_t * __restrict out,
                        progress_state_t * __restrict progress) {
   uint64_t remaining;
   uint32_t crc = initial_crc;
+  int track_progress = progress && progress->options && progress->options->progress;
   int ret;
 
   if (!src)
@@ -3002,9 +3005,11 @@ copy_store_mapped(out_file_t * __restrict out,
 
     if (check_crc)
       crc = crc32_update(crc, src, n);
-    ret = progress_advance(progress, n);
-    if (ret != ZIPY_ZIP_OK)
-      return ret;
+    if (track_progress) {
+      ret = progress_advance(progress, n);
+      if (ret != ZIPY_ZIP_OK)
+        return ret;
+    }
 
     src += n;
     remaining -= n;
@@ -3350,9 +3355,11 @@ inflate_raw(zipy_archive_t * __restrict zipy,
       goto done;
   }
 
-  ret = progress_advance(progress, uncompressed_size);
-  if (ret != ZIPY_ZIP_OK)
-    goto done;
+  if (progress && progress->options && progress->options->progress) {
+    ret = progress_advance(progress, uncompressed_size);
+    if (ret != ZIPY_ZIP_OK)
+      goto done;
+  }
 
   ret = ZIPY_ZIP_OK;
 
@@ -4530,6 +4537,7 @@ extract_store_data_descriptor(zipy_archive_t * __restrict zipy,
   uint32_t resume_crc = 0;
   int apply_metadata = (extract_flags & ZIPY_EXTRACT_NO_METADATA) == 0;
   int keep_part = (extract_flags & ZIPY_EXTRACT_RESUME) != 0;
+  int track_progress = progress && progress->options && progress->options->progress;
   int metadata_done = 0;
   int ret = ZIPY_ZIP_ERR;
 
@@ -4654,9 +4662,11 @@ extract_store_data_descriptor(zipy_archive_t * __restrict zipy,
             ret = write_file(&outfile, buf, i);
             if (ret != ZIPY_ZIP_OK)
               goto done;
-            ret = progress_advance(progress, i);
-            if (ret != ZIPY_ZIP_OK)
-              goto done;
+            if (track_progress) {
+              ret = progress_advance(progress, i);
+              if (ret != ZIPY_ZIP_OK)
+                goto done;
+            }
           }
           crc = candidate_crc;
           base_len = data_len;
@@ -4682,9 +4692,11 @@ extract_store_data_descriptor(zipy_archive_t * __restrict zipy,
             ret = write_file(&outfile, buf, data_in_buf);
             if (ret != ZIPY_ZIP_OK)
               goto done;
-            ret = progress_advance(progress, data_in_buf);
-            if (ret != ZIPY_ZIP_OK)
-              goto done;
+            if (track_progress) {
+              ret = progress_advance(progress, data_in_buf);
+              if (ret != ZIPY_ZIP_OK)
+                goto done;
+            }
           }
           crc = candidate_crc;
           base_len = data_len;
@@ -4703,9 +4715,11 @@ extract_store_data_descriptor(zipy_archive_t * __restrict zipy,
       ret = write_file(&outfile, buf, flush_len);
       if (ret != ZIPY_ZIP_OK)
         goto done;
-      ret = progress_advance(progress, flush_len);
-      if (ret != ZIPY_ZIP_OK)
-        goto done;
+      if (track_progress) {
+        ret = progress_advance(progress, flush_len);
+        if (ret != ZIPY_ZIP_OK)
+          goto done;
+      }
       crc = crc32_update(crc, buf, flush_len);
       base_len += flush_len;
       memcpy(tail, buf + flush_len, keep_tail);
