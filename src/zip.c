@@ -105,11 +105,14 @@ typedef struct zipy_file_t {
   uint16_t mod_time;
   uint16_t mod_date;
   uint32_t external_attr;
+  uint32_t unix_mode;
   time_t   mtime;
   uint16_t zip_method;
   uint16_t aes_vendor_version;
   uint8_t  aes_strength;
   uint8_t  has_mtime;
+  uint8_t  is_symlink;
+  uint8_t  safe_name;
 } zipy_file_t;
 
 typedef struct zipy_path_buf_t {
@@ -1288,7 +1291,7 @@ zipy_mkdirs_buf(const char *path, zipy_path_buf_t *buf) {
 
 static uint32_t
 zipy_unix_mode(const zipy_file_t *info) {
-  return info ? (info->external_attr >> 16) : 0;
+  return info ? info->unix_mode : 0;
 }
 
 static int
@@ -1495,8 +1498,7 @@ zipy_parent_has_symlink_buf(const char *path, zipy_path_buf_t *buf) {
 static int
 zipy_is_symlink(const zipy_file_t *info) {
 #if !defined(_WIN32) && defined(S_IFLNK)
-  uint32_t mode = zipy_unix_mode(info);
-  return (mode & S_IFMT) == S_IFLNK;
+  return info && info->is_symlink;
 #else
   (void)info;
   return 0;
@@ -2803,6 +2805,10 @@ zipy_open(const char *path) {
     commentLen = zipy_le16(hdrp + 32);
     diskStart = zipy_le16(hdrp + 34);
     info->external_attr = zipy_le32(hdrp + 38);
+    info->unix_mode = info->external_attr >> 16;
+#if !defined(_WIN32) && defined(S_IFLNK)
+    info->is_symlink = (info->unix_mode & S_IFMT) == S_IFLNK;
+#endif
     offset32 = zipy_le32(hdrp + 42);
 
     if (nameLen == 0
@@ -2834,6 +2840,7 @@ zipy_open(const char *path) {
     name[nameLen] = '\0';
     info->entry.name = name;
     info->entry.name_len = nameLen;
+    info->safe_name = zipy_is_safe_member_name(name);
 
     info->zip_method = info->entry.method;
     info->entry.compressed_size = comp32;
@@ -2980,7 +2987,7 @@ zipy_extract_entry(zipy_archive_t * ZIPY_RESTRICT zipy,
   if (!zipy || !zipy->fp || !info || !destpath)
     return ZIPY_ZIP_ERR;
 
-  if (!zipy_is_safe_member_name(info->entry.name))
+  if (!info->safe_name)
     return ZIPY_ZIP_EFILE;
 
   if (info->flags & ZIP_FLAG_STRONG_ENC)
