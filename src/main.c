@@ -1958,8 +1958,6 @@ main(int argc, char *argv[]) {
                && !save_dir
                && config.options.on_conflict == ZIPY_CONFLICT_OVERWRITE
                && !(config.options.flags & ZIPY_EXTRACT_RESUME)
-               && !archive_has_encrypted(zip)
-               && !archive_has_symlink(zip)
                && !archive_has_unsupported_method(zip);
   if (directExtract) {
     directRet = zipy_extract_all(zip, extractdir, &config.options);
@@ -1982,6 +1980,18 @@ main(int argc, char *argv[]) {
   if (directExtract && success) {
     if (directRet == ZIPY_ZIP_ENOSPC)
       print_error("  Error: No space left during extraction\n");
+    else if (directRet == ZIPY_ZIP_EPASS)
+      print_error("  Error: Missing or incorrect password\n");
+    else if (directRet == ZIPY_ZIP_EAUTH)
+      print_error("  Error: Authentication failed\n");
+    else if (directRet == ZIPY_ZIP_EUNSUP)
+      print_error("  Error: Unsupported ZIP feature\n");
+    else if (directRet == ZIPY_ZIP_ECRC)
+      print_error("  Error: CRC check failed\n");
+    else if (directRet == ZIPY_ZIP_ECANCEL)
+      print_error("  Error: Extraction cancelled\n");
+    else if (directRet == ZIPY_ZIP_EINCOMPLETE)
+      print_error("  Error: Incomplete ZIP stream\n");
     else
       print_error("  Error: Extraction failed (%d)\n", directRet);
   }
