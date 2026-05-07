@@ -5681,21 +5681,27 @@ extract_all_serial(zipy_archive_t *zipy,
   for (i = 0; i < zipy->file_count; i++) {
     entry_info_t *info;
     progress_state_t progress;
+    progress_state_t *progress_ptr = NULL;
     const char *path;
     int ret;
 
     info = &zipy->files[i];
-    progress_init_entry(&progress,
-                        options,
-                        &info->entry,
-                        &done,
-                        total,
-                        NULL,
-                        NULL);
+    if (options->progress) {
+      progress_init_entry(&progress,
+                          options,
+                          &info->entry,
+                          &done,
+                          total,
+                          NULL,
+                          NULL);
+      progress_ptr = &progress;
+    }
     if (skip && skip[i]) {
-      ret = progress_finish_entry(&progress, info);
-      if (ret < ZIPY_ZIP_OK)
-        return ret;
+      if (progress_ptr) {
+        ret = progress_finish_entry(progress_ptr, info);
+        if (ret < ZIPY_ZIP_OK)
+          return ret;
+      }
       continue;
     }
 
@@ -5715,13 +5721,15 @@ extract_all_serial(zipy_archive_t *zipy,
                              options->password,
                              state_path,
                              destdir,
-                             options->progress ? &progress : NULL);
+                             progress_ptr);
     if (ret < ZIPY_ZIP_OK)
       return ret;
 
-    ret = progress_finish_entry(&progress, info);
-    if (ret < ZIPY_ZIP_OK)
-      return ret;
+    if (progress_ptr) {
+      ret = progress_finish_entry(progress_ptr, info);
+      if (ret < ZIPY_ZIP_OK)
+        return ret;
+    }
   }
 
   return ZIPY_ZIP_OK;
@@ -5771,24 +5779,30 @@ extract_all_worker(void *arg) {
 
     for (; index < end; index++) {
       progress_state_t progress;
+      progress_state_t *progress_ptr = NULL;
 
       if (index >= zipy->file_count) {
         ret = ZIPY_ZIP_EFILE;
         goto fail;
       }
       info = &zipy->files[index];
-      progress_init_entry(&progress,
-                          ctx->options,
-                          &info->entry,
-                          &ctx->done,
-                          ctx->total,
-                          &ctx->lock,
-                          &ctx->result);
+      if (ctx->options->progress) {
+        progress_init_entry(&progress,
+                            ctx->options,
+                            &info->entry,
+                            &ctx->done,
+                            ctx->total,
+                            &ctx->lock,
+                            &ctx->result);
+        progress_ptr = &progress;
+      }
 
       if (ctx->skip && ctx->skip[index]) {
-        ret = progress_finish_entry(&progress, info);
-        if (ret < ZIPY_ZIP_OK)
-          goto fail;
+        if (progress_ptr) {
+          ret = progress_finish_entry(progress_ptr, info);
+          if (ret < ZIPY_ZIP_OK)
+            goto fail;
+        }
         continue;
       }
 
@@ -5810,13 +5824,15 @@ extract_all_worker(void *arg) {
                                ctx->options->password,
                                ctx->state_path,
                                ctx->destdir,
-                               ctx->options->progress ? &progress : NULL);
+                               progress_ptr);
       if (ret < ZIPY_ZIP_OK)
         goto fail;
 
-      ret = progress_finish_entry(&progress, info);
-      if (ret < ZIPY_ZIP_OK)
-        goto fail;
+      if (progress_ptr) {
+        ret = progress_finish_entry(progress_ptr, info);
+        if (ret < ZIPY_ZIP_OK)
+          goto fail;
+      }
     }
 
     continue;
