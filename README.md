@@ -155,8 +155,10 @@ uncompressed sizes, including data-descriptor entries when those sizes are
 still present in the local header or ZIP64 extra. For data-descriptor entries
 with unknown local sizes, `zipy_extract_stream()` can stream unencrypted
 Deflate method 8, legacy ZipCrypto Deflate, and WinZip AES Deflate entries
-before the central directory is available. Stored, ZIP64-sized, and resume-mode
-unknown-size descriptors still require the central directory path.
+before the central directory is available. It can also stream stored entries
+when the data descriptor has the optional signature. Unsigned stored,
+ZIP64-sized, and resume-mode unknown-size descriptors still require the central
+directory path.
 
 CRC32 validation is enabled by default. Set `ZIPY_EXTRACT_NO_CRC` only when
 lower latency matters more than detecting corrupted archive data.
@@ -204,5 +206,6 @@ member.
 - [x] sequential local-header extraction for known-size entries
 - [x] known-size data descriptors in local-header streaming
 - [x] unknown-size Deflate, ZipCrypto, and AES data descriptors before central directory
-- [ ] unknown-size stored data descriptors before central directory
+- [x] signed unknown-size stored data descriptors before central directory
+- [ ] unsigned unknown-size stored data descriptors before central directory
 - [ ] Deflate64 method 9 extraction
