@@ -165,4 +165,4 @@ Set `jobs = 0` for adaptive worker selection, or pass an explicit worker count.
 - [x] legacy ZipCrypto decryption
 - [x] WinZip AES decryption
 - [x] symlinks, attributes, and timestamps
-- [ ] Deflate64
+- [ ] Deflate64 method 9 extraction

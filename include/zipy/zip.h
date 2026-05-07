@@ -32,8 +32,9 @@ typedef enum zipy_zip_result_t {
 } zipy_zip_result_t;
 
 typedef enum zipy_zip_method_t {
-  ZIPY_ZIP_STORE   = 0,
-  ZIPY_ZIP_DEFLATE = 8
+  ZIPY_ZIP_STORE     = 0,
+  ZIPY_ZIP_DEFLATE   = 8,
+  ZIPY_ZIP_DEFLATE64 = 9
 } zipy_zip_method_t;
 
 typedef enum zipy_save_location_t {
