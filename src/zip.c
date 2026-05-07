@@ -66,6 +66,7 @@
 #define ZIP_MAX_EOCD_SEARCH   (ZIP_EOCD_FIXED + 65535u)
 #define ZIP_IO_CHUNK          (256u * 1024u)
 #define ZIP_OUTPUT_MMAP_MIN   (8u * 1024u * 1024u)
+#define ZIP_PATH_STACK        512u
 #define ZIP_STACK_THREADS     64u
 #define ZIP_WORK_BATCH        8u
 
@@ -122,6 +123,7 @@ typedef struct zipy_file_t {
 typedef struct zipy_path_buf_t {
   char  *data;
   size_t cap;
+  char   stack[ZIP_PATH_STACK];
 } zipy_path_buf_t;
 
 typedef struct zipy_name_chunk_t {
@@ -221,7 +223,8 @@ zipy_path_buf_free(zipy_path_buf_t *buf) {
   if (!buf)
     return;
 
-  free(buf->data);
+  if (buf->data && buf->data != buf->stack)
+    free(buf->data);
   buf->data = NULL;
   buf->cap = 0;
 }
@@ -333,8 +336,13 @@ zipy_path_buf_reserve(zipy_path_buf_t *buf, size_t len) {
     return 0;
   if (len <= buf->cap)
     return 1;
+  if (!buf->data && len <= sizeof(buf->stack)) {
+    buf->data = buf->stack;
+    buf->cap = sizeof(buf->stack);
+    return 1;
+  }
 
-  cap = buf->cap ? buf->cap : 256u;
+  cap = buf->cap ? buf->cap : sizeof(buf->stack);
   while (cap < len) {
     if (cap > SIZE_MAX / 2u) {
       cap = len;
@@ -343,7 +351,13 @@ zipy_path_buf_reserve(zipy_path_buf_t *buf, size_t len) {
     cap *= 2u;
   }
 
-  data = realloc(buf->data, cap);
+  if (buf->data == buf->stack) {
+    data = malloc(cap);
+    if (data)
+      memcpy(data, buf->stack, sizeof(buf->stack));
+  } else {
+    data = realloc(buf->data, cap);
+  }
   if (!data)
     return 0;
 
