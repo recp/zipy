@@ -4082,12 +4082,15 @@ extract_deflate_data_descriptor(zipy_archive_t * __restrict zipy,
   out_map_t outmap;
   dec_t dec;
   dec_t *dec_ptr = NULL;
+  dec_t chunk_dec;
   uint8_t *inbuf;
+  uint8_t *plainbuf = NULL;
   const char *part_path;
   uint64_t remaining;
   uint64_t supplied = 0;
   uint64_t descriptor_offset;
   uint64_t encrypted_header_size = 0;
+  uint64_t encrypted_footer_size = 0;
   uint32_t descriptor_crc = 0;
   uint32_t output_crc;
   int check_crc = (extract_flags & ZIPY_EXTRACT_NO_CRC) == 0;
@@ -4108,8 +4111,6 @@ extract_deflate_data_descriptor(zipy_archive_t * __restrict zipy,
       || info->entry.method != ZIPY_ZIP_DEFLATE
       || (extract_flags & ZIPY_EXTRACT_RESUME))
     return ZIPY_ZIP_EUNSUP;
-  if (info->entry.encrypted && info->zip_method == ZIP_METHOD_AES)
-    return ZIPY_ZIP_EUNSUP;
   if ((uint64_t)UINT32_MAX > (uint64_t)SIZE_MAX)
     return ZIPY_ZIP_EUNSUP;
   if (info->data_offset > zipy->file_size)
@@ -4117,7 +4118,7 @@ extract_deflate_data_descriptor(zipy_archive_t * __restrict zipy,
 
   remaining = zipy->file_size - info->data_offset;
   dec_init(&dec);
-  if (info->entry.encrypted) {
+  if (info->entry.encrypted && info->zip_method != ZIP_METHOD_AES) {
     if (seek_set(zipy->fp, info->data_offset) != 0)
       return ZIPY_ZIP_EFILE;
 
@@ -4130,6 +4131,23 @@ extract_deflate_data_descriptor(zipy_archive_t * __restrict zipy,
       return ret;
     encrypted_header_size = ZIPCRYPTO_HEADER_SIZE;
     dec_ptr = &dec;
+  } else if (info->zip_method == ZIP_METHOD_AES) {
+    if (seek_set(zipy->fp, info->data_offset) != 0)
+      return ZIPY_ZIP_EFILE;
+
+    ret = dec_open_aes_wg(&dec,
+                          zipy->fp,
+                          password,
+                          info->aes_strength,
+                          &remaining);
+    if (ret != ZIPY_ZIP_OK)
+      return ret;
+    encrypted_header_size = aes_wg_salt_size(info->aes_strength)
+                          + AES_WG_VERIFY_SIZE;
+    encrypted_footer_size = AES_WG_AUTH_SIZE;
+    dec_ptr = &dec;
+    if (info->aes_vendor_version == 2)
+      check_crc = 0;
   }
 
   if (parent_len == SIZE_MAX) {
@@ -4157,6 +4175,15 @@ extract_deflate_data_descriptor(zipy_archive_t * __restrict zipy,
     goto done;
   }
   inbuf = zipy->inflate_in;
+  if (dec.kind == DEC_AES_WG) {
+    if (!reserve_bytes(&zipy->copy_buf,
+                       &zipy->copy_cap,
+                       ZIP_INFLATE_STREAM_CHUNK)) {
+      ret = ZIPY_ZIP_ERR;
+      goto done;
+    }
+    plainbuf = zipy->copy_buf;
+  }
 
   if (!zipy->inflate_stream) {
     zipy->inflate_stream = infl_init(outmap.data, UINT32_MAX, 0);
@@ -4177,6 +4204,9 @@ extract_deflate_data_descriptor(zipy_archive_t * __restrict zipy,
     size_t n = remaining > ZIP_INFLATE_STREAM_CHUNK
              ? ZIP_INFLATE_STREAM_CHUNK
              : (size_t)remaining;
+    uint64_t supplied_before = supplied;
+    const uint8_t *feed = inbuf;
+    uint32_t payload_consumed;
 
     if (fread(inbuf, 1, n, zipy->fp) != n) {
       ret = ZIPY_ZIP_EFILE;
@@ -4185,15 +4215,40 @@ extract_deflate_data_descriptor(zipy_archive_t * __restrict zipy,
 
     supplied += n;
     remaining -= n;
-    if (dec_ptr)
+    if (dec.kind == DEC_AES_WG) {
+      chunk_dec = dec;
+      memcpy(plainbuf, inbuf, n);
+      dec_decrypt(&dec, plainbuf, n);
+      feed = plainbuf;
+    } else if (dec_ptr) {
       dec_decrypt(dec_ptr, inbuf, n);
-    zret = infl_stream(zipy->inflate_stream, inbuf, (uint32_t)n);
+    }
+
+    zret = infl_stream(zipy->inflate_stream, feed, (uint32_t)n);
     if (zret < UNZ_OK) {
       ret = zret == UNZ_EFULL ? ZIPY_ZIP_EUNSUP : ZIPY_ZIP_EINFLATE;
       goto done;
     }
-    if (zret == UNZ_OK)
+    if (zret == UNZ_OK) {
+      if (dec.kind == DEC_AES_WG) {
+        payload_consumed = infl_input_pos(zipy->inflate_stream);
+        if ((uint64_t)payload_consumed < supplied_before
+            || (uint64_t)payload_consumed > supplied) {
+          ret = ZIPY_ZIP_ESIZE;
+          goto done;
+        }
+        if ((uint64_t)payload_consumed < supplied) {
+          size_t used = (size_t)((uint64_t)payload_consumed - supplied_before);
+
+          dec = chunk_dec;
+          if (used > 0) {
+            memcpy(plainbuf, inbuf, used);
+            dec_decrypt(&dec, plainbuf, used);
+          }
+        }
+      }
       break;
+    }
   }
 
   if (zret != UNZ_OK) {
@@ -4202,11 +4257,26 @@ extract_deflate_data_descriptor(zipy_archive_t * __restrict zipy,
   }
 
   info->entry.compressed_size = encrypted_header_size
-                              + infl_input_pos(zipy->inflate_stream);
+                              + infl_input_pos(zipy->inflate_stream)
+                              + encrypted_footer_size;
   info->entry.uncompressed_size = infl_output_pos(zipy->inflate_stream);
-  if (info->entry.compressed_size - encrypted_header_size > supplied) {
+  if (infl_input_pos(zipy->inflate_stream) > supplied) {
     ret = ZIPY_ZIP_ESIZE;
     goto done;
+  }
+
+  if (dec.kind == DEC_AES_WG) {
+    descriptor_offset = info->data_offset
+                      + encrypted_header_size
+                      + infl_input_pos(zipy->inflate_stream);
+    if (descriptor_offset > zipy->file_size
+        || seek_set(zipy->fp, descriptor_offset) != 0) {
+      ret = ZIPY_ZIP_EFILE;
+      goto done;
+    }
+    ret = dec_finish(&dec, zipy->fp);
+    if (ret != ZIPY_ZIP_OK)
+      goto done;
   }
 
   descriptor_offset = info->data_offset + info->entry.compressed_size;
@@ -5400,7 +5470,6 @@ zipy_extract_stream(const char * __restrict path,
         && !info.entry.is_directory
         && unknownDataDesc
         && (info.entry.method != ZIPY_ZIP_DEFLATE
-            || (info.entry.encrypted && info.zip_method == ZIP_METHOD_AES)
             || zip64Desc
             || (opts.flags & ZIPY_EXTRACT_RESUME))) {
       ret = ZIPY_ZIP_EUNSUP;
