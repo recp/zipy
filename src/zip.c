@@ -1094,6 +1094,7 @@ zipy_path_is_symlink(const char *path) {
 #endif
 }
 
+#if defined(_WIN32) || !defined(O_NOFOLLOW)
 static int
 zipy_unlink_symlink(const char *path) {
   if (!zipy_path_is_symlink(path))
@@ -1103,6 +1104,56 @@ zipy_unlink_symlink(const char *path) {
   return 1;
 #else
   return unlink(path) == 0;
+#endif
+}
+#endif
+
+static FILE *
+zipy_open_output_file(const char *path, int *ret) {
+  FILE *fp;
+
+  if (ret)
+    *ret = ZIPY_ZIP_EFILE;
+
+#if !defined(_WIN32) && defined(O_NOFOLLOW)
+  {
+    int fd;
+    int flags = O_WRONLY | O_CREAT | O_TRUNC | O_NOFOLLOW;
+
+#  if defined(O_CLOEXEC)
+    flags |= O_CLOEXEC;
+#  endif
+
+    fd = open(path, flags, 0666);
+    if (fd < 0 && errno == ELOOP) {
+      if (unlink(path) != 0)
+        return NULL;
+      fd = open(path, flags, 0666);
+    }
+    if (fd < 0)
+      return NULL;
+
+    fp = fdopen(fd, "wb");
+    if (!fp) {
+      close(fd);
+      return NULL;
+    }
+
+    if (ret)
+      *ret = ZIPY_ZIP_OK;
+    return fp;
+  }
+#else
+  if (!zipy_unlink_symlink(path))
+    return NULL;
+
+  fp = fopen(path, "wb");
+  if (!fp)
+    return NULL;
+
+  if (ret)
+    *ret = ZIPY_ZIP_OK;
+  return fp;
 #endif
 }
 
@@ -2750,12 +2801,10 @@ zipy_extract_entry(zipy_archive_t * ZIPY_RESTRICT zipy,
     ret = ZIPY_ZIP_EFILE;
     return ret;
   }
-  if (!zipy_unlink_symlink(destpath))
-    return ZIPY_ZIP_EFILE;
 
-  outfp = fopen(destpath, "wb");
+  outfp = zipy_open_output_file(destpath, &ret);
   if (!outfp)
-    return ZIPY_ZIP_EFILE;
+    return ret;
 
   if (info->entry.method == ZIPY_ZIP_STORE) {
     if (compressed_size != info->entry.uncompressed_size)
