@@ -3033,6 +3033,8 @@ inflate_raw_streamed(zipy_archive_t * __restrict zipy,
   uint32_t crc = 0;
   uint32_t produced = 0;
   int mapped_out = 0;
+  int track_output = check_crc
+                  || (progress && progress->options && progress->options->progress);
   int zret = UNZ_UNFINISHED;
   int ret;
 
@@ -3089,14 +3091,16 @@ inflate_raw_streamed(zipy_archive_t * __restrict zipy,
       ret = ZIPY_ZIP_EINFLATE;
       goto done;
     }
-    ret = account_inflate_output(zipy->inflate_stream,
-                                 outbuf,
-                                 &produced,
-                                 &crc,
-                                 check_crc,
-                                 progress);
-    if (ret != ZIPY_ZIP_OK)
-      goto done;
+    if (track_output) {
+      ret = account_inflate_output(zipy->inflate_stream,
+                                   outbuf,
+                                   &produced,
+                                   &crc,
+                                   check_crc,
+                                   progress);
+      if (ret != ZIPY_ZIP_OK)
+        goto done;
+    }
     if (zret == UNZ_OK && remaining != n) {
       ret = ZIPY_ZIP_ESIZE;
       goto done;
@@ -3111,14 +3115,16 @@ inflate_raw_streamed(zipy_archive_t * __restrict zipy,
     ret = ZIPY_ZIP_EINFLATE;
     goto done;
   }
-  ret = account_inflate_output(zipy->inflate_stream,
-                               outbuf,
-                               &produced,
-                               &crc,
-                               check_crc,
-                               progress);
-  if (ret != ZIPY_ZIP_OK)
-    goto done;
+  if (track_output) {
+    ret = account_inflate_output(zipy->inflate_stream,
+                                 outbuf,
+                                 &produced,
+                                 &crc,
+                                 check_crc,
+                                 progress);
+    if (ret != ZIPY_ZIP_OK)
+      goto done;
+  }
 
   ret = dec_finish(dec, zipy->fp);
   if (ret != ZIPY_ZIP_OK)
@@ -4813,6 +4819,8 @@ extract_deflate_data_descriptor(zipy_archive_t * __restrict zipy,
   uint32_t produced = 0;
   int check_crc = (extract_flags & ZIPY_EXTRACT_NO_CRC) == 0;
   int apply_metadata = (extract_flags & ZIPY_EXTRACT_NO_METADATA) == 0;
+  int track_output = check_crc
+                  || (progress && progress->options && progress->options->progress);
   int metadata_done = 0;
   int zret = UNZ_UNFINISHED;
   int ret = ZIPY_ZIP_ERR;
@@ -4945,14 +4953,16 @@ extract_deflate_data_descriptor(zipy_archive_t * __restrict zipy,
 
     zret = infl_stream(zipy->inflate_stream, feed, (uint32_t)n);
     for (;;) {
-      ret = account_inflate_output(zipy->inflate_stream,
-                                   outmap.data,
-                                   &produced,
-                                   &output_crc,
-                                   check_crc,
-                                   progress);
-      if (ret != ZIPY_ZIP_OK)
-        goto done;
+      if (track_output) {
+        ret = account_inflate_output(zipy->inflate_stream,
+                                     outmap.data,
+                                     &produced,
+                                     &output_crc,
+                                     check_crc,
+                                     progress);
+        if (ret != ZIPY_ZIP_OK)
+          goto done;
+      }
 
       if (zret != UNZ_EFULL)
         break;
