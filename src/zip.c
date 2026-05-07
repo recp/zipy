@@ -145,6 +145,7 @@ struct zipy_archive_t {
   size_t   file_count;
   size_t   extract_file_count;
   size_t   extract_work_file_count;
+  size_t   directory_count;
   uint64_t extract_work_size;
   uint64_t file_size;
   const uint8_t *map;
@@ -1164,8 +1165,12 @@ zipy_is_zip_sep(char c) {
 static void
 zipy_record_extract_metrics(zipy_archive_t * ZIPY_RESTRICT zipy,
                             const zipy_file_t * ZIPY_RESTRICT info) {
-  if (!zipy || !info || info->entry.is_directory)
+  if (!zipy || !info)
     return;
+  if (info->entry.is_directory) {
+    zipy->directory_count++;
+    return;
+  }
 
   zipy->extract_file_count++;
   if (info->entry.method == ZIPY_ZIP_STORE && !(info->flags & ZIP_FLAG_ENCRYPTED))
@@ -3218,6 +3223,7 @@ zipy_clone_init(zipy_archive_t *clone, zipy_archive_t *zipy) {
   clone->file_count = zipy->file_count;
   clone->extract_file_count = zipy->extract_file_count;
   clone->extract_work_file_count = zipy->extract_work_file_count;
+  clone->directory_count = zipy->directory_count;
   clone->extract_work_size = zipy->extract_work_size;
   clone->file_size = zipy->file_size;
   clone->owns_files = 0;
@@ -3841,6 +3847,8 @@ zipy_apply_directory_metadata(zipy_archive_t *zipy,
                               const unsigned char *skip) {
   size_t i, prefixLen;
 
+  if (!zipy || zipy->directory_count == 0)
+    return ZIPY_ZIP_OK;
   if (!zipy_path_buf_set_archive_dir(zipy, destdir, &prefixLen))
     return ZIPY_ZIP_ERR;
 
