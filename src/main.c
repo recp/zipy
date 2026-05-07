@@ -48,11 +48,13 @@
 
 #define ZIPY_STACK_THREADS 64u
 #define ZIPY_WORK_BATCH    8u
+#define ZIPY_PROGRESS_INTERVAL_MS 33u
 
 typedef struct zipy_progress_t {
   FILE  *out;
   size_t count;
   size_t tick;
+  uint64_t last_ms;
   int    tty;
   int    color;
 } zipy_progress_t;
@@ -338,6 +340,7 @@ progress_init(zipy_progress_t *progress, FILE *out, size_t count) {
   progress->out = out;
   progress->count = count;
   progress->tick = 0;
+  progress->last_ms = 0;
   progress->tty = file_is_tty(out);
   progress->color = use_color(progress->tty);
 }
@@ -375,10 +378,17 @@ progress_print_name(FILE *out, const char *name, size_t maxlen) {
 static void
 progress_update(zipy_progress_t *progress, size_t current, const char *name) {
   static const char spinner[] = "-\\|/";
+  uint64_t now;
   unsigned percent;
 
   if (!progress->tty)
     return;
+  now = now_ms();
+  if (current < progress->count
+      && progress->last_ms != 0
+      && now - progress->last_ms < ZIPY_PROGRESS_INTERVAL_MS)
+    return;
+  progress->last_ms = now;
 
   percent = progress->count == 0
           ? 100u
