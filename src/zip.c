@@ -6101,6 +6101,7 @@ zipy_extract_stream(const char * __restrict path,
   for (;;) {
     uint8_t hdr[ZIP_LOCAL_FIXED];
     entry_info_t info;
+    char name_stack[ZIP_PATH_STACK];
     char *name;
     const uint8_t *extra = NULL;
     const char *destpath;
@@ -6159,7 +6160,9 @@ zipy_extract_stream(const char * __restrict path,
     info.zip_method = method;
     info.local_header_offset = offset;
 
-    name = alloc_name(&zipy, (size_t)nameLen + 1u);
+    name = (size_t)nameLen < sizeof(name_stack)
+         ? name_stack
+         : alloc_name(&zipy, (size_t)nameLen + 1u);
     if (!name || !read_exact(zipy.fp, name, nameLen)) {
       ret = name
           ? stream_incomplete_result(&zipy, ZIPY_ZIP_EFILE)
