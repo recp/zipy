@@ -3386,6 +3386,10 @@ inflate_raw(zipy_archive_t * __restrict zipy,
     ret = ZIPY_ZIP_EINFLATE;
     goto done;
   }
+  if (infl_output_pos(zipy->inflate_stream) != (uint32_t)uncompressed_size) {
+    ret = ZIPY_ZIP_ESIZE;
+    goto done;
+  }
 
   if (check_crc) {
     crc = crc32_update(0, outbuf, (size_t)uncompressed_size);
