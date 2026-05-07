@@ -1901,6 +1901,11 @@ main(int argc, char *argv[]) {
     jobs = autoJobs;
     config.options.jobs = 0;
   }
+  if (archive_has_unsupported_method(zip)) {
+    print_error("Error: Unsupported ZIP method in archive\n");
+    zipy_close(zip);
+    return 1;
+  }
   progress_init(&progress, noProgress ? NULL : stderr, count);
   if (!prepare_ask_plan(zip,
                         extractdir,

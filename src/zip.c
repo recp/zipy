@@ -5522,6 +5522,8 @@ zipy_extract_all(zipy_archive_t * __restrict zipy,
 
   if (!zipy || !destdir)
     return ZIPY_ZIP_ERR;
+  if (zipy->has_unsupported_method)
+    return ZIPY_ZIP_EUNSUP;
 
   opts = default_extract_options(options);
   if (opts.on_conflict != ZIPY_CONFLICT_OVERWRITE) {
