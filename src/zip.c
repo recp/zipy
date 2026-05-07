@@ -144,6 +144,8 @@ struct zipy_archive_t {
   zipy_name_chunk_t *name_chunks;
   size_t   file_count;
   size_t   extract_file_count;
+  size_t   extract_work_file_count;
+  uint64_t extract_work_size;
   uint64_t file_size;
   const uint8_t *map;
   size_t   map_size;
@@ -1157,6 +1159,21 @@ zipy_cache_local_header(zipy_archive_t * ZIPY_RESTRICT zipy,
 static bool
 zipy_is_zip_sep(char c) {
   return c == '/' || c == '\\';
+}
+
+static void
+zipy_record_extract_metrics(zipy_archive_t * ZIPY_RESTRICT zipy,
+                            const zipy_file_t * ZIPY_RESTRICT info) {
+  if (!zipy || !info || info->entry.is_directory)
+    return;
+
+  zipy->extract_file_count++;
+  if (info->entry.method == ZIPY_ZIP_STORE && !(info->flags & ZIP_FLAG_ENCRYPTED))
+    return;
+
+  zipy->extract_work_file_count++;
+  if (zipy->extract_work_size < ZIP_PARALLEL_MIN_BYTES)
+    zipy->extract_work_size += info->entry.uncompressed_size;
 }
 
 static bool
@@ -3100,8 +3117,6 @@ zipy_open(const char *path) {
     info->local_header_offset = offset32;
     info->entry.is_directory = zipy_is_dir_name_len(info->entry.name,
                                                     info->entry.name_len);
-    if (!info->entry.is_directory)
-      zipy->extract_file_count++;
     info->entry.encrypted = (info->flags & ZIP_FLAG_ENCRYPTED) != 0;
     if (info->entry.encrypted)
       zipy->has_encrypted = 1;
@@ -3148,6 +3163,8 @@ zipy_open(const char *path) {
     } else if (info->aes_strength != 0) {
       goto err;
     }
+
+    zipy_record_extract_metrics(zipy, info);
 
     if (info->local_header_offset >= dir.central_dir_offset
         || info->entry.compressed_size > zipy->file_size
@@ -3200,6 +3217,8 @@ zipy_clone_init(zipy_archive_t *clone, zipy_archive_t *zipy) {
   clone->files = zipy->files;
   clone->file_count = zipy->file_count;
   clone->extract_file_count = zipy->extract_file_count;
+  clone->extract_work_file_count = zipy->extract_work_file_count;
+  clone->extract_work_size = zipy->extract_work_size;
   clone->file_size = zipy->file_size;
   clone->owns_files = 0;
   clone->has_encrypted = zipy->has_encrypted;
@@ -3596,33 +3615,18 @@ typedef struct zipy_extract_all_context_t {
 
 static size_t
 zipy_extract_default_jobs(const zipy_archive_t *zipy) {
-  uint64_t work_size = 0;
-  size_t i, count, files = 0, work_files = 0;
+  size_t files, work_files;
   size_t jobs;
 
   if (!zipy)
     return 1;
 
-  count = zipy->file_count;
-  for (i = 0; i < count; i++) {
-    const zipy_file_t *info = &zipy->files[i];
-
-    if (info->entry.is_directory)
-      continue;
-    files++;
-
-    if (info->entry.method == ZIPY_ZIP_STORE && !(info->flags & ZIP_FLAG_ENCRYPTED))
-      continue;
-
-    work_files++;
-    if (work_size < ZIP_PARALLEL_MIN_BYTES)
-      work_size += info->entry.uncompressed_size;
-  }
-
+  files = zipy->extract_file_count;
+  work_files = zipy->extract_work_file_count;
   if (files <= 1
       || work_files <= 1
       || (work_files < ZIP_PARALLEL_MIN_ENTRIES
-          && work_size < ZIP_PARALLEL_MIN_BYTES))
+          && zipy->extract_work_size < ZIP_PARALLEL_MIN_BYTES))
     return 1;
 
   jobs = zipy_cpu_count();
