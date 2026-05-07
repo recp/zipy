@@ -90,6 +90,9 @@ typedef struct zipy_extract_options_t {
   void             *userdata;
 } zipy_extract_options_t;
 
+ZIPY_EXPORT void
+zipy_extract_options_init(zipy_extract_options_t * __restrict options);
+
 ZIPY_EXPORT zipy_archive_t *
 zipy_open(const char * __restrict path);
 

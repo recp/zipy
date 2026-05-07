@@ -3847,6 +3847,13 @@ default_extract_options(const zipy_extract_options_t *options) {
   return out;
 }
 
+ZIPY_EXPORT
+void
+zipy_extract_options_init(zipy_extract_options_t * __restrict options) {
+  if (options)
+    *options = default_extract_options(NULL);
+}
+
 static uint64_t
 entry_progress_size(const entry_info_t *info) {
   if (!info || info->entry.is_directory)

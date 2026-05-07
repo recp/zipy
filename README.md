@@ -132,16 +132,9 @@ Use `zipy_extract_all()` or `zipy_extract_to()` to set conflict
 behavior explicitly:
 
 ```c
-zipy_extract_options_t options = {
-  .on_conflict = ZIPY_CONFLICT_SAVE,
-  .save_to = ZIPY_SAVE_TARGET,
-  .save_dir = NULL,
-  .flags = ZIPY_EXTRACT_FAST,
-  .password = NULL,
-  .jobs = 0,
-  .progress = NULL,
-  .userdata = NULL
-};
+zipy_extract_options_t options;
+zipy_extract_options_init(&options);
+options.flags = ZIPY_EXTRACT_FAST;
 
 zipy_archive_t *zip = zipy_open("archive.zip");
 int ret = zipy_extract_all(zip, "target", &options);
