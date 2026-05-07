@@ -194,6 +194,9 @@ Mode and timestamp restoration is enabled by default. Set
 `ZIPY_EXTRACT_NO_METADATA` when raw extraction latency matters more than
 preserving file metadata.
 
+Symlink entries are restored on Unix when their targets remain inside the
+extraction root. Symlink targets that escape the extraction root are rejected.
+
 Set `ZIPY_EXTRACT_ATOMIC` to write regular files under
 `target/.zipy/parts/` and rename them into place only after successful
 extraction. Set `ZIPY_EXTRACT_RESUME` to keep those `.part` files after
@@ -247,6 +250,8 @@ caller already owns the background thread and wants no Swift task hop.
 
 Progress is optional. When no `Progress`, actor, or callback is passed, the
 Swift wrapper does not install a progress callback.
+Known zipy results map to typed Swift errors such as `.incomplete`,
+`.cancelled`, `.unsupportedFeature`, and `.authenticationFailed`.
 
 ```swift
 let progress = Progress(totalUnitCount: 0)

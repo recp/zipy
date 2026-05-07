@@ -68,6 +68,68 @@ func actorProgress() async throws {
   #expect(FileManager.default.fileExists(atPath: output.appendingPathComponent("data.bin").path))
 }
 
+@Test
+func containedSymlinkExtracts() async throws {
+  let root = try temporaryDirectory()
+  let source = root.appendingPathComponent("source", isDirectory: true)
+  let output = root.appendingPathComponent("output", isDirectory: true)
+  let archive = root.appendingPathComponent("archive.zip")
+  let link = output.appendingPathComponent("link")
+
+  try FileManager.default.createDirectory(at: source, withIntermediateDirectories: true)
+  try "hello".write(
+    to: source.appendingPathComponent("file.txt"),
+    atomically: true,
+    encoding: .utf8
+  )
+  try FileManager.default.createSymbolicLink(
+    atPath: source.appendingPathComponent("link").path,
+    withDestinationPath: "file.txt"
+  )
+  try runZip(in: source, archive: archive, preservingSymlinks: true)
+
+  try await Zipy.extract(
+    archive,
+    to: output,
+    options: .fast,
+    conflict: .overwrite
+  )
+
+  let values = try link.resourceValues(forKeys: [.isSymbolicLinkKey])
+  #expect(values.isSymbolicLink == true)
+  #expect(try FileManager.default.destinationOfSymbolicLink(atPath: link.path) == "file.txt")
+}
+
+@Test
+func externalSymlinkIsRejected() async throws {
+  let root = try temporaryDirectory()
+  let source = root.appendingPathComponent("source", isDirectory: true)
+  let output = root.appendingPathComponent("output", isDirectory: true)
+  let archive = root.appendingPathComponent("archive.zip")
+
+  try FileManager.default.createDirectory(at: source, withIntermediateDirectories: true)
+  try FileManager.default.createSymbolicLink(
+    atPath: source.appendingPathComponent("link").path,
+    withDestinationPath: "/etc"
+  )
+  try runZip(in: source, archive: archive, preservingSymlinks: true)
+
+  var error: Zipy.Error?
+  do {
+    try await Zipy.extract(
+      archive,
+      to: output,
+      options: .fast,
+      conflict: .overwrite
+    )
+  } catch let zipError as Zipy.Error {
+    error = zipError
+  }
+
+  #expect(error == .fileOperationFailed)
+  #expect(!FileManager.default.fileExists(atPath: output.appendingPathComponent("link").path))
+}
+
 private func temporaryDirectory() throws -> URL {
   let url = FileManager.default.temporaryDirectory
     .appendingPathComponent("zipy-swift-tests", isDirectory: true)
@@ -76,11 +138,17 @@ private func temporaryDirectory() throws -> URL {
   return url
 }
 
-private func runZip(in directory: URL, archive: URL) throws {
+private func runZip(
+  in directory: URL,
+  archive: URL,
+  preservingSymlinks: Bool = false
+) throws {
   let process = Process()
   process.executableURL = URL(fileURLWithPath: "/usr/bin/zip")
   process.currentDirectoryURL = directory
-  process.arguments = ["-qr", archive.path, "."]
+  process.arguments = preservingSymlinks
+    ? ["-qry", archive.path, "."]
+    : ["-qr", archive.path, "."]
   try process.run()
   process.waitUntilExit()
 

@@ -71,9 +71,20 @@ public enum Zipy {
     }
   }
 
-  public enum Error: Swift.Error, CustomStringConvertible, Sendable {
+  public enum Error: Swift.Error, CustomStringConvertible, Sendable, Equatable {
     case openFailed(String)
     case invalidArgument(String)
+    case inflateFailed
+    case sizeMismatch
+    case crcFailed
+    case fileOperationFailed
+    case unsupportedFeature
+    case fileExists
+    case passwordRequiredOrIncorrect
+    case authenticationFailed
+    case noSpace
+    case cancelled
+    case incomplete
     case operationFailed(code: Int32, message: String)
 
     public var description: String {
@@ -82,8 +93,61 @@ public enum Zipy {
         return "cannot open zip archive: \(path)"
       case .invalidArgument(let message):
         return message
+      case .inflateFailed:
+        return message(for: -2)
+      case .sizeMismatch:
+        return message(for: -3)
+      case .crcFailed:
+        return message(for: -4)
+      case .fileOperationFailed:
+        return message(for: -5)
+      case .unsupportedFeature:
+        return message(for: -6)
+      case .fileExists:
+        return message(for: -7)
+      case .passwordRequiredOrIncorrect:
+        return message(for: -8)
+      case .authenticationFailed:
+        return message(for: -9)
+      case .noSpace:
+        return message(for: -10)
+      case .cancelled:
+        return message(for: -11)
+      case .incomplete:
+        return message(for: -12)
       case .operationFailed(let code, let message):
         return "\(message) (\(code))"
+      }
+    }
+
+    public var code: Int32? {
+      switch self {
+      case .openFailed, .invalidArgument:
+        return nil
+      case .inflateFailed:
+        return -2
+      case .sizeMismatch:
+        return -3
+      case .crcFailed:
+        return -4
+      case .fileOperationFailed:
+        return -5
+      case .unsupportedFeature:
+        return -6
+      case .fileExists:
+        return -7
+      case .passwordRequiredOrIncorrect:
+        return -8
+      case .authenticationFailed:
+        return -9
+      case .noSpace:
+        return -10
+      case .cancelled:
+        return -11
+      case .incomplete:
+        return -12
+      case .operationFailed(let code, _):
+        return code
       }
     }
   }
@@ -379,8 +443,38 @@ public enum Zipy {
     }
 
     let message = zipy_strerror(result).map(String.init(cString:)) ?? "zipy error"
+    switch result {
+    case -2:
+      throw Error.inflateFailed
+    case -3:
+      throw Error.sizeMismatch
+    case -4:
+      throw Error.crcFailed
+    case -5:
+      throw Error.fileOperationFailed
+    case -6:
+      throw Error.unsupportedFeature
+    case -7:
+      throw Error.fileExists
+    case -8:
+      throw Error.passwordRequiredOrIncorrect
+    case -9:
+      throw Error.authenticationFailed
+    case -10:
+      throw Error.noSpace
+    case -11:
+      throw Error.cancelled
+    case -12:
+      throw Error.incomplete
+    default:
+      break
+    }
     throw Error.operationFailed(code: result, message: message)
   }
+}
+
+private func message(for code: Int32) -> String {
+  zipy_strerror(code).map(String.init(cString:)) ?? "zipy error"
 }
 
 public actor ZipyProgressActor {
