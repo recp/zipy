@@ -27,6 +27,7 @@ zipy archive.zip -d target --no-crc
 zipy archive.zip -d target --no-metadata
 zipy archive.zip -d target --atomic
 zipy archive.zip -d target --resume
+zipy archive.zip -d target --unsafe-symlinks
 zipy archive.zip -d target --no-progress
 ```
 
@@ -195,7 +196,9 @@ Mode and timestamp restoration is enabled by default. Set
 preserving file metadata.
 
 Symlink entries are restored on Unix when their targets remain inside the
-extraction root. Symlink targets that escape the extraction root are rejected.
+extraction root. Symlink targets that escape the extraction root are rejected
+by default. Use `ZIPY_EXTRACT_UNSAFE_SYMLINKS` or CLI `--unsafe-symlinks`
+only for trusted archives that intentionally use root-FS symlink targets.
 
 Set `ZIPY_EXTRACT_ATOMIC` to write regular files under
 `target/.zipy/parts/` and rename them into place only after successful
@@ -252,6 +255,9 @@ Progress is optional. When no `Progress`, actor, or callback is passed, the
 Swift wrapper does not install a progress callback.
 Known zipy results map to typed Swift errors such as `.incomplete`,
 `.cancelled`, `.unsupportedFeature`, and `.authenticationFailed`.
+Swift symlink policy defaults to `.contained`; pass `.unsafeRootFS` only for
+trusted archives that intentionally use symlink targets outside the extract
+root.
 
 ```swift
 let progress = Progress(totalUnitCount: 0)
@@ -261,6 +267,7 @@ try await Zipy.extract(
   archiveURL,
   to: targetURL,
   options: .fast,
+  symlinkPolicy: .contained,
   progress: progress,
   observer: observer
 ) { state in

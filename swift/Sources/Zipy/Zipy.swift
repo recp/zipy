@@ -18,6 +18,7 @@ public enum Zipy {
     public static let noMetadata = Self(rawValue: 1 << 1)
     public static let atomic = Self(rawValue: 1 << 2)
     public static let resume = Self(rawValue: 1 << 3)
+    fileprivate static let unsafeSymlinks = Self(rawValue: 1 << 4)
     public static let fast: Self = [.noCRC, .noMetadata]
   }
 
@@ -54,6 +55,20 @@ public enum Zipy {
         return zipy_save_location_t(rawValue: 1)
       case .trash:
         return zipy_save_location_t(rawValue: 2)
+      }
+    }
+  }
+
+  public enum SymlinkPolicy: Sendable {
+    case contained
+    case unsafeRootFS
+
+    fileprivate var flags: ExtractOptions {
+      switch self {
+      case .contained:
+        return []
+      case .unsafeRootFS:
+        return .unsafeSymlinks
       }
     }
   }
@@ -160,6 +175,7 @@ public enum Zipy {
     options: ExtractOptions = [],
     conflict: ConflictPolicy = .save,
     saveTo: SaveLocation = .target,
+    symlinkPolicy: SymlinkPolicy = .contained,
     password: String? = nil,
     jobs: Int = 0,
     progress: Progress? = nil,
@@ -178,6 +194,7 @@ public enum Zipy {
         options: options,
         conflict: conflict,
         saveTo: saveTo,
+        symlinkPolicy: symlinkPolicy,
         password: password,
         jobs: jobs,
         progress: sendableProgress.value,
@@ -193,6 +210,7 @@ public enum Zipy {
     options: ExtractOptions = [],
     conflict: ConflictPolicy = .save,
     saveTo: SaveLocation = .target,
+    symlinkPolicy: SymlinkPolicy = .contained,
     password: String? = nil,
     jobs: Int = 0,
     progress: Progress? = nil,
@@ -209,6 +227,7 @@ public enum Zipy {
         options: options,
         conflict: conflict,
         saveTo: saveTo,
+        symlinkPolicy: symlinkPolicy,
         password: password,
         jobs: jobs,
         progress: sendableProgress.value,
@@ -224,6 +243,7 @@ public enum Zipy {
     options: ExtractOptions = [],
     conflict: ConflictPolicy = .save,
     saveTo: SaveLocation = .target,
+    symlinkPolicy: SymlinkPolicy = .contained,
     password: String? = nil,
     jobs: Int = 0,
     progress: Progress? = nil,
@@ -236,6 +256,7 @@ public enum Zipy {
       options: options,
       conflict: conflict,
       saveTo: saveTo,
+      symlinkPolicy: symlinkPolicy,
       password: password,
       jobs: jobs,
       progress: progress,
@@ -250,6 +271,7 @@ public enum Zipy {
     options: ExtractOptions = [],
     conflict: ConflictPolicy = .save,
     saveTo: SaveLocation = .target,
+    symlinkPolicy: SymlinkPolicy = .contained,
     password: String? = nil,
     jobs: Int = 0,
     progress: Progress? = nil,
@@ -274,7 +296,7 @@ public enum Zipy {
         try withPasswordCString(password) { passwordC in
           var cOptions = zipy_extract_options_t()
           zipy_extract_options_init(&cOptions)
-          cOptions.flags = options.rawValue
+          cOptions.flags = options.union(symlinkPolicy.flags).rawValue
           cOptions.on_conflict = conflict.cValue
           cOptions.save_to = saveTo.cValue
           cOptions.password = passwordC
@@ -305,6 +327,7 @@ public enum Zipy {
     options: ExtractOptions = [],
     conflict: ConflictPolicy = .save,
     saveTo: SaveLocation = .target,
+    symlinkPolicy: SymlinkPolicy = .contained,
     password: String? = nil,
     jobs: Int = 0,
     progress: Progress? = nil,
@@ -323,6 +346,7 @@ public enum Zipy {
         options: options,
         conflict: conflict,
         saveTo: saveTo,
+        symlinkPolicy: symlinkPolicy,
         password: password,
         jobs: jobs,
         progress: sendableProgress.value,
@@ -338,6 +362,7 @@ public enum Zipy {
     options: ExtractOptions = [],
     conflict: ConflictPolicy = .save,
     saveTo: SaveLocation = .target,
+    symlinkPolicy: SymlinkPolicy = .contained,
     password: String? = nil,
     jobs: Int = 0,
     progress: Progress? = nil,
@@ -354,6 +379,7 @@ public enum Zipy {
         options: options,
         conflict: conflict,
         saveTo: saveTo,
+        symlinkPolicy: symlinkPolicy,
         password: password,
         jobs: jobs,
         progress: sendableProgress.value,
@@ -369,6 +395,7 @@ public enum Zipy {
     options: ExtractOptions = [],
     conflict: ConflictPolicy = .save,
     saveTo: SaveLocation = .target,
+    symlinkPolicy: SymlinkPolicy = .contained,
     password: String? = nil,
     jobs: Int = 0,
     progress: Progress? = nil,
@@ -381,6 +408,7 @@ public enum Zipy {
       options: options,
       conflict: conflict,
       saveTo: saveTo,
+      symlinkPolicy: symlinkPolicy,
       password: password,
       jobs: jobs,
       progress: progress,
@@ -395,6 +423,7 @@ public enum Zipy {
     options: ExtractOptions = [],
     conflict: ConflictPolicy = .save,
     saveTo: SaveLocation = .target,
+    symlinkPolicy: SymlinkPolicy = .contained,
     password: String? = nil,
     jobs: Int = 0,
     progress: Progress? = nil,
@@ -419,7 +448,7 @@ public enum Zipy {
         withPasswordCString(password) { passwordC in
           var cOptions = zipy_extract_options_t()
           zipy_extract_options_init(&cOptions)
-          cOptions.flags = options.rawValue
+          cOptions.flags = options.union(symlinkPolicy.flags).rawValue
           cOptions.on_conflict = conflict.cValue
           cOptions.save_to = saveTo.cValue
           cOptions.password = passwordC

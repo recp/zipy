@@ -3586,7 +3586,8 @@ create_symlink(zipy_archive_t * __restrict zipy,
                     const uint8_t *target,
                     size_t target_len,
                     const entry_info_t *info,
-                    int apply_metadata) {
+                    int apply_metadata,
+                    int unsafe_symlinks) {
 #if defined(_WIN32)
   (void)zipy;
   (void)destpath;
@@ -3595,11 +3596,13 @@ create_symlink(zipy_archive_t * __restrict zipy,
   (void)target_len;
   (void)info;
   (void)apply_metadata;
+  (void)unsafe_symlinks;
   return ZIPY_ZIP_EUNSUP;
 #else
   if (!target || target_len == 0 || memchr(target, '\0', target_len))
     return ZIPY_ZIP_EFILE;
-  if (!symlink_target_is_contained(zipy, destpath, rootdir, target, target_len))
+  if (!unsafe_symlinks
+      && !symlink_target_is_contained(zipy, destpath, rootdir, target, target_len))
     return ZIPY_ZIP_EFILE;
   if (parent_has_symlink(destpath))
     return ZIPY_ZIP_EFILE;
@@ -4231,7 +4234,8 @@ default_extract_options(const zipy_extract_options_t *options) {
   out.flags &= ZIPY_EXTRACT_NO_CRC
              | ZIPY_EXTRACT_NO_METADATA
              | ZIPY_EXTRACT_ATOMIC
-             | ZIPY_EXTRACT_RESUME;
+             | ZIPY_EXTRACT_RESUME
+             | ZIPY_EXTRACT_UNSAFE_SYMLINKS;
   if (out.flags & ZIPY_EXTRACT_RESUME)
     out.on_conflict = ZIPY_CONFLICT_OVERWRITE;
 
@@ -5652,7 +5656,8 @@ extract_entry(zipy_archive_t * __restrict zipy,
                                 target,
                                 target_len,
                                 info,
-                                apply_metadata);
+                                apply_metadata,
+                                (extract_flags & ZIPY_EXTRACT_UNSAFE_SYMLINKS) != 0);
     free(target);
     return ret;
   }

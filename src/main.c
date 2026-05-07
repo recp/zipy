@@ -91,6 +91,7 @@ print_usage(void) {
   printf("  --no-metadata  Skip mode and timestamp restoration\n");
   printf("  --atomic   Write files via .part then rename on success\n");
   printf("  --resume   Keep .part files and resume stored entries\n");
+  printf("  --unsafe-symlinks  Allow symlinks to point outside extract root\n");
   printf("  --no-progress  Disable interactive progress output\n");
   printf("  --fast      Alias for --no-crc --no-metadata --no-progress\n");
   printf("  --config [key=value ...]  Show or update ~/.zipy/config\n");
@@ -1940,6 +1941,8 @@ main(int argc, char *argv[]) {
       config.options.flags |= ZIPY_EXTRACT_ATOMIC;
     } else if (strcmp(argv[i], "--resume") == 0) {
       config.options.flags |= ZIPY_EXTRACT_RESUME;
+    } else if (strcmp(argv[i], "--unsafe-symlinks") == 0) {
+      config.options.flags |= ZIPY_EXTRACT_UNSAFE_SYMLINKS;
     } else if (strcmp(argv[i], "--no-progress") == 0) {
       noProgress = 1;
     } else if (strcmp(argv[i], "--fast") == 0) {

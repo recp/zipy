@@ -130,6 +130,34 @@ func externalSymlinkIsRejected() async throws {
   #expect(!FileManager.default.fileExists(atPath: output.appendingPathComponent("link").path))
 }
 
+@Test
+func unsafeRootFSSymlinkExtracts() async throws {
+  let root = try temporaryDirectory()
+  let source = root.appendingPathComponent("source", isDirectory: true)
+  let output = root.appendingPathComponent("output", isDirectory: true)
+  let archive = root.appendingPathComponent("archive.zip")
+  let link = output.appendingPathComponent("link")
+
+  try FileManager.default.createDirectory(at: source, withIntermediateDirectories: true)
+  try FileManager.default.createSymbolicLink(
+    atPath: source.appendingPathComponent("link").path,
+    withDestinationPath: "/etc"
+  )
+  try runZip(in: source, archive: archive, preservingSymlinks: true)
+
+  try await Zipy.extract(
+    archive,
+    to: output,
+    options: .fast,
+    conflict: .overwrite,
+    symlinkPolicy: .unsafeRootFS
+  )
+
+  let values = try link.resourceValues(forKeys: [.isSymbolicLinkKey])
+  #expect(values.isSymbolicLink == true)
+  #expect(try FileManager.default.destinationOfSymbolicLink(atPath: link.path) == "/etc")
+}
+
 private func temporaryDirectory() throws -> URL {
   let url = FileManager.default.temporaryDirectory
     .appendingPathComponent("zipy-swift-tests", isDirectory: true)
