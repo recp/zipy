@@ -8,41 +8,41 @@
  *      http://www.apache.org/licenses/LICENSE-2.0
  */
 
-#ifndef zipy_posix_thread_h
-#define zipy_posix_thread_h
+#ifndef POSIX_THREAD_H
+#define POSIX_THREAD_H
 
 #include <pthread.h>
 #include <stddef.h>
 
-typedef struct zipy_thread_t {
+typedef struct thread_handle_t {
   pthread_t id;
   void (*func)(void *);
   void *arg;
-} zipy_thread_t;
+} thread_handle_t;
 
-typedef struct zipy_mutex_t {
+typedef struct mutex_handle_t {
   pthread_mutex_t mutex;
-} zipy_mutex_t;
+} mutex_handle_t;
 
 int
-zipy_thread_start(zipy_thread_t *thread, void (*func)(void *), void *arg);
+thread_start(thread_handle_t *thread, void (*func)(void *), void *arg);
 
 void
-zipy_thread_join(zipy_thread_t *thread);
+thread_join(thread_handle_t *thread);
 
 void
-zipy_mutex_init(zipy_mutex_t *mutex);
+mutex_init(mutex_handle_t *mutex);
 
 void
-zipy_mutex_destroy(zipy_mutex_t *mutex);
+mutex_destroy(mutex_handle_t *mutex);
 
 void
-zipy_lock(zipy_mutex_t *mutex);
+mutex_lock(mutex_handle_t *mutex);
 
 void
-zipy_unlock(zipy_mutex_t *mutex);
+mutex_unlock(mutex_handle_t *mutex);
 
 size_t
-zipy_cpu_count(void);
+cpu_count(void);
 
-#endif /* zipy_posix_thread_h */
+#endif /* POSIX_THREAD_H */

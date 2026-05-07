@@ -11,19 +11,19 @@
 #include "thread.h"
 
 static DWORD WINAPI
-zipy_thread_entry(void *arg) {
-  zipy_thread_t *thread = arg;
+thread_entry(void *arg) {
+  thread_handle_t *thread = arg;
 
   thread->func(thread->arg);
   return 0;
 }
 
 int
-zipy_thread_start(zipy_thread_t *thread, void (*func)(void *), void *arg) {
+thread_start(thread_handle_t *thread, void (*func)(void *), void *arg) {
   thread->func = func;
   thread->arg = arg;
 
-  thread->id = CreateThread(NULL, 0, zipy_thread_entry, thread, 0, NULL);
+  thread->id = CreateThread(NULL, 0, thread_entry, thread, 0, NULL);
   if (!thread->id)
     return -1;
 
@@ -31,33 +31,33 @@ zipy_thread_start(zipy_thread_t *thread, void (*func)(void *), void *arg) {
 }
 
 void
-zipy_thread_join(zipy_thread_t *thread) {
+thread_join(thread_handle_t *thread) {
   WaitForSingleObject(thread->id, INFINITE);
   CloseHandle(thread->id);
 }
 
 void
-zipy_mutex_init(zipy_mutex_t *mutex) {
+mutex_init(mutex_handle_t *mutex) {
   InitializeCriticalSection(&mutex->mutex);
 }
 
 void
-zipy_mutex_destroy(zipy_mutex_t *mutex) {
+mutex_destroy(mutex_handle_t *mutex) {
   DeleteCriticalSection(&mutex->mutex);
 }
 
 void
-zipy_lock(zipy_mutex_t *mutex) {
+mutex_lock(mutex_handle_t *mutex) {
   EnterCriticalSection(&mutex->mutex);
 }
 
 void
-zipy_unlock(zipy_mutex_t *mutex) {
+mutex_unlock(mutex_handle_t *mutex) {
   LeaveCriticalSection(&mutex->mutex);
 }
 
 size_t
-zipy_cpu_count(void) {
+cpu_count(void) {
   SYSTEM_INFO info;
 
   GetSystemInfo(&info);

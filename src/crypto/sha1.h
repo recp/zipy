@@ -8,8 +8,8 @@
  *      http://www.apache.org/licenses/LICENSE-2.0
  */
 
-#ifndef zipy_crypto_sha1_h
-#define zipy_crypto_sha1_h
+#ifndef CRYPTO_SHA1_H
+#define CRYPTO_SHA1_H
 
 #include <stddef.h>
 #include <stdint.h>
@@ -56,4 +56,4 @@ pbkdf2_hmac_sha1(const uint8_t *password,
                  uint8_t *out,
                  size_t out_len);
 
-#endif /* zipy_crypto_sha1_h */
+#endif /* CRYPTO_SHA1_H */

@@ -13,51 +13,51 @@
 #include <unistd.h>
 
 static void *
-zipy_thread_entry(void *arg) {
-  zipy_thread_t *thread = arg;
+thread_entry(void *arg) {
+  thread_handle_t *thread = arg;
 
   thread->func(thread->arg);
   return NULL;
 }
 
 int
-zipy_thread_start(zipy_thread_t *thread, void (*func)(void *), void *arg) {
+thread_start(thread_handle_t *thread, void (*func)(void *), void *arg) {
   thread->func = func;
   thread->arg = arg;
 
-  if (pthread_create(&thread->id, NULL, zipy_thread_entry, thread) != 0)
+  if (pthread_create(&thread->id, NULL, thread_entry, thread) != 0)
     return -1;
 
   return 0;
 }
 
 void
-zipy_thread_join(zipy_thread_t *thread) {
+thread_join(thread_handle_t *thread) {
   pthread_join(thread->id, NULL);
 }
 
 void
-zipy_mutex_init(zipy_mutex_t *mutex) {
+mutex_init(mutex_handle_t *mutex) {
   pthread_mutex_init(&mutex->mutex, NULL);
 }
 
 void
-zipy_mutex_destroy(zipy_mutex_t *mutex) {
+mutex_destroy(mutex_handle_t *mutex) {
   pthread_mutex_destroy(&mutex->mutex);
 }
 
 void
-zipy_lock(zipy_mutex_t *mutex) {
+mutex_lock(mutex_handle_t *mutex) {
   pthread_mutex_lock(&mutex->mutex);
 }
 
 void
-zipy_unlock(zipy_mutex_t *mutex) {
+mutex_unlock(mutex_handle_t *mutex) {
   pthread_mutex_unlock(&mutex->mutex);
 }
 
 size_t
-zipy_cpu_count(void) {
+cpu_count(void) {
   long n;
 
   n = sysconf(_SC_NPROCESSORS_ONLN);

@@ -8,8 +8,8 @@
  *      http://www.apache.org/licenses/LICENSE-2.0
  */
 
-#ifndef zipy_crypto_dec_h
-#define zipy_crypto_dec_h
+#ifndef CRYPTO_DEC_H
+#define CRYPTO_DEC_H
 
 #include "aes_wg.h"
 
@@ -74,4 +74,4 @@ dec_decrypt(dec_t *dec, uint8_t *buf, size_t len);
 int
 dec_finish(dec_t *dec, FILE *fp);
 
-#endif /* zipy_crypto_dec_h */
+#endif /* CRYPTO_DEC_H */

@@ -8,8 +8,8 @@
  *      http://www.apache.org/licenses/LICENSE-2.0
  */
 
-#ifndef zipy_crypto_aes_wg_h
-#define zipy_crypto_aes_wg_h
+#ifndef CRYPTO_AES_WG_H
+#define CRYPTO_AES_WG_H
 
 #include "sha1.h"
 
@@ -55,4 +55,4 @@ aes_wg_decrypt(aes_wg_t *ctx, uint8_t *buf, size_t len);
 int
 aes_wg_auth(aes_wg_t *ctx, const uint8_t auth[AES_WG_AUTH_SIZE]);
 
-#endif /* zipy_crypto_aes_wg_h */
+#endif /* CRYPTO_AES_WG_H */

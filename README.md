@@ -118,14 +118,14 @@ zipy archive.zip -d target --save-to trash
 #include <zipy/zip.h>
 
 zipy_archive_t *zip = zipy_open("archive.zip");
-zipy_extract_all(zip, "target");
+zipy_extract_all(zip, "target", NULL);
 zipy_close(zip);
 ```
 
 Use `zipy_file_count(zip)` and `zipy_uncompressed_size(zip)` for progress or
 space checks. `zipy_count(zip)` returns all entries, including directories.
 
-Use `zipy_extract_all_options()` or `zipy_extract_to()` to set conflict
+Use `zipy_extract_all()` or `zipy_extract_to()` to set conflict
 behavior explicitly:
 
 ```c
@@ -139,7 +139,7 @@ zipy_extract_options_t options = {
 };
 
 zipy_archive_t *zip = zipy_open("archive.zip");
-zipy_extract_all_options(zip, "target", &options);
+zipy_extract_all(zip, "target", &options);
 zipy_close(zip);
 ```
 

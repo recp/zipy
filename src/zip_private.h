@@ -8,21 +8,21 @@
  *      http://www.apache.org/licenses/LICENSE-2.0
  */
 
-#ifndef zipy_private_h
-#define zipy_private_h
+#ifndef ZIP_PRIVATE_H
+#define ZIP_PRIVATE_H
 
 #include <zipy/zip.h>
 
 zipy_archive_t *
-zipy_clone(zipy_archive_t * __restrict zipy);
+archive_clone(zipy_archive_t * __restrict zipy);
 
 int
-zipy_has_encrypted(const zipy_archive_t * __restrict zipy);
+archive_has_encrypted(const zipy_archive_t * __restrict zipy);
 
 int
-zipy_has_symlink(const zipy_archive_t * __restrict zipy);
+archive_has_symlink(const zipy_archive_t * __restrict zipy);
 
 int
-zipy_has_unsupported_method(const zipy_archive_t * __restrict zipy);
+archive_has_unsupported_method(const zipy_archive_t * __restrict zipy);
 
-#endif /* zipy_private_h */
+#endif /* ZIP_PRIVATE_H */
