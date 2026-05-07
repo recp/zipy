@@ -75,7 +75,7 @@ print_usage(void) {
   printf("Usage: zipy <zipfile> [-d extractdir]\n");
   printf("Options:\n");
   printf("  -d <dir>    Extract files into <dir>\n");
-  printf("  -j <jobs>   Extract with jobs workers (default: cpu count)\n");
+  printf("  -j <jobs>   Extract with N workers, auto, or cpu (default: cpu)\n");
   printf("  --on-conflict <ask|save|overwrite|skip|fail>\n");
   printf("  --save-to <target|home|trash>\n");
   printf("  -p, --password <password>\n");
@@ -288,6 +288,10 @@ parse_jobs(const char *text, size_t *jobs) {
     *jobs = 0;
     return 1;
   }
+  if (strcmp(text, "cpu") == 0) {
+    *jobs = SIZE_MAX;
+    return 1;
+  }
 
   errno = 0;
   value = strtoull(text, &end, 10);
@@ -320,6 +324,8 @@ clamp_jobs(size_t jobs, size_t count) {
     return 1;
   if (jobs == 0)
     jobs = default_jobs(count);
+  else if (jobs == SIZE_MAX)
+    jobs = zipy_cpu_count();
   if (jobs < 1)
     jobs = 1;
   if (jobs > count)

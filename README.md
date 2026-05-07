@@ -19,10 +19,14 @@ The build creates `libzipy.a` and the `zipy` command line tool.
 ```sh
 zipy archive.zip -d target
 zipy archive.zip -d target -j auto
+zipy archive.zip -d target -j cpu
 zipy archive.zip -d target -j 1
 zipy archive.zip -d target -p password
 zipy archive.zip -d target --no-crc
 ```
+
+`-j auto` and `-j cpu` use one worker per CPU core, capped by the number of
+entries. Use an explicit number such as `-j 4` to limit worker fan-out.
 
 By default, the CLI asks what to do when an extracted entry would replace an
 existing file. Non-interactive runs fall back to saving existing files before
