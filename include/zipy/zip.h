@@ -116,6 +116,11 @@ zipy_extract_all(zipy_archive_t * __restrict zipy,
                  const char * __restrict destdir,
                  const zipy_extract_options_t * __restrict options);
 
+ZIPY_EXPORT int
+zipy_extract_stream(const char * __restrict path,
+                    const char * __restrict destdir,
+                    const zipy_extract_options_t * __restrict options);
+
 ZIPY_EXPORT void
 zipy_close(zipy_archive_t * __restrict zipy);
 

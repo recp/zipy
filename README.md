@@ -148,6 +148,12 @@ zipy_close(zip);
 `ask` is CLI-only. Apps should show their own UI and pass `save`,
 `overwrite`, `skip`, or `fail`.
 
+Use `zipy_extract_stream(path, target, options)` to walk local file headers
+instead of opening the central directory first. This is the first streaming
+primitive: it works for local headers that already carry compressed and
+uncompressed sizes. Data-descriptor entries, which are common in true
+download-while-writing ZIP streams, still need the next streaming step.
+
 CRC32 validation is enabled by default. Set `ZIPY_EXTRACT_NO_CRC` only when
 lower latency matters more than detecting corrupted archive data.
 
@@ -178,8 +184,7 @@ also disables progress output. It does not change conflict handling.
 Set `jobs = 0` for adaptive worker selection, or pass an explicit worker count.
 Deflated entries use mmap input when available; the non-mmap path feeds defl
 incrementally with `infl_stream()` instead of buffering the full compressed
-member. True download-while-extract support still needs a sequential local
-header reader because classic ZIP central directory metadata lives at EOF.
+member.
 
 ## Status
 
@@ -192,5 +197,6 @@ header reader because classic ZIP central directory metadata lives at EOF.
 - [x] WinZip AES decryption
 - [x] symlinks, attributes, and timestamps
 - [x] chunked non-mmap deflate input
-- [ ] sequential streaming extraction before central directory
+- [x] sequential local-header extraction for known-size entries
+- [ ] data-descriptor streaming before central directory
 - [ ] Deflate64 method 9 extraction

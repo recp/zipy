@@ -52,6 +52,7 @@
 #define ZIP_SIGN_LOCAL_FILE    0x04034B50u
 #define ZIP_SIGN_CENTRAL_DIR   0x02014B50u
 #define ZIP_SIGN_END_CENTRAL   0x06054B50u
+#define ZIP_SIGN_DATA_DESC     0x08074B50u
 #define ZIP_SIGN_ZIP64_END     0x06064B50u
 #define ZIP_SIGN_ZIP64_LOCATOR 0x07064B50u
 
@@ -2352,6 +2353,7 @@ archive_cleanup(zipy_archive_t *zipy) {
     return;
 
   free_files(zipy);
+  free_name_chunks(zipy);
   free(zipy->path);
   zipy->path = NULL;
   path_buf_free(&zipy->path_buf);
@@ -4925,6 +4927,235 @@ zipy_extract_all(zipy_archive_t * __restrict zipy,
                            ret);
 
   free(skip);
+  return ret;
+}
+
+ZIPY_EXPORT
+int
+zipy_extract_stream(const char * __restrict path,
+                    const char * __restrict destdir,
+                    const zipy_extract_options_t * __restrict options) {
+  zipy_archive_t zipy;
+  zipy_extract_options_t opts;
+  char extra_stack[512];
+  char *save_dir = NULL;
+  uint8_t *extra_buf = NULL;
+  size_t extra_cap = 0;
+  const char *state_path = NULL;
+  size_t prefixLen;
+  int ret = ZIPY_ZIP_OK;
+
+  memset(&zipy, 0, sizeof(zipy));
+  if (!path || !destdir)
+    return ZIPY_ZIP_ERR;
+
+  zipy.fp = fopen(path, "rb");
+  if (!zipy.fp)
+    return ZIPY_ZIP_EFILE;
+  zipy.path = dup_text(path);
+  if (!zipy.path) {
+    ret = ZIPY_ZIP_ERR;
+    goto done;
+  }
+  if (get_file_size(zipy.fp, &zipy.file_size) != 0
+      || seek_set(zipy.fp, 0) != 0) {
+    ret = ZIPY_ZIP_EFILE;
+    goto done;
+  }
+
+  opts = default_extract_options(options);
+  if (opts.flags & ZIPY_EXTRACT_RESUME)
+    state_path = resume_state_path(&zipy, destdir);
+  if (!path_buf_set_archive_dir(&zipy, destdir, &prefixLen)) {
+    ret = ZIPY_ZIP_ERR;
+    goto done;
+  }
+
+  for (;;) {
+    uint8_t hdr[ZIP_LOCAL_FIXED];
+    entry_info_t info;
+    char *name;
+    const uint8_t *extra = NULL;
+    const char *destpath;
+    uint64_t offset, dataOffset;
+    uint32_t sig, comp32, uncomp32;
+    uint16_t flags, method, nameLen, extraLen;
+    size_t parentLen;
+    int conflictRet;
+
+    if (tell_pos(zipy.fp, &offset) != 0) {
+      ret = ZIPY_ZIP_EFILE;
+      break;
+    }
+
+    if (fread(hdr, 1, sizeof(hdr), zipy.fp) != sizeof(hdr)) {
+      ret = feof(zipy.fp) ? ZIPY_ZIP_OK : ZIPY_ZIP_EFILE;
+      break;
+    }
+
+    sig = le32(hdr);
+    if (sig == ZIP_SIGN_CENTRAL_DIR
+        || sig == ZIP_SIGN_END_CENTRAL
+        || sig == ZIP_SIGN_ZIP64_END
+        || sig == ZIP_SIGN_ZIP64_LOCATOR)
+      break;
+    if (sig != ZIP_SIGN_LOCAL_FILE) {
+      ret = ZIPY_ZIP_EFILE;
+      break;
+    }
+
+    flags = le16(hdr + 6);
+    method = le16(hdr + 8);
+    comp32 = le32(hdr + 18);
+    uncomp32 = le32(hdr + 22);
+    nameLen = le16(hdr + 26);
+    extraLen = le16(hdr + 28);
+    if (nameLen == 0 || (flags & (ZIP_FLAG_DATA_DESC | ZIP_FLAG_STRONG_ENC))) {
+      ret = ZIPY_ZIP_EUNSUP;
+      break;
+    }
+
+    memset(&info, 0, sizeof(info));
+    info.flags = flags;
+    info.local_flags = flags;
+    info.mod_time = le16(hdr + 10);
+    info.mod_date = le16(hdr + 12);
+    info.entry.crc32 = le32(hdr + 14);
+    info.entry.compressed_size = comp32;
+    info.entry.uncompressed_size = uncomp32;
+    info.entry.method = method;
+    info.zip_method = method;
+    info.local_header_offset = offset;
+
+    name = alloc_name(&zipy, (size_t)nameLen + 1u);
+    if (!name || !read_exact(zipy.fp, name, nameLen)) {
+      ret = name ? ZIPY_ZIP_EFILE : ZIPY_ZIP_ERR;
+      break;
+    }
+    name[nameLen] = '\0';
+    info.entry.name = name;
+    info.entry.name_len = nameLen;
+    if (!scan_member_name(name,
+                          nameLen,
+                          &info.safe_name,
+                          &info.name_has_backslash,
+                          &info.name_parent_len)) {
+      ret = ZIPY_ZIP_EFILE;
+      break;
+    }
+    if (has_root_zipy_segment(name, nameLen))
+      zipy.has_root_zipy = 1;
+
+    if (extraLen > 0) {
+      if (extraLen <= sizeof(extra_stack)) {
+        extra = (const uint8_t *)extra_stack;
+      } else {
+        if (extraLen > extra_cap) {
+          uint8_t *new_extra = realloc(extra_buf, extraLen);
+          if (!new_extra) {
+            ret = ZIPY_ZIP_ERR;
+            break;
+          }
+          extra_buf = new_extra;
+          extra_cap = extraLen;
+        }
+        extra = extra_buf;
+      }
+      if (!read_exact(zipy.fp, (void *)extra, extraLen)) {
+        ret = ZIPY_ZIP_EFILE;
+        break;
+      }
+      if (!parse_zip64_extra(&info, extra, extraLen, comp32, uncomp32, 0, 0)
+          || !parse_aes_extra(&info, extra, extraLen)
+          || !parse_ext_time_extra(&info, extra, extraLen)) {
+        ret = ZIPY_ZIP_EUNSUP;
+        break;
+      }
+    } else if (comp32 == ZIP64_MAGIC_UINT32 || uncomp32 == ZIP64_MAGIC_UINT32) {
+      ret = ZIPY_ZIP_EUNSUP;
+      break;
+    }
+
+    if (info.zip_method == ZIP_METHOD_AES) {
+      if (!(flags & ZIP_FLAG_ENCRYPTED) || info.aes_strength == 0) {
+        ret = ZIPY_ZIP_EUNSUP;
+        break;
+      }
+    } else if (info.aes_strength != 0) {
+      ret = ZIPY_ZIP_EUNSUP;
+      break;
+    }
+
+    info.entry.is_directory = is_dir_name_len(info.entry.name,
+                                              info.entry.name_len);
+    info.entry.encrypted = (flags & ZIP_FLAG_ENCRYPTED) != 0;
+    info.mtime = dos_time(info.mod_date, info.mod_time);
+    info.has_mtime = info.mtime != (time_t)0;
+    info.data_offset = offset + ZIP_LOCAL_FIXED + (uint64_t)nameLen + extraLen;
+    info.has_data_offset = 1;
+    dataOffset = info.data_offset;
+    if (dataOffset > zipy.file_size
+        || info.entry.compressed_size > zipy.file_size - dataOffset) {
+      ret = ZIPY_ZIP_ESIZE;
+      break;
+    }
+    if (!info.entry.is_directory
+        && info.entry.method != ZIPY_ZIP_STORE
+        && info.entry.method != ZIPY_ZIP_DEFLATE) {
+      ret = ZIPY_ZIP_EUNSUP;
+      break;
+    }
+
+    destpath = path_buf_append_name(&zipy.path_buf,
+                                    prefixLen,
+                                    info.entry.name,
+                                    info.entry.name_len,
+                                    info.name_has_backslash);
+    if (!destpath) {
+      ret = ZIPY_ZIP_ERR;
+      break;
+    }
+
+    conflictRet = prepare_entry_conflict(destdir,
+                                         &info.entry,
+                                         destpath,
+                                         &opts,
+                                         &save_dir);
+    if (conflictRet == ZIPY_ZIP_SKIPPED) {
+      if (seek_set(zipy.fp, dataOffset + info.entry.compressed_size) != 0) {
+        ret = ZIPY_ZIP_EFILE;
+        break;
+      }
+      continue;
+    }
+    if (conflictRet < ZIPY_ZIP_OK) {
+      ret = conflictRet;
+      break;
+    }
+
+    parentLen = extract_parent_len(&info, prefixLen);
+    ret = extract_entry(&zipy,
+                        &info,
+                        destpath,
+                        parentLen,
+                        opts.flags | EXTRACT_DELAY_DIR_METADATA,
+                        opts.password,
+                        state_path,
+                        destdir);
+    if (ret < ZIPY_ZIP_OK)
+      break;
+    if (info.entry.is_directory
+        && info.entry.compressed_size > 0
+        && skip_bytes(zipy.fp, info.entry.compressed_size) != 0) {
+      ret = ZIPY_ZIP_EFILE;
+      break;
+    }
+  }
+
+done:
+  free(extra_buf);
+  free(save_dir);
+  archive_cleanup(&zipy);
   return ret;
 }
 
