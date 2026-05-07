@@ -117,6 +117,7 @@ zipy archive.zip -d target --save-to trash
 ## Library
 
 ```c
+#include <stdio.h>
 #include <zipy/zip.h>
 
 zipy_archive_t *zip = zipy_open("archive.zip");
@@ -143,12 +144,15 @@ zipy_extract_options_t options = {
 };
 
 zipy_archive_t *zip = zipy_open("archive.zip");
-zipy_extract_all(zip, "target", &options);
+int ret = zipy_extract_all(zip, "target", &options);
+if (ret < ZIPY_ZIP_OK)
+  fprintf(stderr, "%s\n", zipy_strerror(ret));
 zipy_close(zip);
 ```
 
 `ask` is CLI-only. Apps should show their own UI and pass `save`,
 `overwrite`, `skip`, or `fail`.
+Use `zipy_strerror(result)` for a static, allocation-free result string.
 
 Set `progress` to receive cumulative extracted-byte updates. Stored paths and
 streamed or mapped Deflate paths report chunk-level progress when a callback is

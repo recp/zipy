@@ -6310,6 +6310,29 @@ done:
 }
 
 ZIPY_EXPORT
+const char *
+zipy_strerror(int result) {
+  switch (result) {
+    case ZIPY_ZIP_OK:          return "ok";
+    case ZIPY_ZIP_SAVED:       return "saved existing file";
+    case ZIPY_ZIP_SKIPPED:     return "skipped existing file";
+    case ZIPY_ZIP_ERR:         return "zipy error";
+    case ZIPY_ZIP_EINFLATE:    return "deflate decode failed";
+    case ZIPY_ZIP_ESIZE:       return "zip size mismatch";
+    case ZIPY_ZIP_ECRC:        return "crc check failed";
+    case ZIPY_ZIP_EFILE:       return "file operation failed";
+    case ZIPY_ZIP_EUNSUP:      return "unsupported zip feature";
+    case ZIPY_ZIP_EEXIST:      return "target already exists";
+    case ZIPY_ZIP_EPASS:       return "missing or incorrect password";
+    case ZIPY_ZIP_EAUTH:       return "authentication failed";
+    case ZIPY_ZIP_ENOSPC:      return "no space left";
+    case ZIPY_ZIP_ECANCEL:     return "extraction cancelled";
+    case ZIPY_ZIP_EINCOMPLETE: return "incomplete zip stream";
+    default:                   return "unknown zipy result";
+  }
+}
+
+ZIPY_EXPORT
 void
 zipy_close(zipy_archive_t * __restrict zipy) {
   if (!zipy)

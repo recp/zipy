@@ -131,6 +131,9 @@ zipy_extract_stream(const char * __restrict path,
                     const char * __restrict destdir,
                     const zipy_extract_options_t * __restrict options);
 
+ZIPY_EXPORT const char *
+zipy_strerror(int result);
+
 ZIPY_EXPORT void
 zipy_close(zipy_archive_t * __restrict zipy);
 
