@@ -1082,13 +1082,12 @@ available_space_for_path(const char *path, uint64_t *available, char **checkedPa
 }
 
 static int
-preflight_space(zipy_archive_t *zip, const char *extractdir) {
+preflight_space(zipy_archive_t *zip, const char *extractdir, int emptyOrMissing) {
   uint64_t needed, available;
   char *checkedPath = NULL;
   char needText[32], availableText[32];
-  int emptyOrMissing = 0;
 
-  if (!target_is_empty_or_missing(extractdir, &emptyOrMissing) || !emptyOrMissing)
+  if (!emptyOrMissing)
     return 1;
 
   needed = zipy_uncompressed_size(zip);
@@ -1369,7 +1368,8 @@ prepare_ask_plan(zipy_archive_t *zip,
                  const char *extractdir,
                  zipy_config_t *config,
                  zipy_conflict_policy_t **policiesOut,
-                 int *needsSaveDir) {
+                 int *needsSaveDir,
+                 int *emptyOrMissingOut) {
   zipy_conflict_policy_t *policies = NULL;
   zipy_cli_conflict_policy_t allPolicy = ZIPY_CLI_CONFLICT_ASK;
   size_t count, i;
@@ -1378,6 +1378,7 @@ prepare_ask_plan(zipy_archive_t *zip,
 
   *policiesOut = NULL;
   *needsSaveDir = 0;
+  *emptyOrMissingOut = 0;
 
   config->options.on_conflict = cli_policy_to_extract(config->on_conflict);
   if (config->options.on_conflict == ZIPY_CONFLICT_OVERWRITE)
@@ -1385,6 +1386,7 @@ prepare_ask_plan(zipy_archive_t *zip,
 
   if (target_is_empty_or_missing(extractdir, &fastNoConflict) && fastNoConflict) {
     config->options.on_conflict = ZIPY_CONFLICT_OVERWRITE;
+    *emptyOrMissingOut = 1;
     return 1;
   }
 
@@ -1705,6 +1707,7 @@ main(int argc, char *argv[]) {
   size_t jobs = 0;
   size_t autoJobs = 1;
   size_t count = 0, files = 0, extracted = 0, saved = 0, skipped = 0;
+  int targetEmptyOrMissing = 0;
   uint64_t startMs, elapsedMs;
   char elapsed[32];
   zipy_progress_t progress;
@@ -1794,12 +1797,17 @@ main(int argc, char *argv[]) {
     config.options.jobs = 0;
   }
   progress_init(&progress, noProgress ? NULL : stderr, count);
-  if (!prepare_ask_plan(zip, extractdir, &config, &policies, &needsSaveDir)) {
+  if (!prepare_ask_plan(zip,
+                        extractdir,
+                        &config,
+                        &policies,
+                        &needsSaveDir,
+                        &targetEmptyOrMissing)) {
     zipy_close(zip);
     free(policies);
     return 1;
   }
-  if (!preflight_space(zip, extractdir)) {
+  if (!preflight_space(zip, extractdir, targetEmptyOrMissing)) {
     zipy_close(zip);
     free(policies);
     return 1;
