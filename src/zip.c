@@ -410,6 +410,16 @@ zipy_write_file(FILE * ZIPY_RESTRICT fp,
 }
 
 static int
+zipy_flush_output(FILE *fp) {
+#if defined(_WIN32)
+  return fflush(fp) == 0;
+#else
+  (void)fp;
+  return 1;
+#endif
+}
+
+static int
 zipy_seek_set(FILE * ZIPY_RESTRICT fp, uint64_t off) {
 #if defined(_WIN32)
   if (off > (uint64_t)INT64_MAX)
@@ -3183,7 +3193,7 @@ zipy_extract_entry(zipy_archive_t * ZIPY_RESTRICT zipy,
   }
 
   if (ret == ZIPY_ZIP_OK) {
-    if (fflush(outfp) != 0)
+    if (!zipy_flush_output(outfp))
       ret = ZIPY_ZIP_EFILE;
     else
       metadata_done = zipy_apply_open_file_metadata(outfp, info);
