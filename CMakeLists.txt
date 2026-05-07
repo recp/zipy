@@ -66,6 +66,7 @@ add_library(${PROJECT_NAME}
         src/crypto/sha1.c
         ${ZIPY_THREAD_SOURCE}
         deps/defl/src/infl/infl.c
+        deps/defl/src/infl/stream.c
         deps/defl/src/infl/mem.c
 )
 

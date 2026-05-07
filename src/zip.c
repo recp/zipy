@@ -65,6 +65,7 @@
 #define ZIP64_LOCATOR_FIXED   20u
 #define ZIP_MAX_EOCD_SEARCH   (ZIP_EOCD_FIXED + 65535u)
 #define ZIP_IO_CHUNK          (256u * 1024u)
+#define ZIP_INFLATE_STREAM_CHUNK (1024u * 1024u)
 #define ZIP_MAPPED_WRITE_CHUNK (16u * 1024u * 1024u)
 #define ZIP_FAST_WRITE_CHUNK  (128u * 1024u * 1024u)
 #define ZIP_OUTPUT_MMAP_MIN   (8u * 1024u * 1024u)
@@ -2721,6 +2722,122 @@ copy_store_mapped(out_file_t * __restrict out,
 }
 
 static int
+inflate_raw_streamed(zipy_archive_t * __restrict zipy,
+                     out_file_t * __restrict out,
+                     uint64_t compressed_size,
+                     uint64_t uncompressed_size,
+                     uint32_t expectedCrc,
+                     int check_crc,
+                     dec_t * __restrict dec) {
+  out_map_t outmap;
+  uint8_t *outbuf;
+  uint8_t *inbuf;
+  uint64_t remaining;
+  size_t outlen;
+  uint32_t crc;
+  int mapped_out = 0;
+  int zret = UNZ_UNFINISHED;
+  int ret;
+
+  if (!zipy || !zipy->fp)
+    return ZIPY_ZIP_EFILE;
+  if (compressed_size > UINT32_MAX || uncompressed_size > UINT32_MAX)
+    return ZIPY_ZIP_EUNSUP;
+
+  outlen = uncompressed_size > 0 ? (size_t)uncompressed_size : 1u;
+  memset(&outmap, 0, sizeof(outmap));
+  if (uncompressed_size >= ZIP_OUTPUT_MMAP_MIN
+      && map_output(out, uncompressed_size, &outmap)) {
+    outbuf = outmap.data;
+    mapped_out = 1;
+  } else {
+    if (!reserve_bytes(&zipy->inflate_out, &zipy->inflate_out_cap, outlen))
+      return ZIPY_ZIP_ERR;
+    outbuf = zipy->inflate_out;
+  }
+
+  if (!reserve_bytes(&zipy->inflate_in,
+                     &zipy->inflate_in_cap,
+                     ZIP_INFLATE_STREAM_CHUNK)) {
+    ret = ZIPY_ZIP_ERR;
+    goto done;
+  }
+  inbuf = zipy->inflate_in;
+
+  if (!zipy->inflate_stream) {
+    zipy->inflate_stream = infl_init(outbuf, (uint32_t)uncompressed_size, 0);
+    if (!zipy->inflate_stream) {
+      ret = ZIPY_ZIP_ERR;
+      goto done;
+    }
+  } else {
+    infl_reset(zipy->inflate_stream, outbuf, (uint32_t)uncompressed_size, 0);
+  }
+
+  remaining = compressed_size;
+  while (remaining > 0) {
+    size_t n = remaining > ZIP_INFLATE_STREAM_CHUNK
+             ? ZIP_INFLATE_STREAM_CHUNK
+             : (size_t)remaining;
+
+    if (fread(inbuf, 1, n, zipy->fp) != n) {
+      ret = ZIPY_ZIP_EFILE;
+      goto done;
+    }
+    if (dec)
+      dec_decrypt(dec, inbuf, n);
+
+    zret = infl_stream(zipy->inflate_stream, inbuf, (uint32_t)n);
+    if (zret < UNZ_OK) {
+      ret = ZIPY_ZIP_EINFLATE;
+      goto done;
+    }
+    if (zret == UNZ_OK && remaining != n) {
+      ret = ZIPY_ZIP_ESIZE;
+      goto done;
+    }
+
+    remaining -= n;
+  }
+
+  if (zret == UNZ_UNFINISHED)
+    zret = infl_stream(zipy->inflate_stream, NULL, 0);
+  if (zret != UNZ_OK) {
+    ret = ZIPY_ZIP_EINFLATE;
+    goto done;
+  }
+
+  ret = dec_finish(dec, zipy->fp);
+  if (ret != ZIPY_ZIP_OK)
+    goto done;
+
+  if (infl_output_pos(zipy->inflate_stream) != (uint32_t)uncompressed_size) {
+    ret = ZIPY_ZIP_ESIZE;
+    goto done;
+  }
+
+  if (check_crc) {
+    crc = crc32_update(0, outbuf, (size_t)uncompressed_size);
+    if (crc != expectedCrc) {
+      ret = ZIPY_ZIP_ECRC;
+      goto done;
+    }
+  }
+
+  if (!mapped_out && uncompressed_size > 0) {
+    ret = write_file(out, outbuf, (size_t)uncompressed_size);
+    if (ret != ZIPY_ZIP_OK)
+      goto done;
+  }
+
+  ret = ZIPY_ZIP_OK;
+
+done:
+  unmap_output(&outmap);
+  return ret;
+}
+
+static int
 inflate_raw(zipy_archive_t * __restrict zipy,
                  out_file_t * __restrict out,
                  const uint8_t * __restrict mapped,
@@ -2743,6 +2860,14 @@ inflate_raw(zipy_archive_t * __restrict zipy,
     return ZIPY_ZIP_EFILE;
   if (compressed_size > UINT32_MAX || uncompressed_size > UINT32_MAX)
     return ZIPY_ZIP_EUNSUP;
+  if (!mapped)
+    return inflate_raw_streamed(zipy,
+                                out,
+                                compressed_size,
+                                uncompressed_size,
+                                expectedCrc,
+                                check_crc,
+                                dec);
 
   inlen = compressed_size > 0 ? (size_t)compressed_size : 1;
   outlen = uncompressed_size > 0 ? (size_t)uncompressed_size : 1;

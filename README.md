@@ -176,6 +176,10 @@ For raw speed, use `ZIPY_EXTRACT_FAST` in the library. It combines
 also disables progress output. It does not change conflict handling.
 
 Set `jobs = 0` for adaptive worker selection, or pass an explicit worker count.
+Deflated entries use mmap input when available; the non-mmap path feeds defl
+incrementally with `infl_stream()` instead of buffering the full compressed
+member. True download-while-extract support still needs a sequential local
+header reader because classic ZIP central directory metadata lives at EOF.
 
 ## Status
 
@@ -187,4 +191,6 @@ Set `jobs = 0` for adaptive worker selection, or pass an explicit worker count.
 - [x] legacy ZipCrypto decryption
 - [x] WinZip AES decryption
 - [x] symlinks, attributes, and timestamps
+- [x] chunked non-mmap deflate input
+- [ ] sequential streaming extraction before central directory
 - [ ] Deflate64 method 9 extraction
