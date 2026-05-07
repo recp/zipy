@@ -253,6 +253,61 @@ zipy_alloc_name(zipy_archive_t *zipy, size_t len) {
 }
 
 static int
+zipy_prealloc_name_slab(zipy_archive_t *zipy,
+                        const uint8_t *central,
+                        size_t central_size,
+                        size_t count) {
+  zipy_name_chunk_t *chunk;
+  size_t i, pos = 0, total = 0;
+
+  if (!zipy || !central || count == 0)
+    return 1;
+
+  for (i = 0; i < count; i++) {
+    const uint8_t *hdr;
+    uint16_t nameLen, extraLen, commentLen;
+    size_t record_len;
+
+    if (pos > central_size || central_size - pos < ZIP_CENTRAL_FIXED)
+      return 0;
+
+    hdr = central + pos;
+    if (zipy_le32(hdr) != ZIP_SIGN_CENTRAL_DIR)
+      return 0;
+
+    nameLen = zipy_le16(hdr + 28);
+    extraLen = zipy_le16(hdr + 30);
+    commentLen = zipy_le16(hdr + 32);
+    if (nameLen == 0)
+      return 0;
+
+    record_len = ZIP_CENTRAL_FIXED
+               + (size_t)nameLen
+               + (size_t)extraLen
+               + (size_t)commentLen;
+    if (record_len > central_size - pos
+        || total > SIZE_MAX - (size_t)nameLen - 1u)
+      return 0;
+
+    total += (size_t)nameLen + 1u;
+    pos += record_len;
+  }
+
+  if (pos != central_size || total == 0)
+    return pos == central_size;
+
+  chunk = malloc(sizeof(*chunk) + total);
+  if (!chunk)
+    return 0;
+
+  chunk->next = zipy->name_chunks;
+  chunk->used = 0;
+  chunk->cap = total;
+  zipy->name_chunks = chunk;
+  return 1;
+}
+
+static int
 zipy_path_buf_reserve(zipy_path_buf_t *buf, size_t len) {
   char *data;
   size_t cap;
@@ -2577,6 +2632,9 @@ zipy_open(const char *path) {
   zipy->file_size = dir.file_size;
   zipy_map_archive(zipy);
   central = zipy_mapped_range(zipy, dir.central_dir_offset, dir.central_dir_size);
+  if (central
+      && !zipy_prealloc_name_slab(zipy, central, (size_t)dir.central_dir_size, count))
+    goto err;
 
   if (count > 0) {
     zipy->files = calloc(count, sizeof(*zipy->files));
