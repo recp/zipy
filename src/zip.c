@@ -1830,6 +1830,34 @@ zipy_free_files(zipy_archive_t *zipy) {
   zipy->files = NULL;
 }
 
+static void
+zipy_archive_cleanup(zipy_archive_t *zipy) {
+  if (!zipy)
+    return;
+
+  zipy_free_files(zipy);
+  free(zipy->path);
+  zipy->path = NULL;
+  zipy_path_buf_free(&zipy->path_buf);
+  zipy_path_buf_free(&zipy->parent_buf);
+  zipy_path_buf_free(&zipy->parent_cache);
+  free(zipy->copy_buf);
+  zipy->copy_buf = NULL;
+  free(zipy->inflate_in);
+  zipy->inflate_in = NULL;
+  free(zipy->inflate_out);
+  zipy->inflate_out = NULL;
+  if (zipy->inflate_stream) {
+    infl_destroy(zipy->inflate_stream);
+    zipy->inflate_stream = NULL;
+  }
+  zipy_unmap_archive(zipy);
+  if (zipy->fp) {
+    fclose(zipy->fp);
+    zipy->fp = NULL;
+  }
+}
+
 static size_t
 zipy_chunk_size(uint64_t remaining) {
   return remaining > ZIP_IO_CHUNK ? ZIP_IO_CHUNK : (size_t)remaining;
@@ -3061,38 +3089,25 @@ zipy_open(const char *path) {
 err:
   free(extra_buf);
   if (zipy) {
-    zipy_unmap_archive(zipy);
-    zipy_free_files(zipy);
-    free(zipy->path);
-    zipy_path_buf_free(&zipy->path_buf);
-    zipy_path_buf_free(&zipy->parent_buf);
-    zipy_path_buf_free(&zipy->parent_cache);
-    free(zipy->copy_buf);
-    free(zipy->inflate_in);
-    free(zipy->inflate_out);
-    if (zipy->inflate_stream)
-      infl_destroy(zipy->inflate_stream);
+    zipy_archive_cleanup(zipy);
     free(zipy);
+  } else {
+    fclose(fp);
   }
-  fclose(fp);
   return NULL;
 }
 
-zipy_archive_t *
-zipy_clone(zipy_archive_t *zipy) {
-  zipy_archive_t *clone;
+static int
+zipy_clone_init(zipy_archive_t *clone, zipy_archive_t *zipy) {
   int needs_fp;
 
-  if (!zipy)
-    return NULL;
+  if (!clone || !zipy)
+    return 0;
+  memset(clone, 0, sizeof(*clone));
 
   needs_fp = !zipy->map || zipy->has_encrypted || zipy->has_symlink;
   if (needs_fp && (!zipy->path || !zipy->fp))
-    return NULL;
-
-  clone = calloc(1, sizeof(*clone));
-  if (!clone)
-    return NULL;
+    return 0;
 
   if (needs_fp) {
     clone->fp = fopen(zipy->path, "rb");
@@ -3115,11 +3130,26 @@ zipy_clone(zipy_archive_t *zipy) {
     zipy_map_archive(clone);
   }
 
-  return clone;
+  return 1;
 
 err:
-  zipy_close(clone);
-  return NULL;
+  zipy_archive_cleanup(clone);
+  return 0;
+}
+
+zipy_archive_t *
+zipy_clone(zipy_archive_t *zipy) {
+  zipy_archive_t *clone;
+
+  clone = malloc(sizeof(*clone));
+  if (!clone)
+    return NULL;
+  if (!zipy_clone_init(clone, zipy)) {
+    free(clone);
+    return NULL;
+  }
+
+  return clone;
 }
 
 static int
@@ -3506,12 +3536,12 @@ zipy_extract_all_serial(zipy_archive_t *zipy,
 static void
 zipy_extract_all_worker(void *arg) {
   zipy_extract_all_context_t *ctx;
-  zipy_archive_t *zipy;
+  zipy_archive_t clone;
+  zipy_archive_t *zipy = &clone;
   size_t index, prefixLen;
 
   ctx = arg;
-  zipy = zipy_clone(ctx->source);
-  if (!zipy) {
+  if (!zipy_clone_init(zipy, ctx->source)) {
     zipy_lock(&ctx->lock);
     if (ctx->result == ZIPY_ZIP_OK)
       ctx->result = ZIPY_ZIP_EFILE;
@@ -3523,7 +3553,7 @@ zipy_extract_all_worker(void *arg) {
     if (ctx->result == ZIPY_ZIP_OK)
       ctx->result = ZIPY_ZIP_ERR;
     zipy_unlock(&ctx->lock);
-    zipy_close(zipy);
+    zipy_archive_cleanup(zipy);
     return;
   }
 
@@ -3584,7 +3614,7 @@ zipy_extract_all_worker(void *arg) {
     break;
   }
 
-  zipy_close(zipy);
+  zipy_archive_cleanup(zipy);
 }
 
 static int
@@ -3784,18 +3814,6 @@ zipy_close(zipy_archive_t *zipy) {
   if (!zipy)
     return;
 
-  zipy_free_files(zipy);
-  free(zipy->path);
-  zipy_path_buf_free(&zipy->path_buf);
-  zipy_path_buf_free(&zipy->parent_buf);
-  zipy_path_buf_free(&zipy->parent_cache);
-  free(zipy->copy_buf);
-  free(zipy->inflate_in);
-  free(zipy->inflate_out);
-  if (zipy->inflate_stream)
-    infl_destroy(zipy->inflate_stream);
-  zipy_unmap_archive(zipy);
-  if (zipy->fp)
-    fclose(zipy->fp);
+  zipy_archive_cleanup(zipy);
   free(zipy);
 }
