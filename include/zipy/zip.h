@@ -82,6 +82,9 @@ zipy_open(const char *path);
 ZIPY_EXPORT size_t
 zipy_count(const zipy_archive_t *zipy);
 
+ZIPY_EXPORT size_t
+zipy_file_count(const zipy_archive_t *zipy);
+
 ZIPY_EXPORT const zipy_entry_t *
 zipy_entry(const zipy_archive_t *zipy, size_t index);
 

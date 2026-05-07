@@ -1609,11 +1609,12 @@ main(int argc, char *argv[]) {
 
   /* Extract all files */
   count = zipy_count(zip);
-  autoJobs = adaptive_jobs(zip, count, &files);
+  files = zipy_file_count(zip);
   if (jobsSpecified && jobs != 0) {
     jobs = clamp_jobs(jobs, count);
     config.options.jobs = jobs;
   } else {
+    autoJobs = adaptive_jobs(zip, count, &files);
     jobs = autoJobs;
     config.options.jobs = 0;
   }

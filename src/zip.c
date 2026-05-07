@@ -143,6 +143,7 @@ struct zipy_archive_t {
   zipy_file_t *files;
   zipy_name_chunk_t *name_chunks;
   size_t   file_count;
+  size_t   extract_file_count;
   uint64_t file_size;
   const uint8_t *map;
   size_t   map_size;
@@ -3099,6 +3100,8 @@ zipy_open(const char *path) {
     info->local_header_offset = offset32;
     info->entry.is_directory = zipy_is_dir_name_len(info->entry.name,
                                                     info->entry.name_len);
+    if (!info->entry.is_directory)
+      zipy->extract_file_count++;
     info->entry.encrypted = (info->flags & ZIP_FLAG_ENCRYPTED) != 0;
     if (info->entry.encrypted)
       zipy->has_encrypted = 1;
@@ -3196,6 +3199,7 @@ zipy_clone_init(zipy_archive_t *clone, zipy_archive_t *zipy) {
 
   clone->files = zipy->files;
   clone->file_count = zipy->file_count;
+  clone->extract_file_count = zipy->extract_file_count;
   clone->file_size = zipy->file_size;
   clone->owns_files = 0;
   clone->has_encrypted = zipy->has_encrypted;
@@ -3470,6 +3474,12 @@ ZIPY_EXPORT
 size_t
 zipy_count(const zipy_archive_t *zipy) {
   return zipy ? zipy->file_count : 0;
+}
+
+ZIPY_EXPORT
+size_t
+zipy_file_count(const zipy_archive_t *zipy) {
+  return zipy ? zipy->extract_file_count : 0;
 }
 
 ZIPY_EXPORT
