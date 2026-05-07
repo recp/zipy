@@ -2408,9 +2408,6 @@ prepare_parent_dir_len(zipy_archive_t * __restrict zipy,
     return !zipy->parent_cache_has_symlink;
   }
 
-  if (parent_has_symlink_buf(path, &zipy->parent_buf))
-    return 0;
-
   if (!path_buf_reserve(&zipy->parent_buf, parent_len + 1u))
     return 0;
   memcpy(zipy->parent_buf.data, path, parent_len);
