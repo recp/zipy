@@ -371,6 +371,23 @@ adaptive_jobs(zipy_archive_t *zip, size_t count) {
   return jobs > 0 ? jobs : 1;
 }
 
+static size_t
+file_count(zipy_archive_t *zip, size_t count) {
+  size_t i, files = 0;
+
+  if (!zip)
+    return 0;
+
+  for (i = 0; i < count; i++) {
+    const zipy_entry_t *entry = zipy_entry(zip, i);
+
+    if (entry && !entry->is_directory)
+      files++;
+  }
+
+  return files;
+}
+
 static void
 progress_init(zipy_progress_t *progress, FILE *out, size_t count) {
   progress->out = out;
@@ -1321,7 +1338,8 @@ extract_one(ExtractContext *ctx, zipy_archive_t *zip, size_t index) {
   if (ret == ZIPY_ZIP_SKIPPED) {
     ctx->skipped++;
   } else if (ret >= ZIPY_ZIP_OK) {
-    ctx->extracted++;
+    if (!entry->is_directory)
+      ctx->extracted++;
     if (ret == ZIPY_ZIP_SAVED)
       ctx->saved++;
   } else {
@@ -1521,7 +1539,7 @@ main(int argc, char *argv[]) {
   int noProgress = 0;
   int jobsSpecified = 0;
   size_t jobs = 0;
-  size_t count = 0, extracted = 0, saved = 0, skipped = 0;
+  size_t count = 0, files = 0, extracted = 0, saved = 0, skipped = 0;
   uint64_t startMs, elapsedMs;
   char elapsed[32];
   zipy_progress_t progress;
@@ -1601,6 +1619,7 @@ main(int argc, char *argv[]) {
 
   /* Extract all files */
   count = zipy_count(zip);
+  files = file_count(zip, count);
   if (jobsSpecified && jobs != 0) {
     jobs = clamp_jobs(jobs, count);
     config.options.jobs = jobs;
@@ -1637,7 +1656,7 @@ main(int argc, char *argv[]) {
   if (directExtract) {
     directRet = zipy_extract_all_options(zip, extractdir, &config.options);
     success = directRet < ZIPY_ZIP_OK;
-    extracted = success ? 0 : count;
+    extracted = success ? 0 : files;
   } else if (jobs > 1) {
     success = extract_parallel(zipfile, zip, extractdir, &config.options, policies,
                                &progress, count, jobs,
@@ -1662,14 +1681,14 @@ main(int argc, char *argv[]) {
     if (summaryColor)
       printf("  \033[31mextracted %zu/%zu %s \033[2min %s\033[0m\n",
              extracted,
-             count,
-             count == 1 ? "file" : "files",
+             files,
+             files == 1 ? "file" : "files",
              elapsed);
     else
       printf("  extracted %zu/%zu %s in %s\n",
              extracted,
-             count,
-             count == 1 ? "file" : "files",
+             files,
+             files == 1 ? "file" : "files",
              elapsed);
   } else {
     if (summaryColor)
