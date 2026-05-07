@@ -1564,6 +1564,9 @@ prepare_ask_plan(zipy_archive_t *zip,
   *emptyOrMissingOut = 0;
 
   config->options.on_conflict = cli_policy_to_extract(config->on_conflict);
+  if (target_is_empty_or_missing(extractdir, &fastNoConflict) && fastNoConflict)
+    *emptyOrMissingOut = 1;
+
   if (config->options.flags & ZIPY_EXTRACT_RESUME) {
     config->on_conflict = CLI_CONFLICT_OVERWRITE;
     config->options.on_conflict = ZIPY_CONFLICT_OVERWRITE;
@@ -1572,9 +1575,8 @@ prepare_ask_plan(zipy_archive_t *zip,
   if (config->options.on_conflict == ZIPY_CONFLICT_OVERWRITE)
     return 1;
 
-  if (target_is_empty_or_missing(extractdir, &fastNoConflict) && fastNoConflict) {
+  if (fastNoConflict) {
     config->options.on_conflict = ZIPY_CONFLICT_OVERWRITE;
-    *emptyOrMissingOut = 1;
     return 1;
   }
 
