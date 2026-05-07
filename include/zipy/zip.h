@@ -30,7 +30,8 @@ typedef enum zipy_zip_result_t {
   ZIPY_ZIP_EPASS    = -8,
   ZIPY_ZIP_EAUTH    = -9,
   ZIPY_ZIP_ENOSPC   = -10,
-  ZIPY_ZIP_ECANCEL  = -11
+  ZIPY_ZIP_ECANCEL  = -11,
+  ZIPY_ZIP_EINCOMPLETE = -12
 } zipy_zip_result_t;
 
 typedef enum zipy_zip_method_t {

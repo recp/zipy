@@ -213,6 +213,19 @@ typedef struct progress_state_t {
 static int
 progress_advance(progress_state_t *progress, uint64_t amount);
 
+static int
+stream_incomplete_result(zipy_archive_t * __restrict zipy, int ret) {
+  if ((ret == ZIPY_ZIP_EFILE
+       || ret == ZIPY_ZIP_ESIZE
+       || ret == ZIPY_ZIP_EINFLATE)
+      && zipy
+      && zipy->fp
+      && feof(zipy->fp))
+    return ZIPY_ZIP_EINCOMPLETE;
+
+  return ret;
+}
+
 static uint16_t
 le16(const uint8_t * __restrict p) {
   return (uint16_t)((uint16_t)p[0] | ((uint16_t)p[1] << 8));
@@ -5939,7 +5952,7 @@ zipy_extract_stream(const char * __restrict path,
     }
 
     if (fread(hdr, 1, sizeof(hdr), zipy.fp) != sizeof(hdr)) {
-      ret = feof(zipy.fp) ? ZIPY_ZIP_OK : ZIPY_ZIP_EFILE;
+      ret = feof(zipy.fp) ? ZIPY_ZIP_EINCOMPLETE : ZIPY_ZIP_EFILE;
       break;
     }
 
@@ -5982,7 +5995,9 @@ zipy_extract_stream(const char * __restrict path,
 
     name = alloc_name(&zipy, (size_t)nameLen + 1u);
     if (!name || !read_exact(zipy.fp, name, nameLen)) {
-      ret = name ? ZIPY_ZIP_EFILE : ZIPY_ZIP_ERR;
+      ret = name
+          ? stream_incomplete_result(&zipy, ZIPY_ZIP_EFILE)
+          : ZIPY_ZIP_ERR;
       break;
     }
     name[nameLen] = '\0';
@@ -6015,7 +6030,7 @@ zipy_extract_stream(const char * __restrict path,
         extra = extra_buf;
       }
       if (!read_exact(zipy.fp, (void *)extra, extraLen)) {
-        ret = ZIPY_ZIP_EFILE;
+        ret = stream_incomplete_result(&zipy, ZIPY_ZIP_EFILE);
         break;
       }
       if (!parse_zip64_extra(&info, extra, extraLen, comp32, uncomp32, 0, 0)
@@ -6073,7 +6088,7 @@ zipy_extract_stream(const char * __restrict path,
     dataOffset = info.data_offset;
     if (dataOffset > zipy.file_size
         || info.entry.compressed_size > zipy.file_size - dataOffset) {
-      ret = ZIPY_ZIP_ESIZE;
+      ret = ZIPY_ZIP_EINCOMPLETE;
       break;
     }
     if (!info.entry.is_directory
@@ -6121,8 +6136,10 @@ zipy_extract_stream(const char * __restrict path,
                                    (opts.flags & ZIPY_EXTRACT_NO_CRC) == 0
                                     && info.entry.crc32 != 0,
                                    NULL);
-        if (ret < ZIPY_ZIP_OK)
+        if (ret < ZIPY_ZIP_OK) {
+          ret = stream_incomplete_result(&zipy, ret);
           break;
+        }
       }
       ret = progress_finish_entry(&progress, &info);
       if (ret < ZIPY_ZIP_OK)
@@ -6165,8 +6182,10 @@ zipy_extract_stream(const char * __restrict path,
                           destdir,
                           opts.progress ? &progress : NULL);
     }
-    if (ret < ZIPY_ZIP_OK)
+    if (ret < ZIPY_ZIP_OK) {
+      ret = stream_incomplete_result(&zipy, ret);
       break;
+    }
     ret = progress_finish_entry(&progress, &info);
     if (ret < ZIPY_ZIP_OK)
       break;
@@ -6185,8 +6204,10 @@ zipy_extract_stream(const char * __restrict path,
                                  (opts.flags & ZIPY_EXTRACT_NO_CRC) == 0
                                   && info.entry.crc32 != 0,
                                  NULL);
-      if (ret < ZIPY_ZIP_OK)
+      if (ret < ZIPY_ZIP_OK) {
+        ret = stream_incomplete_result(&zipy, ret);
         break;
+      }
     }
   }
 

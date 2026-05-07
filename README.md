@@ -182,6 +182,9 @@ before the central directory is available. It can also stream stored entries
 when the data descriptor has the optional signature. Unsigned stored,
 ZIP64-sized, and resume-mode unknown-size descriptors still require the central
 directory path.
+If EOF is reached before a central-directory header, `zipy_extract_stream()`
+returns `ZIPY_ZIP_EINCOMPLETE` instead of success so callers can retry a
+still-downloading or truncated archive.
 
 CRC32 validation is enabled by default. Set `ZIPY_EXTRACT_NO_CRC` only when
 lower latency matters more than detecting corrupted archive data.
