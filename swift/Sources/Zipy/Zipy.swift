@@ -7,6 +7,22 @@ import Glibc
 #endif
 
 public enum Zipy {
+  public struct Version: Sendable, Equatable, CustomStringConvertible {
+    public let major: Int
+    public let minor: Int
+    public let patch: Int
+
+    public var description: String {
+      "\(major).\(minor).\(patch)"
+    }
+  }
+
+  public static let version = Version(
+    major: Int(ZIPY_VERSION_MAJOR),
+    minor: Int(ZIPY_VERSION_MINOR),
+    patch: Int(ZIPY_VERSION_PATCH)
+  )
+
   public struct ExtractOptions: OptionSet, Sendable {
     public let rawValue: UInt32
 

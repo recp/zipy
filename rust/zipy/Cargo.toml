@@ -1,0 +1,9 @@
+[package]
+name = "zipy"
+version = "0.1.0"
+edition = "2021"
+license = "Apache-2.0"
+description = "Small ergonomic Rust wrapper for zipy"
+
+[dependencies]
+zipy-sys = { path = "../zipy-sys", version = "0.1.0" }

@@ -58,6 +58,8 @@ cmake-build**
 *.xcodeproj/
 **/.vscode/
 build/
+target/
+rust/target/
 
 # zipy extraction state
 .zipy/

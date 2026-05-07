@@ -278,6 +278,18 @@ try await Zipy.extract(
 let latest = await observer.latest
 ```
 
+## Rust
+
+The Rust workspace under `rust/` builds the same C sources. `zipy-sys` is the
+raw FFI crate; `zipy` is the small safe wrapper.
+
+```rust
+zipy::extract("archive.zip", "target", zipy::Options::fast().overwrite())?;
+```
+
+The wrapper only converts paths/options/errors around one C call. Progress is
+optional; when omitted, no Rust callback trampoline is installed.
+
 ## Status
 
 - [x] open ZIP central directory

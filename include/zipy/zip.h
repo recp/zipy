@@ -12,6 +12,7 @@
 #define zipy_zip_h
 
 #include "common.h"
+#include "version.h"
 #include <stdbool.h>
 
 typedef struct zipy_archive_t zipy_archive_t;

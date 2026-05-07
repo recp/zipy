@@ -1,0 +1,6 @@
+[workspace]
+members = [
+  "rust/zipy",
+  "rust/zipy-sys"
+]
+resolver = "2"
