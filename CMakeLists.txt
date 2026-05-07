@@ -7,6 +7,8 @@ project(zipy
 )
 
 set(CMAKE_C_STANDARD 11)
+set(CMAKE_C_STANDARD_REQUIRED ON)
+set(DEFAULT_BUILD_TYPE Release)
 
 if(MSVC)
   add_definitions(-D_WINDOWS -D_USRDLL)
