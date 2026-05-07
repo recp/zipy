@@ -5128,6 +5128,10 @@ extract_entry(zipy_archive_t * __restrict zipy,
           remove_file(part_path);
           part_exists = 0;
           part_size = 0;
+        } else if (!check_crc && info->entry.method == ZIPY_ZIP_DEFLATE) {
+          remove_file(part_path);
+          part_exists = 0;
+          part_size = 0;
         } else if (!check_crc) {
           if (!replace_file(part_path, destpath))
             return ZIPY_ZIP_EFILE;

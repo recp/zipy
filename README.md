@@ -195,8 +195,10 @@ Set `ZIPY_EXTRACT_ATOMIC` to write regular files under
 extraction. Set `ZIPY_EXTRACT_RESUME` to keep those `.part` files after
 failures, treat existing target files as resume state, and resume stored,
 unencrypted entries by appending missing bytes. Deflated partial `.part` files
-are restarted unless they are already complete and pass CRC validation, or CRC
-is disabled.
+are restarted unless they are already complete and pass CRC validation. With
+CRC disabled, complete stored `.part` files can be reused by size, but Deflate
+`.part` files are restarted because mmap output may allocate the final size
+before all bytes are written.
 
 When resume is enabled, zipy also writes `target/.zipy/resume_state.txt` with
 the last entry, target path, `.part` path, resume offset, sizes, CRC, and flags.
