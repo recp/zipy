@@ -679,6 +679,111 @@ zipy_read_zip64_eocd(FILE *fp, zipy_dir_info_t *dir) {
 }
 
 static int
+zipy_read_zip64_eocd_mapped(const uint8_t *map,
+                            uint64_t file_size,
+                            zipy_dir_info_t *dir) {
+  const uint8_t *locator, *eocd;
+  uint64_t zip64Off, entriesDisk;
+
+  if (!map || dir->eocd_offset < ZIP64_LOCATOR_FIXED)
+    return 0;
+
+  locator = map + (size_t)(dir->eocd_offset - ZIP64_LOCATOR_FIXED);
+  if (zipy_le32(locator) != ZIP_SIGN_ZIP64_LOCATOR)
+    return 0;
+
+  if (zipy_le32(locator + 4) != 0 || zipy_le32(locator + 16) != 1)
+    return 0;
+
+  zip64Off = zipy_le64(locator + 8);
+  if (file_size < ZIP64_EOCD_FIXED
+      || zip64Off > file_size - ZIP64_EOCD_FIXED)
+    return 0;
+
+  eocd = map + (size_t)zip64Off;
+  if (zipy_le32(eocd) != ZIP_SIGN_ZIP64_END || zipy_le64(eocd + 4) < 44)
+    return 0;
+
+  if (zipy_le32(eocd + 16) != 0 || zipy_le32(eocd + 20) != 0)
+    return 0;
+
+  entriesDisk = zipy_le64(eocd + 24);
+  dir->entries = zipy_le64(eocd + 32);
+  if (entriesDisk != dir->entries)
+    return 0;
+
+  dir->central_dir_size = zipy_le64(eocd + 40);
+  dir->central_dir_offset = zipy_le64(eocd + 48);
+  return 1;
+}
+
+static int
+zipy_find_eocd_mapped(const uint8_t *map,
+                      uint64_t file_size,
+                      zipy_dir_info_t *dir) {
+  uint64_t tailOff;
+  size_t tailSize, i;
+
+  memset(dir, 0, sizeof(*dir));
+
+  if (!map || file_size < ZIP_EOCD_FIXED || file_size > (uint64_t)SIZE_MAX)
+    return 0;
+
+  tailSize = file_size < ZIP_MAX_EOCD_SEARCH
+           ? (size_t)file_size
+           : (size_t)ZIP_MAX_EOCD_SEARCH;
+  tailOff = file_size - tailSize;
+
+  i = tailSize - ZIP_EOCD_FIXED;
+  for (;;) {
+    const uint8_t *p = map + (size_t)tailOff + i;
+
+    if (zipy_le32(p) == ZIP_SIGN_END_CENTRAL) {
+      uint16_t disk = zipy_le16(p + 4);
+      uint16_t cdDisk = zipy_le16(p + 6);
+      uint16_t entriesDisk = zipy_le16(p + 8);
+      uint16_t entries = zipy_le16(p + 10);
+      uint16_t commentLen = zipy_le16(p + 20);
+      int needsZip64;
+
+      if (i + ZIP_EOCD_FIXED + commentLen != tailSize)
+        goto next;
+
+      dir->file_size = file_size;
+      dir->eocd_offset = tailOff + i;
+      dir->entries = entries;
+      dir->central_dir_size = zipy_le32(p + 12);
+      dir->central_dir_offset = zipy_le32(p + 16);
+
+      needsZip64 = disk == ZIP64_MAGIC_UINT16
+                || cdDisk == ZIP64_MAGIC_UINT16
+                || entriesDisk == ZIP64_MAGIC_UINT16
+                || entries == ZIP64_MAGIC_UINT16
+                || dir->central_dir_size == ZIP64_MAGIC_UINT32
+                || dir->central_dir_offset == ZIP64_MAGIC_UINT32;
+
+      if (needsZip64) {
+        if (!zipy_read_zip64_eocd_mapped(map, file_size, dir))
+          break;
+      } else if (disk != 0 || cdDisk != 0 || entriesDisk != entries) {
+        break;
+      }
+
+      if (UINT64_MAX - dir->central_dir_offset < dir->central_dir_size)
+        return 0;
+      return dir->central_dir_offset + dir->central_dir_size <= dir->eocd_offset;
+    }
+
+next:
+    if (i == 0)
+      break;
+    i--;
+  }
+
+  return 0;
+}
+
+static int
 zipy_find_eocd(FILE *fp, zipy_dir_info_t *dir) {
   uint8_t *tail;
   uint64_t tailOff, file_size;
@@ -2613,12 +2718,6 @@ zipy_open(const char *path) {
   if (!path || !(fp = fopen(path, "rb")))
     return NULL;
 
-  if (!zipy_find_eocd(fp, &dir))
-    goto err;
-
-  if (!zipy_u64_to_size(dir.entries, &count))
-    goto err;
-
   zipy = calloc(1, sizeof(*zipy));
   if (!zipy)
     goto err;
@@ -2628,9 +2727,23 @@ zipy_open(const char *path) {
   if (!zipy->path)
     goto err;
 
-  zipy->file_count = count;
-  zipy->file_size = dir.file_size;
+  if (zipy_file_size(fp, &zipy->file_size) != 0)
+    goto err;
   zipy_map_archive(zipy);
+
+  if (zipy->map) {
+    if (!zipy_find_eocd_mapped(zipy->map, zipy->file_size, &dir))
+      goto err;
+  } else if (!zipy_find_eocd(fp, &dir)) {
+    goto err;
+  } else {
+    zipy->file_size = dir.file_size;
+  }
+
+  if (!zipy_u64_to_size(dir.entries, &count))
+    goto err;
+
+  zipy->file_count = count;
   central = zipy_mapped_range(zipy, dir.central_dir_offset, dir.central_dir_size);
   if (central
       && !zipy_prealloc_name_slab(zipy, central, (size_t)dir.central_dir_size, count))
