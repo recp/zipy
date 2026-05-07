@@ -70,6 +70,8 @@
 #define ZIP_PATH_STACK        512u
 #define ZIP_PARALLEL_MIN_ENTRIES 8u
 #define ZIP_PARALLEL_MIN_BYTES (8u * 1024u * 1024u)
+#define ZIP_PARALLEL_MIN_STORE_ENTRIES 16u
+#define ZIP_PARALLEL_MIN_STORE_BYTES (64u * 1024u * 1024u)
 #define ZIP_STACK_THREADS     64u
 #define ZIP_WORK_BATCH        8u
 
@@ -1195,8 +1197,12 @@ zipy_record_extract_metrics(zipy_archive_t * ZIPY_RESTRICT zipy,
     return;
 
   zipy->extract_work_file_count++;
-  if (zipy->extract_work_size < ZIP_PARALLEL_MIN_BYTES)
-    zipy->extract_work_size += info->entry.uncompressed_size;
+  if (zipy->extract_work_size < ZIP_PARALLEL_MIN_BYTES) {
+    if (info->entry.uncompressed_size > ZIP_PARALLEL_MIN_BYTES - zipy->extract_work_size)
+      zipy->extract_work_size = ZIP_PARALLEL_MIN_BYTES;
+    else
+      zipy->extract_work_size += info->entry.uncompressed_size;
+  }
 }
 
 static bool
@@ -3680,17 +3686,29 @@ zipy_extract_default_jobs(const zipy_archive_t *zipy) {
 
   files = zipy->extract_file_count;
   work_files = zipy->extract_work_file_count;
-  if (files <= 1
-      || work_files <= 1
-      || (work_files < ZIP_PARALLEL_MIN_ENTRIES
-          && zipy->extract_work_size < ZIP_PARALLEL_MIN_BYTES))
+  if (files <= 1)
+    return 1;
+
+  if (work_files > 1
+      && (work_files >= ZIP_PARALLEL_MIN_ENTRIES
+          || zipy->extract_work_size >= ZIP_PARALLEL_MIN_BYTES)) {
+    jobs = zipy_cpu_count();
+    if (jobs < 1)
+      jobs = 1;
+    if (jobs > work_files)
+      jobs = work_files;
+    return jobs;
+  }
+
+  if (files < ZIP_PARALLEL_MIN_STORE_ENTRIES
+      || zipy->extract_uncompressed_size < ZIP_PARALLEL_MIN_STORE_BYTES)
     return 1;
 
   jobs = zipy_cpu_count();
   if (jobs < 1)
     jobs = 1;
-  if (jobs > work_files)
-    jobs = work_files;
+  if (jobs > files)
+    jobs = files;
 
   return jobs;
 }

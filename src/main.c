@@ -51,6 +51,8 @@
 #define ZIPY_WORK_BATCH    8u
 #define ZIPY_PARALLEL_MIN_ENTRIES 8u
 #define ZIPY_PARALLEL_MIN_BYTES (8u * 1024u * 1024u)
+#define ZIPY_PARALLEL_MIN_STORE_ENTRIES 16u
+#define ZIPY_PARALLEL_MIN_STORE_BYTES (64u * 1024u * 1024u)
 #define ZIPY_PROGRESS_INTERVAL_MS 33u
 
 typedef struct zipy_progress_t {
@@ -359,7 +361,7 @@ clamp_jobs(size_t jobs, size_t count) {
 
 static size_t
 adaptive_jobs(zipy_archive_t *zip, size_t count, size_t *filesOut) {
-  uint64_t workSize = 0;
+  uint64_t workSize = 0, totalSize = 0;
   size_t i, files = 0, workFiles = 0;
   size_t jobs;
 
@@ -376,24 +378,42 @@ adaptive_jobs(zipy_archive_t *zip, size_t count, size_t *filesOut) {
       continue;
 
     files++;
+    if (totalSize < ZIPY_PARALLEL_MIN_STORE_BYTES) {
+      if (entry->uncompressed_size > ZIPY_PARALLEL_MIN_STORE_BYTES - totalSize)
+        totalSize = ZIPY_PARALLEL_MIN_STORE_BYTES;
+      else
+        totalSize += entry->uncompressed_size;
+    }
     if (entry->method == ZIPY_ZIP_STORE && !entry->encrypted)
       continue;
 
     workFiles++;
-    if (workSize < ZIPY_PARALLEL_MIN_BYTES)
-      workSize += entry->uncompressed_size;
+    if (workSize < ZIPY_PARALLEL_MIN_BYTES) {
+      if (entry->uncompressed_size > ZIPY_PARALLEL_MIN_BYTES - workSize)
+        workSize = ZIPY_PARALLEL_MIN_BYTES;
+      else
+        workSize += entry->uncompressed_size;
+    }
   }
 
   if (filesOut)
     *filesOut = files;
 
-  if (files <= 1
-      || workFiles <= 1
-      || (workFiles < ZIPY_PARALLEL_MIN_ENTRIES
-          && workSize < ZIPY_PARALLEL_MIN_BYTES))
+  if (files <= 1)
     return 1;
 
-  jobs = cpu_jobs(workFiles);
+  if (workFiles > 1
+      && (workFiles >= ZIPY_PARALLEL_MIN_ENTRIES
+          || workSize >= ZIPY_PARALLEL_MIN_BYTES)) {
+    jobs = cpu_jobs(workFiles);
+    return jobs > 0 ? jobs : 1;
+  }
+
+  if (files < ZIPY_PARALLEL_MIN_STORE_ENTRIES
+      || totalSize < ZIPY_PARALLEL_MIN_STORE_BYTES)
+    return 1;
+
+  jobs = cpu_jobs(files);
   return jobs > 0 ? jobs : 1;
 }
 

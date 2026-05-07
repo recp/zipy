@@ -28,10 +28,10 @@ zipy archive.zip -d target --no-metadata
 zipy archive.zip -d target --no-progress
 ```
 
-`-j auto` is the default. It keeps stored-only archives serial and uses CPU
-workers when compressed or encrypted work is large enough. `-j cpu` forces one
-worker per CPU core, capped by the number of entries. Use an explicit number
-such as `-j 4` to limit worker fan-out.
+`-j auto` is the default. It keeps small archives serial and uses CPU workers
+when compressed, encrypted, or large stored workloads are big enough. `-j cpu`
+forces one worker per CPU core, capped by the number of entries. Use an
+explicit number such as `-j 4` to limit worker fan-out.
 
 By default, the CLI asks what to do when an extracted entry would replace an
 existing file. Non-interactive runs fall back to saving existing files before
