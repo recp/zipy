@@ -2241,8 +2241,12 @@ zipy_extract_path_len(const char *dir, const char *name, size_t nameLen) {
   if (dirLen > 0 && !zipy_is_fs_sep(dir[dirLen - 1]))
     path[dirLen++] = '/';
 
-  for (i = 0; i < nameLen; i++)
-    path[dirLen + i] = zipy_is_zip_sep(name[i]) ? '/' : name[i];
+  if (memchr(name, '\\', nameLen)) {
+    for (i = 0; i < nameLen; i++)
+      path[dirLen + i] = zipy_is_zip_sep(name[i]) ? '/' : name[i];
+  } else {
+    memcpy(path + dirLen, name, nameLen);
+  }
   path[dirLen + nameLen] = '\0';
 
   return path;
@@ -2273,8 +2277,12 @@ zipy_path_buf_extract_len(zipy_path_buf_t * ZIPY_RESTRICT buf,
   if (dirLen > 0 && !zipy_is_fs_sep(dir[dirLen - 1]))
     buf->data[dirLen++] = '/';
 
-  for (i = 0; i < nameLen; i++)
-    buf->data[dirLen + i] = zipy_is_zip_sep(name[i]) ? '/' : name[i];
+  if (memchr(name, '\\', nameLen)) {
+    for (i = 0; i < nameLen; i++)
+      buf->data[dirLen + i] = zipy_is_zip_sep(name[i]) ? '/' : name[i];
+  } else {
+    memcpy(buf->data + dirLen, name, nameLen);
+  }
   buf->data[dirLen + nameLen] = '\0';
 
   return buf->data;
