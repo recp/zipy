@@ -1465,7 +1465,7 @@ static const uint32_t zipy_crc32_base_table[256] = {
     0xB40BBE37u, 0xC30C8EA1u, 0x5A05DF1Bu, 0x2D02EF8Du
   };
 
-static uint32_t zipy_crc32_tables[8][256];
+static uint32_t zipy_crc32_tables[16][256];
 
 static void
 zipy_crc32_make_tables(void) {
@@ -1478,7 +1478,7 @@ zipy_crc32_make_tables(void) {
   for (i = 0; i < 256u; i++) {
     uint32_t crc = zipy_crc32_tables[0][i];
 
-    for (j = 1; j < 8u; j++) {
+    for (j = 1; j < 16u; j++) {
       crc = zipy_crc32_tables[0][crc & 0xFFu] ^ (crc >> 8);
       zipy_crc32_tables[j][i] = crc;
     }
@@ -1519,6 +1519,30 @@ zipy_crc32_update(uint32_t crc,
   zipy_crc32_init_tables();
 
   crc = ~crc;
+  while (len >= 16u) {
+    uint64_t word0 = zipy_le64(buf) ^ crc;
+    uint64_t word1 = zipy_le64(buf + 8u);
+
+    crc = table[15][ word0        & 0xFFu]
+        ^ table[14][(word0 >>  8) & 0xFFu]
+        ^ table[13][(word0 >> 16) & 0xFFu]
+        ^ table[12][(word0 >> 24) & 0xFFu]
+        ^ table[11][(word0 >> 32) & 0xFFu]
+        ^ table[10][(word0 >> 40) & 0xFFu]
+        ^ table[ 9][(word0 >> 48) & 0xFFu]
+        ^ table[ 8][(word0 >> 56) & 0xFFu]
+        ^ table[ 7][ word1        & 0xFFu]
+        ^ table[ 6][(word1 >>  8) & 0xFFu]
+        ^ table[ 5][(word1 >> 16) & 0xFFu]
+        ^ table[ 4][(word1 >> 24) & 0xFFu]
+        ^ table[ 3][(word1 >> 32) & 0xFFu]
+        ^ table[ 2][(word1 >> 40) & 0xFFu]
+        ^ table[ 1][(word1 >> 48) & 0xFFu]
+        ^ table[ 0][(word1 >> 56) & 0xFFu];
+    buf += 16u;
+    len -= 16u;
+  }
+
   while (len >= 8u) {
     uint64_t word = zipy_le64(buf) ^ crc;
 
