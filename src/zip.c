@@ -1706,6 +1706,40 @@ resume_state_path(zipy_archive_t * __restrict zipy,
   return zipy->state_buf.data;
 }
 
+static const char *
+resume_part_path(zipy_archive_t * __restrict zipy,
+                 const char * __restrict destdir,
+                 const entry_info_t * __restrict info) {
+  size_t prefixLen;
+
+  if (!zipy || !destdir || !info)
+    return NULL;
+  if (!path_buf_set_dir(&zipy->part_buf, destdir, &prefixLen))
+    return NULL;
+  if (!path_buf_append_name(&zipy->part_buf,
+                            prefixLen,
+                            ".zipy/parts",
+                            11u,
+                            0))
+    return NULL;
+  if (!mkdirs_buf(zipy->part_buf.data, &zipy->parent_buf))
+    return NULL;
+  if (!path_buf_append_suffix(&zipy->part_buf, "/"))
+    return NULL;
+
+  prefixLen = strlen(zipy->part_buf.data);
+  if (!path_buf_append_name(&zipy->part_buf,
+                            prefixLen,
+                            info->entry.name,
+                            info->entry.name_len,
+                            info->name_has_backslash))
+    return NULL;
+  if (!path_buf_append_suffix(&zipy->part_buf, ".part"))
+    return NULL;
+
+  return zipy->part_buf.data;
+}
+
 static void
 write_resume_state(const char *state_path,
                    const zipy_archive_t *zipy,
@@ -3690,7 +3724,8 @@ extract_entry(zipy_archive_t * __restrict zipy,
                    size_t parent_len,
                    uint32_t extract_flags,
                    const char * __restrict password,
-                   const char * __restrict state_path) {
+                   const char * __restrict state_path,
+                   const char * __restrict part_destdir) {
   uint8_t local[ZIP_LOCAL_FIXED];
   const uint8_t *localp;
   const uint8_t *mapped_data = NULL;
@@ -3882,7 +3917,9 @@ extract_entry(zipy_archive_t * __restrict zipy,
     int part_exists = 0;
     uint64_t part_size = 0;
 
-    part_path = path_buf_set_suffix(&zipy->part_buf, destpath, ".part");
+    part_path = part_destdir
+              ? resume_part_path(zipy, part_destdir, info)
+              : path_buf_set_suffix(&zipy->part_buf, destpath, ".part");
     if (!part_path)
       return ZIPY_ZIP_ERR;
     output_path = part_path;
@@ -4002,6 +4039,9 @@ extract_entry(zipy_archive_t * __restrict zipy,
                        resume_offset,
                        extract_flags,
                        "extracting");
+
+    if (!prepare_parent_dir(zipy, output_path))
+      return ZIPY_ZIP_EFILE;
   }
 
   if (!open_output_file_seek(output_path,
@@ -4125,6 +4165,7 @@ zipy_extract(zipy_archive_t * __restrict zipy,
                             SIZE_MAX,
                             ZIPY_EXTRACT_DEFAULT,
                             NULL,
+                            NULL,
                             NULL);
 }
 
@@ -4179,7 +4220,8 @@ zipy_extract_to(zipy_archive_t * __restrict zipy,
                            opts.password,
                            opts.flags & ZIPY_EXTRACT_RESUME
                          ? resume_state_path(zipy, destdir)
-                         : NULL);
+                         : NULL,
+                           destdir);
   if (ret == ZIPY_ZIP_OK && conflictRet == ZIPY_ZIP_SAVED)
     ret = ZIPY_ZIP_SAVED;
 
@@ -4207,6 +4249,7 @@ zipy_extract_named(zipy_archive_t * __restrict zipy,
                            destpath,
                            SIZE_MAX,
                            ZIPY_EXTRACT_DEFAULT,
+                           NULL,
                            NULL,
                            NULL);
 }
@@ -4309,7 +4352,8 @@ extract_all_serial(zipy_archive_t *zipy,
                              extract_parent_len(info, prefixLen),
                              flags | EXTRACT_DELAY_DIR_METADATA,
                              password,
-                             state_path);
+                             state_path,
+                             destdir);
     if (ret < ZIPY_ZIP_OK)
       return ret;
   }
@@ -4385,7 +4429,8 @@ extract_all_worker(void *arg) {
                                extract_parent_len(info, prefixLen),
                                ctx->flags | EXTRACT_DELAY_DIR_METADATA,
                                ctx->password,
-                               ctx->state_path);
+                               ctx->state_path,
+                               ctx->destdir);
       if (ret < ZIPY_ZIP_OK)
         goto fail;
     }

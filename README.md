@@ -155,12 +155,13 @@ Mode and timestamp restoration is enabled by default. Set
 `ZIPY_EXTRACT_NO_METADATA` when raw extraction latency matters more than
 preserving file metadata.
 
-Set `ZIPY_EXTRACT_ATOMIC` to write regular files as `name.part` and rename
-them into place only after successful extraction. Set `ZIPY_EXTRACT_RESUME` to
-keep `.part` files after failures, treat existing target files as resume state,
-and resume stored, unencrypted entries by appending missing bytes. Deflated
-partial `.part` files are restarted unless they are already complete and pass
-CRC validation, or CRC is disabled.
+Set `ZIPY_EXTRACT_ATOMIC` to write regular files under
+`target/.zipy/parts/` and rename them into place only after successful
+extraction. Set `ZIPY_EXTRACT_RESUME` to keep those `.part` files after
+failures, treat existing target files as resume state, and resume stored,
+unencrypted entries by appending missing bytes. Deflated partial `.part` files
+are restarted unless they are already complete and pass CRC validation, or CRC
+is disabled.
 
 When resume is enabled, zipy also writes `target/.zipy/resume_state.txt` with
 the last entry, target path, `.part` path, resume offset, sizes, CRC, and flags.
