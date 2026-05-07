@@ -95,6 +95,9 @@
 #define ZIP_METHOD_AES        99u
 #define EXTRACT_DELAY_DIR_METADATA (1u << 31)
 
+#define ZIP_HOST_UNIX         3u
+#define ZIP_HOST_OSX          19u
+
 #if defined(_WIN32)
 #  define PATH_SEP '\\'
 #else
@@ -4362,6 +4365,7 @@ zipy_open(const char * __restrict path) {
     const uint8_t *extra = NULL;
     entry_info_t *info = &zipy->files[i];
     uint16_t nameLen, extraLen, commentLen, diskStart;
+    uint8_t creatorHost;
     uint32_t comp32, uncomp32, offset32;
     size_t record_len;
 
@@ -4380,6 +4384,7 @@ zipy_open(const char * __restrict path) {
       goto err;
 
     info->flags = le16(hdrp + 8);
+    creatorHost = (uint8_t)(le16(hdrp + 4) >> 8);
     info->entry.method = le16(hdrp + 10);
     info->mod_time = le16(hdrp + 12);
     info->mod_date = le16(hdrp + 14);
@@ -4391,7 +4396,8 @@ zipy_open(const char * __restrict path) {
     commentLen = le16(hdrp + 32);
     diskStart = le16(hdrp + 34);
     info->external_attr = le32(hdrp + 38);
-    info->unix_mode = info->external_attr >> 16;
+    if (creatorHost == ZIP_HOST_UNIX || creatorHost == ZIP_HOST_OSX)
+      info->unix_mode = info->external_attr >> 16;
 #if !defined(_WIN32) && defined(S_IFLNK)
     info->is_symlink = (info->unix_mode & S_IFMT) == S_IFLNK;
 #endif
