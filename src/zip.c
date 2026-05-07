@@ -116,6 +116,7 @@ typedef struct zipy_file_t {
   uint8_t  is_symlink;
   uint8_t  safe_name;
   uint8_t  has_data_offset;
+  uint8_t  name_has_backslash;
 } zipy_file_t;
 
 typedef struct zipy_path_buf_t {
@@ -2368,33 +2369,52 @@ zipy_extract_path(const char *dir, const char *name) {
   return zipy_extract_path_len(dir, name, strlen(name));
 }
 
-static const char *
-zipy_path_buf_extract_len(zipy_path_buf_t * ZIPY_RESTRICT buf,
-                          const char * ZIPY_RESTRICT dir,
-                          const char * ZIPY_RESTRICT name,
-                          size_t nameLen) {
-  size_t dirLen, i;
+static int
+zipy_path_buf_set_dir(zipy_path_buf_t * ZIPY_RESTRICT buf,
+                      const char * ZIPY_RESTRICT dir,
+                      size_t * ZIPY_RESTRICT prefixLen) {
+  size_t dirLen;
 
-  if (!buf || !dir || !name)
-    return NULL;
+  if (!buf || !dir || !prefixLen)
+    return 0;
 
   dirLen = strlen(dir);
-  if (dirLen > SIZE_MAX - nameLen - 2u)
-    return NULL;
-  if (!zipy_path_buf_reserve(buf, dirLen + nameLen + 2u))
-    return NULL;
+  if (dirLen > SIZE_MAX - 2u)
+    return 0;
+  if (!zipy_path_buf_reserve(buf, dirLen + 2u))
+    return 0;
 
   memcpy(buf->data, dir, dirLen);
   if (dirLen > 0 && !zipy_is_fs_sep(dir[dirLen - 1]))
     buf->data[dirLen++] = '/';
+  buf->data[dirLen] = '\0';
+  *prefixLen = dirLen;
 
-  if (memchr(name, '\\', nameLen)) {
+  return 1;
+}
+
+static const char *
+zipy_path_buf_append_name(zipy_path_buf_t * ZIPY_RESTRICT buf,
+                          size_t prefixLen,
+                          const char * ZIPY_RESTRICT name,
+                          size_t nameLen,
+                          int nameHasBackslash) {
+  size_t i;
+
+  if (!buf || !buf->data || !name)
+    return NULL;
+  if (prefixLen > SIZE_MAX - nameLen - 1u)
+    return NULL;
+  if (!zipy_path_buf_reserve(buf, prefixLen + nameLen + 1u))
+    return NULL;
+
+  if (nameHasBackslash) {
     for (i = 0; i < nameLen; i++)
-      buf->data[dirLen + i] = zipy_is_zip_sep(name[i]) ? '/' : name[i];
+      buf->data[prefixLen + i] = zipy_is_zip_sep(name[i]) ? '/' : name[i];
   } else {
-    memcpy(buf->data + dirLen, name, nameLen);
+    memcpy(buf->data + prefixLen, name, nameLen);
   }
-  buf->data[dirLen + nameLen] = '\0';
+  buf->data[prefixLen + nameLen] = '\0';
 
   return buf->data;
 }
@@ -2950,6 +2970,7 @@ zipy_open(const char *path) {
     info->entry.name = name;
     info->entry.name_len = nameLen;
     info->safe_name = zipy_is_safe_member_name(name);
+    info->name_has_backslash = memchr(name, '\\', nameLen) != NULL;
 
     info->zip_method = info->entry.method;
     info->entry.compressed_size = comp32;
@@ -3333,23 +3354,29 @@ zipy_extract_to(zipy_archive_t *zipy,
                 const char *destdir,
                 const zipy_extract_options_t *options) {
   zipy_extract_options_t opts;
+  zipy_file_t *info;
   const char *destpath;
   char *save_dir = NULL;
+  size_t prefixLen;
   int ret, conflictRet;
 
   if (!zipy || index >= zipy->file_count || !destdir)
     return ZIPY_ZIP_EFILE;
 
   opts = zipy_default_extract_options(options);
-  destpath = zipy_path_buf_extract_len(&zipy->path_buf,
-                                       destdir,
-                                       zipy->files[index].entry.name,
-                                       zipy->files[index].entry.name_len);
+  info = &zipy->files[index];
+  if (!zipy_path_buf_set_dir(&zipy->path_buf, destdir, &prefixLen))
+    return ZIPY_ZIP_ERR;
+  destpath = zipy_path_buf_append_name(&zipy->path_buf,
+                                       prefixLen,
+                                       info->entry.name,
+                                       info->entry.name_len,
+                                       info->name_has_backslash);
   if (!destpath)
     return ZIPY_ZIP_ERR;
 
   conflictRet = zipy_prepare_entry_conflict(destdir,
-                                            &zipy->files[index].entry,
+                                            &info->entry,
                                             destpath,
                                             &opts,
                                             &save_dir);
@@ -3363,7 +3390,7 @@ zipy_extract_to(zipy_archive_t *zipy,
   }
 
   ret = zipy_extract_entry(zipy,
-                           &zipy->files[index],
+                           info,
                            destpath,
                            opts.flags,
                            opts.password);
@@ -3428,24 +3455,30 @@ zipy_extract_all_serial(zipy_archive_t *zipy,
                         const unsigned char *skip,
                         uint32_t flags,
                         const char *password) {
-  size_t i;
+  size_t i, prefixLen;
+
+  if (!zipy_path_buf_set_dir(&zipy->path_buf, destdir, &prefixLen))
+    return ZIPY_ZIP_ERR;
 
   for (i = 0; i < zipy->file_count; i++) {
+    zipy_file_t *info;
     const char *path;
     int ret;
 
     if (skip && skip[i])
       continue;
 
-    path = zipy_path_buf_extract_len(&zipy->path_buf,
-                                     destdir,
-                                     zipy->files[i].entry.name,
-                                     zipy->files[i].entry.name_len);
+    info = &zipy->files[i];
+    path = zipy_path_buf_append_name(&zipy->path_buf,
+                                     prefixLen,
+                                     info->entry.name,
+                                     info->entry.name_len,
+                                     info->name_has_backslash);
     if (!path)
       return ZIPY_ZIP_ERR;
 
     ret = zipy_extract_entry(zipy,
-                             &zipy->files[i],
+                             info,
                              path,
                              flags | ZIPY_EXTRACT_DELAY_DIR_METADATA,
                              password);
@@ -3460,7 +3493,7 @@ static void
 zipy_extract_all_worker(void *arg) {
   zipy_extract_all_context_t *ctx;
   zipy_archive_t *zipy;
-  size_t index;
+  size_t index, prefixLen;
 
   ctx = arg;
   zipy = zipy_clone(ctx->source);
@@ -3471,9 +3504,17 @@ zipy_extract_all_worker(void *arg) {
     zipy_unlock(&ctx->lock);
     return;
   }
+  if (!zipy_path_buf_set_dir(&zipy->path_buf, ctx->destdir, &prefixLen)) {
+    zipy_lock(&ctx->lock);
+    if (ctx->result == ZIPY_ZIP_OK)
+      ctx->result = ZIPY_ZIP_ERR;
+    zipy_unlock(&ctx->lock);
+    zipy_close(zipy);
+    return;
+  }
 
   for (;;) {
-    const zipy_entry_t *entry;
+    zipy_file_t *info;
     const char *path;
     size_t end;
     int ret;
@@ -3494,23 +3535,24 @@ zipy_extract_all_worker(void *arg) {
       if (ctx->skip && ctx->skip[index])
         continue;
 
-      entry = zipy_entry(zipy, index);
-      if (!entry) {
+      if (index >= zipy->file_count) {
         ret = ZIPY_ZIP_EFILE;
         goto fail;
       }
+      info = &zipy->files[index];
 
-      path = zipy_path_buf_extract_len(&zipy->path_buf,
-                                       ctx->destdir,
-                                       entry->name,
-                                       entry->name_len);
+      path = zipy_path_buf_append_name(&zipy->path_buf,
+                                       prefixLen,
+                                       info->entry.name,
+                                       info->entry.name_len,
+                                       info->name_has_backslash);
       if (!path) {
         ret = ZIPY_ZIP_ERR;
         goto fail;
       }
 
       ret = zipy_extract_entry(zipy,
-                               &zipy->files[index],
+                               info,
                                path,
                                ctx->flags | ZIPY_EXTRACT_DELAY_DIR_METADATA,
                                ctx->password);
@@ -3593,7 +3635,10 @@ static int
 zipy_apply_directory_metadata(zipy_archive_t *zipy,
                               const char *destdir,
                               const unsigned char *skip) {
-  size_t i;
+  size_t i, prefixLen;
+
+  if (!zipy_path_buf_set_dir(&zipy->path_buf, destdir, &prefixLen))
+    return ZIPY_ZIP_ERR;
 
   for (i = zipy->file_count; i > 0; i--) {
     zipy_file_t *info = &zipy->files[i - 1u];
@@ -3603,10 +3648,11 @@ zipy_apply_directory_metadata(zipy_archive_t *zipy,
     if (!info->entry.is_directory || (skip && skip[i - 1u]))
       continue;
 
-    path = zipy_path_buf_extract_len(&zipy->path_buf,
-                                     destdir,
+    path = zipy_path_buf_append_name(&zipy->path_buf,
+                                     prefixLen,
                                      info->entry.name,
-                                     info->entry.name_len);
+                                     info->entry.name_len,
+                                     info->name_has_backslash);
     if (!path)
       return ZIPY_ZIP_ERR;
 
@@ -3624,29 +3670,33 @@ zipy_prepare_extract_all(zipy_archive_t *zipy,
                          const zipy_extract_options_t *options,
                          unsigned char **skipOut) {
   char *save_dir = NULL;
-  size_t i;
+  size_t i, prefixLen;
   int result = ZIPY_ZIP_OK;
 
   *skipOut = NULL;
 
   if (options->on_conflict == ZIPY_CONFLICT_OVERWRITE)
     return ZIPY_ZIP_OK;
+  if (!zipy_path_buf_set_dir(&zipy->path_buf, destdir, &prefixLen))
+    return ZIPY_ZIP_ERR;
 
   for (i = 0; i < zipy->file_count; i++) {
+    zipy_file_t *info = &zipy->files[i];
     const char *path;
     int ret;
 
-    path = zipy_path_buf_extract_len(&zipy->path_buf,
-                                     destdir,
-                                     zipy->files[i].entry.name,
-                                     zipy->files[i].entry.name_len);
+    path = zipy_path_buf_append_name(&zipy->path_buf,
+                                     prefixLen,
+                                     info->entry.name,
+                                     info->entry.name_len,
+                                     info->name_has_backslash);
     if (!path) {
       result = ZIPY_ZIP_ERR;
       break;
     }
 
     ret = zipy_prepare_entry_conflict(destdir,
-                                      &zipy->files[i].entry,
+                                      &info->entry,
                                       path,
                                       options,
                                       &save_dir);
