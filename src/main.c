@@ -525,6 +525,68 @@ progress_update(progress_t *progress, size_t current, const char *name) {
   fflush(progress->out);
 }
 
+static void
+progress_update_bytes(progress_t *progress,
+                      uint64_t done,
+                      uint64_t total,
+                      const char *name) {
+  static const char spinner[] = "-\\|/";
+  char doneText[32], totalText[32];
+  uint64_t now, shown;
+  unsigned percent;
+
+  if (!progress->tty)
+    return;
+  now = now_ms();
+  if (done < total
+      && progress->last_ms != 0
+      && now - progress->last_ms < PROGRESS_INTERVAL_MS)
+    return;
+  progress->last_ms = now;
+
+  shown = total > 0 && done > total ? total : done;
+  percent = total == 0
+          ? 100u
+          : shown >= total
+          ? 100u
+          : (unsigned)(((double)shown * 100.0) / (double)total);
+  format_bytes(doneText, sizeof(doneText), shown);
+  format_bytes(totalText, sizeof(totalText), total);
+
+  fputs("\r\033[2K", progress->out);
+  if (progress->color) {
+    fprintf(progress->out,
+            "  \033[36m%c\033[0m \033[1m%s/%s\033[0m %3u%% ",
+            spinner[progress->tick++ & 3u],
+            doneText,
+            totalText,
+            percent);
+  } else {
+    fprintf(progress->out,
+            "  %c %s/%s %3u%% ",
+            spinner[progress->tick++ & 3u],
+            doneText,
+            totalText,
+            percent);
+  }
+
+  progress_print_name(progress->out, name, 72);
+  fflush(progress->out);
+}
+
+static int
+extract_progress(void *userdata,
+                 const zipy_entry_t *entry,
+                 uint64_t done,
+                 uint64_t total) {
+  progress_t *progress = userdata;
+
+  if (!progress)
+    return 1;
+  progress_update_bytes(progress, done, total, entry ? entry->name : NULL);
+  return 1;
+}
+
 static char*
 make_extract_path(const char *dir, const char *filename) {
   size_t dirlen, namelen;
@@ -1953,12 +2015,18 @@ main(int argc, char *argv[]) {
     config.options.save_dir = save_dir;
   }
 
-  directExtract = noProgress
-               && !policies
+  directExtract = !policies
                && !save_dir
                && config.options.on_conflict == ZIPY_CONFLICT_OVERWRITE
                && !(config.options.flags & ZIPY_EXTRACT_RESUME)
                && !archive_has_unsupported_method(zip);
+  if (directExtract && progress.tty) {
+    config.options.progress = extract_progress;
+    config.options.userdata = &progress;
+  } else {
+    config.options.progress = NULL;
+    config.options.userdata = NULL;
+  }
   if (!directExtract && jobs == 0) {
     autoJobs = adaptive_jobs(zip, count, &files);
     jobs = autoJobs;
