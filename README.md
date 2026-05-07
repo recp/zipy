@@ -34,6 +34,8 @@ zipy archive.zip -d target --no-progress
 when compressed, encrypted, or large stored workloads are big enough. `-j cpu`
 forces one worker per CPU core, capped by the number of entries. Use an
 explicit number such as `-j 4` to limit worker fan-out.
+Progress is rendered only on a TTY; redirected or container-style runs skip
+the spinner automatically.
 
 By default, the CLI asks what to do when an extracted entry would replace an
 existing file. Non-interactive runs fall back to saving existing files before
