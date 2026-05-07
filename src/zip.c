@@ -2169,7 +2169,7 @@ write_resume_state(const char *state_path,
           (unsigned long long)info->entry.compressed_size,
           (unsigned long long)info->entry.uncompressed_size,
           (unsigned)info->entry.crc32,
-          (unsigned)flags);
+          (unsigned)(flags & ~EXTRACT_DELAY_DIR_METADATA));
 
   if (fclose(fp) != 0) {
     remove_file(tmp);
@@ -4452,17 +4452,22 @@ extract_store_data_descriptor(zipy_archive_t * __restrict zipy,
                               size_t parent_len,
                               uint32_t extract_flags,
                               int zip64_descriptor,
+                              const char * __restrict state_path,
+                              const char * __restrict part_destdir,
                               progress_state_t * __restrict progress) {
   out_file_t outfile;
   uint8_t *buf;
-  const char *part_path;
+  const char *part_path = NULL;
   uint8_t tail[15];
   size_t tail_len = 0;
   uint64_t base_len = 0;
+  uint64_t resume_offset = 0;
   uint64_t remaining;
   size_t keep_tail = 15u;
   uint32_t crc = 0;
+  uint32_t resume_crc = 0;
   int apply_metadata = (extract_flags & ZIPY_EXTRACT_NO_METADATA) == 0;
+  int keep_part = (extract_flags & ZIPY_EXTRACT_RESUME) != 0;
   int metadata_done = 0;
   int ret = ZIPY_ZIP_ERR;
 
@@ -4475,8 +4480,7 @@ extract_store_data_descriptor(zipy_archive_t * __restrict zipy,
     return ZIPY_ZIP_ERR;
   if (zip64_descriptor
       || info->entry.encrypted
-      || info->entry.method != ZIPY_ZIP_STORE
-      || (extract_flags & ZIPY_EXTRACT_RESUME))
+      || info->entry.method != ZIPY_ZIP_STORE)
     return ZIPY_ZIP_EUNSUP;
   if (info->data_offset > zipy->file_size)
     return ZIPY_ZIP_ESIZE;
@@ -4491,19 +4495,57 @@ extract_store_data_descriptor(zipy_archive_t * __restrict zipy,
     return ZIPY_ZIP_EFILE;
   }
 
-  part_path = path_buf_set_suffix(&zipy->part_buf, destpath, ".part");
+  part_path = keep_part && part_destdir
+            ? resume_part_path(zipy, part_destdir, info)
+            : path_buf_set_suffix(&zipy->part_buf, destpath, ".part");
   if (!part_path)
     return ZIPY_ZIP_ERR;
-  remove_file(part_path);
+  if (!prepare_parent_dir(zipy, part_path))
+    return ZIPY_ZIP_EFILE;
 
-  if (!open_output_file_seek(part_path, &outfile, &ret, 0, 1))
+  if (keep_part) {
+    int part_exists = 0;
+    uint64_t part_size = 0;
+
+    if (!regular_file_size(part_path, &part_exists, &part_size))
+      return ZIPY_ZIP_EFILE;
+    if (part_exists && part_size > 0) {
+      if (part_size > zipy->file_size - info->data_offset) {
+        remove_file(part_path);
+      } else {
+        ret = crc32_file_prefix(zipy, part_path, part_size, &resume_crc);
+        if (ret != ZIPY_ZIP_OK)
+          return ret;
+        resume_offset = part_size;
+        base_len = part_size;
+        crc = resume_crc;
+      }
+    }
+  } else {
+    remove_file(part_path);
+  }
+
+  write_resume_state(state_path,
+                     zipy,
+                     info,
+                     destpath,
+                     part_path,
+                     resume_offset,
+                     extract_flags,
+                     "extracting");
+
+  if (!open_output_file_seek(part_path,
+                             &outfile,
+                             &ret,
+                             resume_offset,
+                             resume_offset == 0))
     return ret;
-  if (seek_set(zipy->fp, info->data_offset) != 0) {
+  if (seek_set(zipy->fp, info->data_offset + resume_offset) != 0) {
     ret = ZIPY_ZIP_EFILE;
     goto done;
   }
 
-  remaining = zipy->file_size - info->data_offset;
+  remaining = zipy->file_size - info->data_offset - resume_offset;
   while (remaining > 0) {
     uint64_t read_end;
     size_t n = remaining > ZIP_IO_CHUNK ? ZIP_IO_CHUNK : (size_t)remaining;
@@ -4617,7 +4659,7 @@ extract_store_data_descriptor(zipy_archive_t * __restrict zipy,
     }
   }
 
-  ret = ZIPY_ZIP_EUNSUP;
+  ret = ZIPY_ZIP_EINCOMPLETE;
   goto done;
 
 found:
@@ -4670,8 +4712,20 @@ done:
     outfile.fd = -1;
   }
 #endif
-  if (ret != ZIPY_ZIP_OK)
+  write_resume_state(state_path,
+                     zipy,
+                     info,
+                     destpath,
+                     part_path,
+                     base_len,
+                     extract_flags,
+                     ret == ZIPY_ZIP_OK ? "done"
+                   : ret == ZIPY_ZIP_EINCOMPLETE ? "incomplete"
+                   : "failed");
+  if (ret != ZIPY_ZIP_OK && (!keep_part || ret != ZIPY_ZIP_EINCOMPLETE))
     remove_file(part_path);
+  if (ret == ZIPY_ZIP_OK && keep_part && part_destdir)
+    cleanup_empty_parts_dirs(zipy, part_destdir, part_path);
   return ret;
 }
 
@@ -5995,6 +6049,7 @@ zipy_extract_stream(const char * __restrict path,
   const char *state_path = NULL;
   uint64_t progress_done = 0;
   size_t prefixLen;
+  int keep_entry_state = 0;
   int ret = ZIPY_ZIP_OK;
 
   memset(&zipy, 0, sizeof(zipy));
@@ -6161,7 +6216,8 @@ zipy_extract_stream(const char * __restrict path,
              && info.entry.method != ZIPY_ZIP_STORE)
             || (info.entry.method == ZIPY_ZIP_STORE && info.entry.encrypted)
             || zip64Desc
-            || (opts.flags & ZIPY_EXTRACT_RESUME))) {
+            || ((opts.flags & ZIPY_EXTRACT_RESUME)
+                && info.entry.method != ZIPY_ZIP_STORE))) {
       ret = ZIPY_ZIP_EUNSUP;
       break;
     }
@@ -6251,7 +6307,11 @@ zipy_extract_stream(const char * __restrict path,
                                             parentLen,
                                             opts.flags | EXTRACT_DELAY_DIR_METADATA,
                                             zip64Desc,
+                                            state_path,
+                                            destdir,
                                             opts.progress ? &progress : NULL);
+        if (ret < ZIPY_ZIP_OK && (opts.flags & ZIPY_EXTRACT_RESUME))
+          keep_entry_state = 1;
       } else {
         ret = extract_deflate_data_descriptor(&zipy,
                                               &info,
@@ -6303,7 +6363,7 @@ zipy_extract_stream(const char * __restrict path,
   }
 
 done:
-  if (state_path)
+  if (state_path && !keep_entry_state)
     write_resume_run_state(state_path,
                            &zipy,
                            ret == ZIPY_ZIP_OK ? "complete"

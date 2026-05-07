@@ -177,7 +177,9 @@ with unknown local sizes, `zipy_extract_stream()` can stream unencrypted
 Deflate method 8, legacy ZipCrypto Deflate, and WinZip AES Deflate entries
 before the central directory is available. It can also stream stored entries
 when the data descriptor is signed or when an unsigned descriptor is followed
-by another ZIP record. ZIP64-sized and resume-mode unknown-size descriptors
+by another ZIP record. With `ZIPY_EXTRACT_RESUME`, unknown-size stored entries
+keep partial output under `target/.zipy/parts/` and can continue when the
+archive grows. ZIP64-sized and resume-mode unknown-size Deflate descriptors
 still require the central directory path.
 If EOF is reached before a central-directory header, `zipy_extract_stream()`
 returns `ZIPY_ZIP_EINCOMPLETE` instead of success so callers can retry a
