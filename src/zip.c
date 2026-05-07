@@ -698,6 +698,61 @@ match_signed_store_descriptor(zipy_archive_t * __restrict zipy,
 }
 
 static int
+match_unsigned_store_descriptor(zipy_archive_t * __restrict zipy,
+                                entry_info_t * __restrict info,
+                                uint64_t descriptor_offset,
+                                uint64_t data_len,
+                                uint32_t data_crc,
+                                int zip64_descriptor) {
+  uint8_t desc[24];
+  uint8_t next[4];
+  uint64_t compressed_size;
+  uint64_t uncompressed_size;
+  uint64_t descriptor_len;
+  const uint8_t *p;
+  uint32_t crc;
+
+  if (!zipy || !zipy->fp || !info)
+    return ZIPY_ZIP_ERR;
+
+  descriptor_len = zip64_descriptor ? 20u : 12u;
+  if (descriptor_offset > zipy->file_size
+      || descriptor_len > zipy->file_size - descriptor_offset
+      || zipy->file_size - descriptor_offset - descriptor_len < 4u)
+    return ZIPY_ZIP_SKIPPED;
+
+  if (seek_set(zipy->fp, descriptor_offset) != 0
+      || !read_exact(zipy->fp, desc, (size_t)descriptor_len)
+      || !read_exact(zipy->fp, next, sizeof(next)))
+    return ZIPY_ZIP_EFILE;
+
+  p = desc;
+  crc = le32(p);
+  p += 4u;
+  if (zip64_descriptor) {
+    compressed_size = le64(p);
+    uncompressed_size = le64(p + 8u);
+  } else {
+    compressed_size = le32(p);
+    uncompressed_size = le32(p + 4u);
+  }
+
+  if (crc != data_crc
+      || compressed_size != data_len
+      || uncompressed_size != data_len
+      || !is_record_signature(le32(next)))
+    return ZIPY_ZIP_SKIPPED;
+
+  info->entry.crc32 = crc;
+  info->entry.compressed_size = compressed_size;
+  info->entry.uncompressed_size = uncompressed_size;
+
+  return seek_set(zipy->fp, descriptor_offset + descriptor_len) == 0
+       ? ZIPY_ZIP_OK
+       : ZIPY_ZIP_EFILE;
+}
+
+static int
 get_file_size(FILE *fp, uint64_t *size) {
 #if defined(_WIN32)
   if (_fseeki64(fp, 0, SEEK_END) != 0)
@@ -4394,10 +4449,11 @@ extract_store_data_descriptor(zipy_archive_t * __restrict zipy,
   out_file_t outfile;
   uint8_t *buf;
   const char *part_path;
-  uint8_t tail[3];
+  uint8_t tail[15];
   size_t tail_len = 0;
   uint64_t base_len = 0;
   uint64_t remaining;
+  size_t keep_tail = 15u;
   uint32_t crc = 0;
   int apply_metadata = (extract_flags & ZIPY_EXTRACT_NO_METADATA) == 0;
   int metadata_done = 0;
@@ -4417,7 +4473,7 @@ extract_store_data_descriptor(zipy_archive_t * __restrict zipy,
     return ZIPY_ZIP_EUNSUP;
   if (info->data_offset > zipy->file_size)
     return ZIPY_ZIP_ESIZE;
-  if (!reserve_bytes(&zipy->copy_buf, &zipy->copy_cap, ZIP_IO_CHUNK + 3u))
+  if (!reserve_bytes(&zipy->copy_buf, &zipy->copy_cap, ZIP_IO_CHUNK + keep_tail))
     return ZIPY_ZIP_ERR;
   buf = zipy->copy_buf;
 
@@ -4498,12 +4554,40 @@ extract_store_data_descriptor(zipy_archive_t * __restrict zipy,
         if (ret < ZIPY_ZIP_OK)
           goto done;
       }
+      if (is_record_signature(sig) && i >= keep_tail - 3u) {
+        size_t data_in_buf = i - (keep_tail - 3u);
+        uint32_t candidate_crc = crc32_update(crc, buf, data_in_buf);
+        uint64_t data_len = base_len + data_in_buf;
+        uint64_t descriptor_offset = info->data_offset + data_len;
+
+        ret = match_unsigned_store_descriptor(zipy,
+                                              info,
+                                              descriptor_offset,
+                                              data_len,
+                                              candidate_crc,
+                                              zip64_descriptor);
+        if (ret == ZIPY_ZIP_OK) {
+          if (data_in_buf > 0) {
+            ret = write_file(&outfile, buf, data_in_buf);
+            if (ret != ZIPY_ZIP_OK)
+              goto done;
+            ret = progress_advance(progress, data_in_buf);
+            if (ret != ZIPY_ZIP_OK)
+              goto done;
+          }
+          crc = candidate_crc;
+          base_len = data_len;
+          goto found;
+        }
+        if (ret < ZIPY_ZIP_OK)
+          goto done;
+      }
 
       i++;
     }
 
-    if (scan_len > 3u) {
-      size_t flush_len = scan_len - 3u;
+    if (scan_len > keep_tail) {
+      size_t flush_len = scan_len - keep_tail;
 
       ret = write_file(&outfile, buf, flush_len);
       if (ret != ZIPY_ZIP_OK)
@@ -4513,8 +4597,8 @@ extract_store_data_descriptor(zipy_archive_t * __restrict zipy,
         goto done;
       crc = crc32_update(crc, buf, flush_len);
       base_len += flush_len;
-      memcpy(tail, buf + flush_len, 3u);
-      tail_len = 3u;
+      memcpy(tail, buf + flush_len, keep_tail);
+      tail_len = keep_tail;
     } else {
       memcpy(tail, buf, scan_len);
       tail_len = scan_len;

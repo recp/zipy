@@ -179,9 +179,9 @@ still present in the local header or ZIP64 extra. For data-descriptor entries
 with unknown local sizes, `zipy_extract_stream()` can stream unencrypted
 Deflate method 8, legacy ZipCrypto Deflate, and WinZip AES Deflate entries
 before the central directory is available. It can also stream stored entries
-when the data descriptor has the optional signature. Unsigned stored,
-ZIP64-sized, and resume-mode unknown-size descriptors still require the central
-directory path.
+when the data descriptor is signed or when an unsigned descriptor is followed
+by another ZIP record. ZIP64-sized and resume-mode unknown-size descriptors
+still require the central directory path.
 If EOF is reached before a central-directory header, `zipy_extract_stream()`
 returns `ZIPY_ZIP_EINCOMPLETE` instead of success so callers can retry a
 still-downloading or truncated archive.
@@ -237,5 +237,5 @@ member.
 - [x] known-size data descriptors in local-header streaming
 - [x] unknown-size Deflate, ZipCrypto, and AES data descriptors before central directory
 - [x] signed unknown-size stored data descriptors before central directory
-- [ ] unsigned unknown-size stored data descriptors before central directory
+- [x] unsigned unknown-size stored data descriptors before central directory
 - [ ] Deflate64 method 9 extraction
