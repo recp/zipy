@@ -6212,6 +6212,13 @@ zipy_extract_stream(const char * __restrict path,
   }
 
 done:
+  if (state_path)
+    write_resume_run_state(state_path,
+                           &zipy,
+                           ret == ZIPY_ZIP_OK ? "complete"
+                         : ret == ZIPY_ZIP_EINCOMPLETE ? "incomplete"
+                         : "failed",
+                           ret);
   free(extra_buf);
   free(save_dir);
   archive_cleanup(&zipy);
