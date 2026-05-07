@@ -3072,6 +3072,8 @@ copy_store_mapped(out_file_t * __restrict out,
 
   src += (size_t)already_written;
   remaining = len - already_written;
+  if (!check_crc && !track_progress && remaining <= (uint64_t)SIZE_MAX)
+    return write_file(out, src, (size_t)remaining);
 
   while (remaining > 0) {
     size_t n = check_crc
