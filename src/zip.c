@@ -1348,6 +1348,36 @@ zipy_apply_metadata(const char *path, const zipy_file_t *info) {
 }
 
 static int
+zipy_apply_open_file_metadata(FILE *out, const zipy_file_t *info) {
+#if defined(_WIN32)
+  (void)out;
+  (void)info;
+  return 0;
+#else
+  uint32_t mode = zipy_unix_mode(info);
+
+  if (!out || !info || zipy_is_symlink(info))
+    return 0;
+
+  if (mode != 0 && fchmod(fileno(out), (mode_t)(mode & 07777u)) != 0)
+    return 0;
+
+  if (info->has_mtime) {
+    struct timespec times[2];
+
+    times[0].tv_sec = info->mtime;
+    times[0].tv_nsec = 0;
+    times[1].tv_sec = info->mtime;
+    times[1].tv_nsec = 0;
+    if (futimens(fileno(out), times) != 0)
+      return 0;
+  }
+
+  return 1;
+#endif
+}
+
+static int
 zipy_mkdir_parent(const char *path) {
   char *tmp, *p, *last = NULL;
   int ok;
@@ -2668,6 +2698,7 @@ zipy_extract_entry(zipy_archive_t * ZIPY_RESTRICT zipy,
   FILE *outfp;
   int check_crc = (extract_flags & ZIPY_EXTRACT_NO_CRC) == 0;
   int encrypted;
+  int metadata_done = 0;
   int ret = ZIPY_ZIP_ERR;
 
   if (!zipy || !zipy->fp || !info || !destpath)
@@ -2832,9 +2863,15 @@ zipy_extract_entry(zipy_archive_t * ZIPY_RESTRICT zipy,
                           dec_ptr);
   }
 
+  if (ret == ZIPY_ZIP_OK) {
+    if (fflush(outfp) != 0)
+      ret = ZIPY_ZIP_EFILE;
+    else
+      metadata_done = zipy_apply_open_file_metadata(outfp, info);
+  }
   if (fclose(outfp) != 0 && ret == ZIPY_ZIP_OK)
     ret = ZIPY_ZIP_EFILE;
-  if (ret == ZIPY_ZIP_OK && !zipy_apply_metadata(destpath, info))
+  if (ret == ZIPY_ZIP_OK && !metadata_done && !zipy_apply_metadata(destpath, info))
     ret = ZIPY_ZIP_EFILE;
 
   return ret;
