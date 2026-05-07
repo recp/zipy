@@ -4429,16 +4429,6 @@ archive_clone(zipy_archive_t * __restrict zipy) {
 }
 
 int
-archive_has_encrypted(const zipy_archive_t * __restrict zipy) {
-  return zipy && zipy->has_encrypted;
-}
-
-int
-archive_has_symlink(const zipy_archive_t * __restrict zipy) {
-  return zipy && zipy->has_symlink;
-}
-
-int
 archive_has_unsupported_method(const zipy_archive_t * __restrict zipy) {
   return zipy && zipy->has_unsupported_method;
 }

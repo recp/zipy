@@ -17,12 +17,6 @@ zipy_archive_t *
 archive_clone(zipy_archive_t * __restrict zipy);
 
 int
-archive_has_encrypted(const zipy_archive_t * __restrict zipy);
-
-int
-archive_has_symlink(const zipy_archive_t * __restrict zipy);
-
-int
 archive_has_unsupported_method(const zipy_archive_t * __restrict zipy);
 
 uint16_t
