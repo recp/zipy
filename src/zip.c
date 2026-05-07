@@ -115,10 +115,18 @@ typedef struct zipy_path_buf_t {
   size_t cap;
 } zipy_path_buf_t;
 
+typedef struct zipy_name_chunk_t {
+  struct zipy_name_chunk_t *next;
+  size_t used;
+  size_t cap;
+  char data[];
+} zipy_name_chunk_t;
+
 struct zipy_archive_t {
   FILE    *fp;
   char    *path;
   zipy_file_t *files;
+  zipy_name_chunk_t *name_chunks;
   size_t   file_count;
   uint64_t file_size;
   const uint8_t *map;
@@ -197,6 +205,49 @@ zipy_path_buf_free(zipy_path_buf_t *buf) {
   free(buf->data);
   buf->data = NULL;
   buf->cap = 0;
+}
+
+static void
+zipy_free_name_chunks(zipy_archive_t *zipy) {
+  zipy_name_chunk_t *chunk;
+
+  if (!zipy)
+    return;
+
+  chunk = zipy->name_chunks;
+  while (chunk) {
+    zipy_name_chunk_t *next = chunk->next;
+
+    free(chunk);
+    chunk = next;
+  }
+
+  zipy->name_chunks = NULL;
+}
+
+static char *
+zipy_alloc_name(zipy_archive_t *zipy, size_t len) {
+  zipy_name_chunk_t *chunk;
+  size_t cap;
+
+  if (!zipy || len == 0)
+    return NULL;
+
+  chunk = zipy->name_chunks;
+  if (!chunk || len > chunk->cap - chunk->used) {
+    cap = len > 4096u ? len : 4096u;
+    chunk = malloc(sizeof(*chunk) + cap);
+    if (!chunk)
+      return NULL;
+
+    chunk->next = zipy->name_chunks;
+    chunk->used = 0;
+    chunk->cap = cap;
+    zipy->name_chunks = chunk;
+  }
+
+  chunk->used += len;
+  return chunk->data + chunk->used - len;
 }
 
 static int
@@ -1485,8 +1536,12 @@ zipy_free_files(zipy_archive_t *zipy) {
     return;
   }
 
-  for (i = 0; i < zipy->file_count; i++)
-    free((char *)zipy->files[i].entry.name);
+  if (zipy->name_chunks) {
+    zipy_free_name_chunks(zipy);
+  } else {
+    for (i = 0; i < zipy->file_count; i++)
+      free((char *)zipy->files[i].entry.name);
+  }
 
   free(zipy->files);
   zipy->files = NULL;
@@ -2491,7 +2546,6 @@ zipy_open(const char *path) {
   uint8_t extra_stack[512];
   uint8_t *extra_buf = NULL;
   size_t extra_cap = 0;
-  char *name = NULL;
   size_t i, count;
 
   if (!path || !(fp = fopen(path, "rb")))
@@ -2554,14 +2608,14 @@ zipy_open(const char *path) {
         || (diskStart != 0 && diskStart != ZIP64_MAGIC_UINT16))
       goto err;
 
-    name = malloc((size_t)nameLen + 1u);
+    char *name = zipy_alloc_name(zipy, (size_t)nameLen + 1u);
+
     if (!name || !zipy_read(fp, name, nameLen))
       goto err;
     if (memchr(name, '\0', nameLen))
       goto err;
     name[nameLen] = '\0';
     info->entry.name = name;
-    name = NULL;
 
     info->zip_method = info->entry.method;
     info->entry.compressed_size = comp32;
@@ -2622,7 +2676,6 @@ zipy_open(const char *path) {
   return zipy;
 
 err:
-  free(name);
   free(extra_buf);
   if (zipy) {
     zipy_unmap_archive(zipy);
