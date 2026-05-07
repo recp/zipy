@@ -27,6 +27,13 @@
 #include <string.h>
 #include <time.h>
 
+#if defined(__APPLE__) && defined(__aarch64__) && defined(__has_include)
+#  if __has_include(<arm_acle.h>)
+#    include <arm_acle.h>
+#    define ZIPY_HAVE_ARM_CRC32 1
+#  endif
+#endif
+
 #if defined(_WIN32)
 #  include <direct.h>
 #  include <io.h>
@@ -2648,6 +2655,7 @@ fast_write_chunk_size(uint64_t remaining) {
        : (size_t)remaining;
 }
 
+#if !ZIPY_HAVE_ARM_CRC32
 static const uint32_t crc32_base_table[256] = {
     0x00000000u, 0x77073096u, 0xEE0E612Cu, 0x990951BAu,
     0x076DC419u, 0x706AF48Fu, 0xE963A535u, 0x9E6495A3u,
@@ -2759,11 +2767,48 @@ crc32_init_tables(void) {
   (void)pthread_once(&crc32_once, crc32_make_tables);
 }
 #endif
+#endif
+
+#if ZIPY_HAVE_ARM_CRC32
+static uint32_t
+crc32_update_arm(uint32_t crc,
+                 const uint8_t * __restrict buf,
+                 size_t len) {
+  crc = ~crc;
+
+  while (len >= 64u) {
+    crc = __crc32d(crc, load_le64(buf));
+    crc = __crc32d(crc, load_le64(buf + 8u));
+    crc = __crc32d(crc, load_le64(buf + 16u));
+    crc = __crc32d(crc, load_le64(buf + 24u));
+    crc = __crc32d(crc, load_le64(buf + 32u));
+    crc = __crc32d(crc, load_le64(buf + 40u));
+    crc = __crc32d(crc, load_le64(buf + 48u));
+    crc = __crc32d(crc, load_le64(buf + 56u));
+    buf += 64u;
+    len -= 64u;
+  }
+
+  while (len >= 8u) {
+    crc = __crc32d(crc, load_le64(buf));
+    buf += 8u;
+    len -= 8u;
+  }
+
+  while (len--)
+    crc = __crc32b(crc, *buf++);
+
+  return ~crc;
+}
+#endif
 
 static uint32_t
 crc32_update(uint32_t crc,
                   const uint8_t * __restrict buf,
                   size_t len) {
+#if ZIPY_HAVE_ARM_CRC32
+  return crc32_update_arm(crc, buf, len);
+#else
   const uint32_t (*table)[256] = crc32_tables;
 
   crc32_init_tables();
@@ -2811,6 +2856,7 @@ crc32_update(uint32_t crc,
   while (len--)
     crc = (crc >> 8) ^ table[0][(crc ^ *buf++) & 0xFFu];
   return ~crc;
+#endif
 }
 
 static int
