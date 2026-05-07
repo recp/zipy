@@ -23,6 +23,7 @@ zipy archive.zip -d target -j cpu
 zipy archive.zip -d target -j 1
 zipy archive.zip -d target -p password
 zipy archive.zip -d target --no-crc
+zipy archive.zip -d target --no-metadata
 ```
 
 `-j auto` and `-j cpu` use one worker per CPU core, capped by the number of
@@ -135,6 +136,10 @@ zipy_close(zip);
 
 CRC32 validation is enabled by default. Set `ZIPY_EXTRACT_NO_CRC` only when
 lower latency matters more than detecting corrupted archive data.
+
+Mode and timestamp restoration is enabled by default. Set
+`ZIPY_EXTRACT_NO_METADATA` when raw extraction latency matters more than
+preserving file metadata.
 
 ## Status
 

@@ -82,6 +82,7 @@ print_usage(void) {
   printf("  --save-to <target|home|trash>\n");
   printf("  -p, --password <password>\n");
   printf("  --no-crc    Skip CRC32 validation\n");
+  printf("  --no-metadata  Skip mode and timestamp restoration\n");
   printf("  --config [key=value ...]  Show or update ~/.zipy/config\n");
 }
 
@@ -1520,6 +1521,9 @@ main(int argc, char *argv[]) {
       config.options.password = argv[++i];
     } else if (strcmp(argv[i], "--no-crc") == 0) {
       config.options.flags |= ZIPY_EXTRACT_NO_CRC;
+    } else if (strcmp(argv[i], "--no-metadata") == 0
+               || strcmp(argv[i], "--no-meta") == 0) {
+      config.options.flags |= ZIPY_EXTRACT_NO_METADATA;
     } else if (!zipfile) {
       zipfile = argv[i];
     } else {

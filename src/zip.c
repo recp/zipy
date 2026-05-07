@@ -2377,12 +2377,14 @@ static int
 zipy_create_symlink(const char *destpath,
                     const uint8_t *target,
                     size_t target_len,
-                    const zipy_file_t *info) {
+                    const zipy_file_t *info,
+                    int apply_metadata) {
 #if defined(_WIN32)
   (void)destpath;
   (void)target;
   (void)target_len;
   (void)info;
+  (void)apply_metadata;
   return ZIPY_ZIP_EUNSUP;
 #else
   if (!target || target_len == 0 || memchr(target, '\0', target_len))
@@ -2398,7 +2400,9 @@ zipy_create_symlink(const char *destpath,
       return ZIPY_ZIP_EFILE;
   }
 
-  return zipy_apply_metadata(destpath, info) ? ZIPY_ZIP_OK : ZIPY_ZIP_EFILE;
+  if (apply_metadata && !zipy_apply_metadata(destpath, info))
+    return ZIPY_ZIP_EFILE;
+  return ZIPY_ZIP_OK;
 #endif
 }
 
@@ -2721,7 +2725,7 @@ zipy_default_extract_options(const zipy_extract_options_t *options) {
     out.on_conflict = ZIPY_CONFLICT_SAVE;
   if (out.save_to < ZIPY_SAVE_TARGET || out.save_to > ZIPY_SAVE_TRASH)
     out.save_to = ZIPY_SAVE_TARGET;
-  out.flags &= ZIPY_EXTRACT_NO_CRC;
+  out.flags &= ZIPY_EXTRACT_NO_CRC | ZIPY_EXTRACT_NO_METADATA;
 
   return out;
 }
@@ -3203,6 +3207,7 @@ zipy_extract_entry(zipy_archive_t * ZIPY_RESTRICT zipy,
   dec_t *dec_ptr = NULL;
   zipy_out_file_t outfile;
   int check_crc = (extract_flags & ZIPY_EXTRACT_NO_CRC) == 0;
+  int apply_metadata = (extract_flags & ZIPY_EXTRACT_NO_METADATA) == 0;
   int encrypted;
   int metadata_done = 0;
   int ret = ZIPY_ZIP_ERR;
@@ -3224,7 +3229,7 @@ zipy_extract_entry(zipy_archive_t * ZIPY_RESTRICT zipy,
   if (info->entry.is_directory) {
     if (!zipy_mkdirs_buf(destpath, &zipy->parent_buf))
       return ZIPY_ZIP_EFILE;
-    if (extract_flags & ZIPY_EXTRACT_DELAY_DIR_METADATA)
+    if ((extract_flags & ZIPY_EXTRACT_DELAY_DIR_METADATA) || !apply_metadata)
       return ZIPY_ZIP_OK;
     return zipy_apply_metadata(destpath, info) ? ZIPY_ZIP_OK : ZIPY_ZIP_EFILE;
   }
@@ -3345,7 +3350,11 @@ zipy_extract_entry(zipy_archive_t * ZIPY_RESTRICT zipy,
     }
 
     if (ret == ZIPY_ZIP_OK)
-      ret = zipy_create_symlink(destpath, target, target_len, info);
+      ret = zipy_create_symlink(destpath,
+                                target,
+                                target_len,
+                                info,
+                                apply_metadata);
     free(target);
     return ret;
   }
@@ -3392,12 +3401,15 @@ zipy_extract_entry(zipy_archive_t * ZIPY_RESTRICT zipy,
   if (ret == ZIPY_ZIP_OK) {
     if (!zipy_flush_output(&outfile))
       ret = ZIPY_ZIP_EFILE;
-    else
+    else if (apply_metadata)
       metadata_done = zipy_apply_open_file_metadata(&outfile, info);
   }
   if (!zipy_close_output_file(&outfile) && ret == ZIPY_ZIP_OK)
     ret = ZIPY_ZIP_EFILE;
-  if (ret == ZIPY_ZIP_OK && !metadata_done && !zipy_apply_metadata(destpath, info))
+  if (ret == ZIPY_ZIP_OK
+      && apply_metadata
+      && !metadata_done
+      && !zipy_apply_metadata(destpath, info))
     ret = ZIPY_ZIP_EFILE;
 
   return ret;
@@ -3847,7 +3859,7 @@ zipy_extract_all_options(zipy_archive_t *zipy,
                                     skip,
                                     opts.flags,
                                     opts.password);
-  if (ret == ZIPY_ZIP_OK)
+  if (ret == ZIPY_ZIP_OK && !(opts.flags & ZIPY_EXTRACT_NO_METADATA))
     ret = zipy_apply_directory_metadata(zipy, destdir, skip);
 
   free(skip);
