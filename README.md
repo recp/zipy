@@ -167,6 +167,8 @@ When resume is enabled, zipy also writes `target/.zipy/resume_state.txt` with
 the last entry, target path, `.part` path, resume offset, sizes, CRC, and flags.
 The CLI writes `target/.zipy/resume_options.txt` with the effective options and
 relevant `ZIPY_*` environment values. Password values are never written.
+With atomic or resume extraction enabled, `.zipy` at the archive root is
+reserved for zipy's extraction state.
 
 For raw speed, use `ZIPY_EXTRACT_FAST` in the library. It combines
 `ZIPY_EXTRACT_NO_CRC` and `ZIPY_EXTRACT_NO_METADATA`. In the CLI, `--fast`

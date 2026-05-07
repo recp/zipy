@@ -1258,6 +1258,31 @@ scan_member_name(const char * __restrict path,
 }
 
 static int
+name_is_zipy_segment(const char *name, size_t len) {
+  return len == 5u
+      && name[0] == '.'
+      && tolower((unsigned char)name[1]) == 'z'
+      && tolower((unsigned char)name[2]) == 'i'
+      && tolower((unsigned char)name[3]) == 'p'
+      && tolower((unsigned char)name[4]) == 'y';
+}
+
+static int
+is_internal_state_name(const char *name, size_t len) {
+  size_t i;
+
+  if (!name || len < 5u)
+    return 0;
+
+  for (i = 0; i < len; i++) {
+    if (is_zip_sep(name[i]))
+      break;
+  }
+
+  return name_is_zipy_segment(name, i);
+}
+
+static int
 path_info(const char *path, int *exists, int *isDir) {
 #if defined(_WIN32)
   struct _stat64 st;
@@ -3760,6 +3785,10 @@ extract_entry(zipy_archive_t * __restrict zipy,
 
   if (info->flags & ZIP_FLAG_STRONG_ENC)
     return ZIPY_ZIP_EUNSUP;
+
+  if (use_part
+      && is_internal_state_name(info->entry.name, info->entry.name_len))
+    return ZIPY_ZIP_EFILE;
 
   if (info->entry.is_directory) {
     if (!mkdirs_buf(destpath, &zipy->parent_buf))
