@@ -150,8 +150,9 @@ zipy_close(zip);
 `ask` is CLI-only. Apps should show their own UI and pass `save`,
 `overwrite`, `skip`, or `fail`.
 
-Set `progress` to receive cumulative extracted-byte updates after each file.
-Return zero from the callback to cancel extraction; zipy returns
+Set `progress` to receive cumulative extracted-byte updates. Stored streaming
+paths report chunk-level progress; mapped and deflated paths may report in
+larger steps. Return zero from the callback to cancel extraction; zipy returns
 `ZIPY_ZIP_ECANCEL`. `zipy_extract_stream()` reports `total = 0` because the
 central directory may not be available yet. With `jobs > 1`, callbacks may run
 from worker threads.

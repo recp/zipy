@@ -200,6 +200,19 @@ typedef struct out_file_t {
 #endif
 } out_file_t;
 
+typedef struct progress_state_t {
+  const zipy_extract_options_t *options;
+  const zipy_entry_t *entry;
+  mutex_handle_t *lock;
+  uint64_t *done;
+  uint64_t total;
+  uint64_t entry_done;
+  int *result;
+} progress_state_t;
+
+static int
+progress_advance(progress_state_t *progress, uint64_t amount);
+
 static uint16_t
 le16(const uint8_t * __restrict p) {
   return (uint16_t)((uint16_t)p[0] | ((uint16_t)p[1] << 8));
@@ -2750,7 +2763,8 @@ write_chunk(out_file_t * __restrict out,
                  uint32_t * __restrict crc,
                  int check_crc,
                  dec_t * __restrict dec,
-                 uint64_t * __restrict written) {
+                 uint64_t * __restrict written,
+                 progress_state_t * __restrict progress) {
   int ret;
 
   if (len == 0)
@@ -2766,7 +2780,7 @@ write_chunk(out_file_t * __restrict out,
   if (check_crc)
     *crc = crc32_update(*crc, buf, len);
   *written += len;
-  return ZIPY_ZIP_OK;
+  return progress_advance(progress, len);
 }
 
 static int
@@ -2777,7 +2791,8 @@ copy_store(zipy_archive_t * __restrict zipy,
                 int check_crc,
                 dec_t * __restrict dec,
                 uint64_t already_written,
-                uint32_t initial_crc) {
+                uint32_t initial_crc,
+                progress_state_t * __restrict progress) {
   FILE *fp;
   uint8_t *buf;
   uint64_t remaining, written;
@@ -2804,7 +2819,7 @@ copy_store(zipy_archive_t * __restrict zipy,
       return ret;
     }
 
-    ret = write_chunk(out, buf, n, &crc, check_crc, dec, &written);
+    ret = write_chunk(out, buf, n, &crc, check_crc, dec, &written, progress);
     if (ret != ZIPY_ZIP_OK)
       return ret;
 
@@ -2830,7 +2845,8 @@ copy_store_mapped(out_file_t * __restrict out,
                        uint32_t expectedCrc,
                        int check_crc,
                        uint64_t already_written,
-                       uint32_t initial_crc) {
+                       uint32_t initial_crc,
+                       progress_state_t * __restrict progress) {
   uint64_t remaining;
   uint32_t crc = initial_crc;
   int ret;
@@ -2856,6 +2872,9 @@ copy_store_mapped(out_file_t * __restrict out,
 
     if (check_crc)
       crc = crc32_update(crc, src, n);
+    ret = progress_advance(progress, n);
+    if (ret != ZIPY_ZIP_OK)
+      return ret;
 
     src += n;
     remaining -= n;
@@ -2874,13 +2893,15 @@ inflate_raw_streamed(zipy_archive_t * __restrict zipy,
                      uint64_t uncompressed_size,
                      uint32_t expectedCrc,
                      int check_crc,
-                     dec_t * __restrict dec) {
+                     dec_t * __restrict dec,
+                     progress_state_t * __restrict progress) {
   out_map_t outmap;
   uint8_t *outbuf;
   uint8_t *inbuf;
   uint64_t remaining;
   size_t outlen;
   uint32_t crc;
+  uint32_t produced = 0;
   int mapped_out = 0;
   int zret = UNZ_UNFINISHED;
   int ret;
@@ -2937,6 +2958,18 @@ inflate_raw_streamed(zipy_archive_t * __restrict zipy,
     if (zret < UNZ_OK) {
       ret = ZIPY_ZIP_EINFLATE;
       goto done;
+    }
+    if (progress && progress->options && progress->options->progress) {
+      uint32_t now = infl_output_pos(zipy->inflate_stream);
+
+      if (now < produced) {
+        ret = ZIPY_ZIP_ESIZE;
+        goto done;
+      }
+      ret = progress_advance(progress, (uint64_t)(now - produced));
+      if (ret != ZIPY_ZIP_OK)
+        goto done;
+      produced = now;
     }
     if (zret == UNZ_OK && remaining != n) {
       ret = ZIPY_ZIP_ESIZE;
@@ -2995,7 +3028,8 @@ inflate_raw(zipy_archive_t * __restrict zipy,
                  uint64_t uncompressed_size,
                  uint32_t expectedCrc,
                  int check_crc,
-                 dec_t * __restrict dec) {
+                 dec_t * __restrict dec,
+                 progress_state_t * __restrict progress) {
   FILE *fp;
   uint8_t *inbuf = NULL;
   uint8_t *outbuf;
@@ -3017,7 +3051,8 @@ inflate_raw(zipy_archive_t * __restrict zipy,
                                 uncompressed_size,
                                 expectedCrc,
                                 check_crc,
-                                dec);
+                                dec,
+                                progress);
 
   inlen = compressed_size > 0 ? (size_t)compressed_size : 1;
   outlen = uncompressed_size > 0 ? (size_t)uncompressed_size : 1;
@@ -3089,6 +3124,10 @@ inflate_raw(zipy_archive_t * __restrict zipy,
     if (ret != ZIPY_ZIP_OK)
       goto done;
   }
+
+  ret = progress_advance(progress, uncompressed_size);
+  if (ret != ZIPY_ZIP_OK)
+    goto done;
 
   ret = ZIPY_ZIP_OK;
 
@@ -3665,6 +3704,88 @@ report_progress(const zipy_extract_options_t *options,
 }
 
 static int
+progress_advance(progress_state_t *progress, uint64_t amount) {
+  const zipy_extract_options_t *options;
+  uint64_t done;
+  uint64_t total;
+  int ret;
+
+  if (!progress
+      || !progress->options
+      || !progress->options->progress
+      || amount == 0)
+    return ZIPY_ZIP_OK;
+
+  if (progress->lock)
+    mutex_lock(progress->lock);
+
+  if (UINT64_MAX - progress->entry_done < amount)
+    progress->entry_done = UINT64_MAX;
+  else
+    progress->entry_done += amount;
+
+  if (progress->done) {
+    if (UINT64_MAX - *progress->done < amount)
+      *progress->done = UINT64_MAX;
+    else
+      *progress->done += amount;
+    done = *progress->done;
+  } else {
+    done = progress->entry_done;
+  }
+  total = progress->total;
+  options = progress->options;
+
+  ret = report_progress(options, progress->entry, done, total);
+  if (ret < ZIPY_ZIP_OK && progress->result && *progress->result == ZIPY_ZIP_OK)
+    *progress->result = ret;
+
+  if (progress->lock)
+    mutex_unlock(progress->lock);
+
+  return ret;
+}
+
+static int
+progress_finish_entry(progress_state_t *progress,
+                      const entry_info_t *info) {
+  uint64_t size;
+
+  if (!progress
+      || !progress->options
+      || !progress->options->progress
+      || !info
+      || info->entry.is_directory)
+    return ZIPY_ZIP_OK;
+
+  size = entry_progress_size(info);
+  if (size <= progress->entry_done)
+    return ZIPY_ZIP_OK;
+
+  return progress_advance(progress, size - progress->entry_done);
+}
+
+static void
+progress_init_entry(progress_state_t *progress,
+                    const zipy_extract_options_t *options,
+                    const zipy_entry_t *entry,
+                    uint64_t *done,
+                    uint64_t total,
+                    mutex_handle_t *lock,
+                    int *result) {
+  memset(progress, 0, sizeof(*progress));
+  if (!options || !options->progress || !entry || entry->is_directory)
+    return;
+
+  progress->options = options;
+  progress->entry = entry;
+  progress->done = done;
+  progress->total = total;
+  progress->lock = lock;
+  progress->result = result;
+}
+
+static int
 prepare_conflict(const char *destdir,
                       const zipy_entry_t *entry,
                       const char *destpath,
@@ -4161,7 +4282,8 @@ extract_store_data_descriptor(zipy_archive_t * __restrict zipy,
                               const char * __restrict destpath,
                               size_t parent_len,
                               uint32_t extract_flags,
-                              int zip64_descriptor) {
+                              int zip64_descriptor,
+                              progress_state_t * __restrict progress) {
   out_file_t outfile;
   uint8_t *buf;
   const char *part_path;
@@ -4258,6 +4380,9 @@ extract_store_data_descriptor(zipy_archive_t * __restrict zipy,
             ret = write_file(&outfile, buf, i);
             if (ret != ZIPY_ZIP_OK)
               goto done;
+            ret = progress_advance(progress, i);
+            if (ret != ZIPY_ZIP_OK)
+              goto done;
           }
           crc = candidate_crc;
           base_len = data_len;
@@ -4274,6 +4399,9 @@ extract_store_data_descriptor(zipy_archive_t * __restrict zipy,
       size_t flush_len = scan_len - 3u;
 
       ret = write_file(&outfile, buf, flush_len);
+      if (ret != ZIPY_ZIP_OK)
+        goto done;
+      ret = progress_advance(progress, flush_len);
       if (ret != ZIPY_ZIP_OK)
         goto done;
       crc = crc32_update(crc, buf, flush_len);
@@ -4356,7 +4484,8 @@ extract_deflate_data_descriptor(zipy_archive_t * __restrict zipy,
                                 size_t parent_len,
                                 uint32_t extract_flags,
                                 const char * __restrict password,
-                                int zip64_descriptor) {
+                                int zip64_descriptor,
+                                progress_state_t * __restrict progress) {
   out_file_t outfile;
   out_map_t outmap;
   dec_t dec;
@@ -4372,6 +4501,7 @@ extract_deflate_data_descriptor(zipy_archive_t * __restrict zipy,
   uint64_t encrypted_footer_size = 0;
   uint32_t descriptor_crc = 0;
   uint32_t output_crc;
+  uint32_t produced = 0;
   int check_crc = (extract_flags & ZIPY_EXTRACT_NO_CRC) == 0;
   int apply_metadata = (extract_flags & ZIPY_EXTRACT_NO_METADATA) == 0;
   int metadata_done = 0;
@@ -4507,6 +4637,18 @@ extract_deflate_data_descriptor(zipy_archive_t * __restrict zipy,
     if (zret < UNZ_OK) {
       ret = zret == UNZ_EFULL ? ZIPY_ZIP_EUNSUP : ZIPY_ZIP_EINFLATE;
       goto done;
+    }
+    if (progress && progress->options && progress->options->progress) {
+      uint32_t now = infl_output_pos(zipy->inflate_stream);
+
+      if (now < produced) {
+        ret = ZIPY_ZIP_ESIZE;
+        goto done;
+      }
+      ret = progress_advance(progress, (uint64_t)(now - produced));
+      if (ret != ZIPY_ZIP_OK)
+        goto done;
+      produced = now;
     }
     if (zret == UNZ_OK) {
       if (dec.kind == DEC_AES_WG) {
@@ -4644,7 +4786,8 @@ extract_entry(zipy_archive_t * __restrict zipy,
                    uint32_t extract_flags,
                    const char * __restrict password,
                    const char * __restrict state_path,
-                   const char * __restrict part_destdir) {
+                   const char * __restrict part_destdir,
+                   progress_state_t * __restrict progress) {
   uint8_t local[ZIP_LOCAL_FIXED];
   const uint8_t *localp;
   const uint8_t *mapped_data = NULL;
@@ -4984,7 +5127,8 @@ extract_entry(zipy_archive_t * __restrict zipy,
                               info->entry.crc32,
                               check_crc,
                               resume_offset,
-                              resume_crc);
+                              resume_crc,
+                              progress);
     else {
       if (resume_offset > 0
           && (UINT64_MAX - dataOffset < resume_offset
@@ -4997,7 +5141,8 @@ extract_entry(zipy_archive_t * __restrict zipy,
                          check_crc,
                          dec_ptr,
                          resume_offset,
-                         resume_crc);
+                         resume_crc,
+                         progress);
       }
     }
   } else {
@@ -5011,7 +5156,8 @@ extract_entry(zipy_archive_t * __restrict zipy,
                         info->entry.uncompressed_size,
                         info->entry.crc32,
                         check_crc,
-                        dec_ptr);
+                        dec_ptr,
+                        progress);
     }
   }
 
@@ -5091,6 +5237,7 @@ zipy_extract(zipy_archive_t * __restrict zipy,
                             ZIPY_EXTRACT_DEFAULT,
                             NULL,
                             NULL,
+                            NULL,
                             NULL);
 }
 
@@ -5104,6 +5251,8 @@ zipy_extract_to(zipy_archive_t * __restrict zipy,
   entry_info_t *info;
   const char *destpath;
   char *save_dir = NULL;
+  progress_state_t progress;
+  uint64_t done = 0;
   size_t prefixLen, parentLen;
   int ret, conflictRet;
 
@@ -5112,6 +5261,13 @@ zipy_extract_to(zipy_archive_t * __restrict zipy,
 
   opts = default_extract_options(options);
   info = &zipy->files[index];
+  progress_init_entry(&progress,
+                      &opts,
+                      &info->entry,
+                      &done,
+                      entry_progress_size(info),
+                      NULL,
+                      NULL);
   if (!path_buf_set_archive_dir(zipy, destdir, &prefixLen))
     return ZIPY_ZIP_ERR;
   destpath = path_buf_append_name(&zipy->path_buf,
@@ -5146,14 +5302,14 @@ zipy_extract_to(zipy_archive_t * __restrict zipy,
                            opts.flags & ZIPY_EXTRACT_RESUME
                          ? resume_state_path(zipy, destdir)
                          : NULL,
-                           destdir);
+                           destdir,
+                           opts.progress ? &progress : NULL);
   if (ret == ZIPY_ZIP_OK && conflictRet == ZIPY_ZIP_SAVED)
     ret = ZIPY_ZIP_SAVED;
 
 report:
-  if (ret >= ZIPY_ZIP_OK && !info->entry.is_directory) {
-    uint64_t done = entry_progress_size(info);
-    int progressRet = report_progress(&opts, &info->entry, done, done);
+  if (ret >= ZIPY_ZIP_OK) {
+    int progressRet = progress_finish_entry(&progress, info);
 
     if (progressRet < ZIPY_ZIP_OK)
       ret = progressRet;
@@ -5183,6 +5339,7 @@ zipy_extract_named(zipy_archive_t * __restrict zipy,
                            destpath,
                            SIZE_MAX,
                            ZIPY_EXTRACT_DEFAULT,
+                           NULL,
                            NULL,
                            NULL,
                            NULL);
@@ -5253,60 +5410,6 @@ extract_clamp_jobs(const zipy_archive_t *zipy, size_t jobs) {
 }
 
 static int
-extract_all_report(const zipy_extract_options_t *options,
-                   const entry_info_t *info,
-                   uint64_t *done,
-                   uint64_t total) {
-  uint64_t size;
-
-  if (!options || !options->progress || !info || info->entry.is_directory)
-    return ZIPY_ZIP_OK;
-
-  size = entry_progress_size(info);
-  if (UINT64_MAX - *done < size)
-    *done = UINT64_MAX;
-  else
-    *done += size;
-
-  return report_progress(options, &info->entry, *done, total);
-}
-
-static int
-extract_all_report_locked(extract_all_context_t *ctx,
-                          const entry_info_t *info) {
-  const zipy_extract_options_t *options;
-  uint64_t done;
-  uint64_t total;
-  uint64_t size;
-  int ret;
-
-  if (!ctx
-      || !ctx->options
-      || !ctx->options->progress
-      || !info
-      || info->entry.is_directory)
-    return ZIPY_ZIP_OK;
-
-  size = entry_progress_size(info);
-  mutex_lock(&ctx->lock);
-  if (UINT64_MAX - ctx->done < size)
-    ctx->done = UINT64_MAX;
-  else
-    ctx->done += size;
-  done = ctx->done;
-  total = ctx->total;
-  options = ctx->options;
-  ret = report_progress(options, &info->entry, done, total);
-  if (ret < ZIPY_ZIP_OK) {
-    if (ctx->result == ZIPY_ZIP_OK)
-      ctx->result = ret;
-  }
-  mutex_unlock(&ctx->lock);
-
-  return ret;
-}
-
-static int
 extract_all_serial(zipy_archive_t *zipy,
                         const char *destdir,
                         const unsigned char *skip,
@@ -5321,12 +5424,20 @@ extract_all_serial(zipy_archive_t *zipy,
 
   for (i = 0; i < zipy->file_count; i++) {
     entry_info_t *info;
+    progress_state_t progress;
     const char *path;
     int ret;
 
     info = &zipy->files[i];
+    progress_init_entry(&progress,
+                        options,
+                        &info->entry,
+                        &done,
+                        total,
+                        NULL,
+                        NULL);
     if (skip && skip[i]) {
-      ret = extract_all_report(options, info, &done, total);
+      ret = progress_finish_entry(&progress, info);
       if (ret < ZIPY_ZIP_OK)
         return ret;
       continue;
@@ -5347,11 +5458,12 @@ extract_all_serial(zipy_archive_t *zipy,
                              options->flags | EXTRACT_DELAY_DIR_METADATA,
                              options->password,
                              state_path,
-                             destdir);
+                             destdir,
+                             options->progress ? &progress : NULL);
     if (ret < ZIPY_ZIP_OK)
       return ret;
 
-    ret = extract_all_report(options, info, &done, total);
+    ret = progress_finish_entry(&progress, info);
     if (ret < ZIPY_ZIP_OK)
       return ret;
   }
@@ -5402,14 +5514,23 @@ extract_all_worker(void *arg) {
     mutex_unlock(&ctx->lock);
 
     for (; index < end; index++) {
+      progress_state_t progress;
+
       if (index >= zipy->file_count) {
         ret = ZIPY_ZIP_EFILE;
         goto fail;
       }
       info = &zipy->files[index];
+      progress_init_entry(&progress,
+                          ctx->options,
+                          &info->entry,
+                          &ctx->done,
+                          ctx->total,
+                          &ctx->lock,
+                          &ctx->result);
 
       if (ctx->skip && ctx->skip[index]) {
-        ret = extract_all_report_locked(ctx, info);
+        ret = progress_finish_entry(&progress, info);
         if (ret < ZIPY_ZIP_OK)
           goto fail;
         continue;
@@ -5432,11 +5553,12 @@ extract_all_worker(void *arg) {
                                ctx->options->flags | EXTRACT_DELAY_DIR_METADATA,
                                ctx->options->password,
                                ctx->state_path,
-                               ctx->destdir);
+                               ctx->destdir,
+                               ctx->options->progress ? &progress : NULL);
       if (ret < ZIPY_ZIP_OK)
         goto fail;
 
-      ret = extract_all_report_locked(ctx, info);
+      ret = progress_finish_entry(&progress, info);
       if (ret < ZIPY_ZIP_OK)
         goto fail;
     }
@@ -5705,6 +5827,7 @@ zipy_extract_stream(const char * __restrict path,
     char *name;
     const uint8_t *extra = NULL;
     const char *destpath;
+    progress_state_t progress;
     uint64_t offset, dataOffset;
     uint32_t sig, comp32, uncomp32;
     uint16_t flags, method, nameLen, extraLen;
@@ -5871,6 +5994,13 @@ zipy_extract_stream(const char * __restrict path,
       ret = ZIPY_ZIP_ERR;
       break;
     }
+    progress_init_entry(&progress,
+                        &opts,
+                        &info.entry,
+                        &progress_done,
+                        0,
+                        NULL,
+                        NULL);
 
     conflictRet = prepare_entry_conflict(destdir,
                                          &info.entry,
@@ -5896,7 +6026,7 @@ zipy_extract_stream(const char * __restrict path,
         if (ret < ZIPY_ZIP_OK)
           break;
       }
-      ret = extract_all_report(&opts, &info, &progress_done, 0);
+      ret = progress_finish_entry(&progress, &info);
       if (ret < ZIPY_ZIP_OK)
         break;
       continue;
@@ -5914,7 +6044,8 @@ zipy_extract_stream(const char * __restrict path,
                                             destpath,
                                             parentLen,
                                             opts.flags | EXTRACT_DELAY_DIR_METADATA,
-                                            zip64Desc);
+                                            zip64Desc,
+                                            opts.progress ? &progress : NULL);
       } else {
         ret = extract_deflate_data_descriptor(&zipy,
                                               &info,
@@ -5922,7 +6053,8 @@ zipy_extract_stream(const char * __restrict path,
                                               parentLen,
                                               opts.flags | EXTRACT_DELAY_DIR_METADATA,
                                               opts.password,
-                                              zip64Desc);
+                                              zip64Desc,
+                                              opts.progress ? &progress : NULL);
       }
     } else {
       ret = extract_entry(&zipy,
@@ -5932,11 +6064,12 @@ zipy_extract_stream(const char * __restrict path,
                           opts.flags | EXTRACT_DELAY_DIR_METADATA,
                           opts.password,
                           state_path,
-                          destdir);
+                          destdir,
+                          opts.progress ? &progress : NULL);
     }
     if (ret < ZIPY_ZIP_OK)
       break;
-    ret = extract_all_report(&opts, &info, &progress_done, 0);
+    ret = progress_finish_entry(&progress, &info);
     if (ret < ZIPY_ZIP_OK)
       break;
     if (unknownDataDesc)
