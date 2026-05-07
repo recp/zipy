@@ -1341,6 +1341,8 @@ extract_one(ExtractContext *ctx, zipy_archive_t *zip, size_t index) {
       print_error("  Error: Unsupported ZIP method %u for '%s'\n",
                   (unsigned)entry->method,
                   name);
+    else if (ret == ZIPY_ZIP_ENOSPC)
+      print_error("  Error: No space left while extracting '%s'\n", name);
     else
       print_error("  Error: Failed to extract '%s' (%d)\n", name, ret);
     ctx->failed = 1;
@@ -1666,8 +1668,12 @@ main(int argc, char *argv[]) {
   elapsedMs = now_ms() - startMs;
   format_duration(elapsed, sizeof(elapsed), elapsedMs);
   progress_clear(&progress);
-  if (directExtract && success)
-    print_error("  Error: Extraction failed (%d)\n", directRet);
+  if (directExtract && success) {
+    if (directRet == ZIPY_ZIP_ENOSPC)
+      print_error("  Error: No space left during extraction\n");
+    else
+      print_error("  Error: Extraction failed (%d)\n", directRet);
+  }
   if (save_dir && saved == 0) {
     zipy_rmdir(save_dir);
   }
