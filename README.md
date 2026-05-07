@@ -25,6 +25,8 @@ zipy archive.zip -d target -j 1
 zipy archive.zip -d target -p password
 zipy archive.zip -d target --no-crc
 zipy archive.zip -d target --no-metadata
+zipy archive.zip -d target --atomic
+zipy archive.zip -d target --resume
 zipy archive.zip -d target --no-progress
 ```
 
@@ -152,6 +154,18 @@ lower latency matters more than detecting corrupted archive data.
 Mode and timestamp restoration is enabled by default. Set
 `ZIPY_EXTRACT_NO_METADATA` when raw extraction latency matters more than
 preserving file metadata.
+
+Set `ZIPY_EXTRACT_ATOMIC` to write regular files as `name.part` and rename
+them into place only after successful extraction. Set `ZIPY_EXTRACT_RESUME` to
+keep `.part` files after failures, treat existing target files as resume state,
+and resume stored, unencrypted entries by appending missing bytes. Deflated
+partial `.part` files are restarted unless they are already complete and pass
+CRC validation, or CRC is disabled.
+
+When resume is enabled, zipy also writes `target/.zipy/resume_state.txt` with
+the last entry, target path, `.part` path, resume offset, sizes, CRC, and flags.
+The CLI writes `target/.zipy/resume_options.txt` with the effective options and
+relevant `ZIPY_*` environment values. Password values are never written.
 
 For raw speed, use `ZIPY_EXTRACT_FAST` in the library. It combines
 `ZIPY_EXTRACT_NO_CRC` and `ZIPY_EXTRACT_NO_METADATA`. In the CLI, `--fast`

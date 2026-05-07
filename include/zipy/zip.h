@@ -55,6 +55,8 @@ typedef enum zipy_extract_flags_t {
   ZIPY_EXTRACT_DEFAULT     = 0,
   ZIPY_EXTRACT_NO_CRC      = 1u << 0,
   ZIPY_EXTRACT_NO_METADATA = 1u << 1,
+  ZIPY_EXTRACT_ATOMIC      = 1u << 2,
+  ZIPY_EXTRACT_RESUME      = 1u << 3,
   ZIPY_EXTRACT_FAST        = ZIPY_EXTRACT_NO_CRC | ZIPY_EXTRACT_NO_METADATA
 } zipy_extract_flags_t;
 

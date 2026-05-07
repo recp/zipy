@@ -89,6 +89,8 @@ print_usage(void) {
   printf("  -p, --password <password>\n");
   printf("  --no-crc    Skip CRC32 validation\n");
   printf("  --no-metadata  Skip mode and timestamp restoration\n");
+  printf("  --atomic   Write files via .part then rename on success\n");
+  printf("  --resume   Keep .part files and resume stored entries\n");
   printf("  --no-progress  Disable interactive progress output\n");
   printf("  --fast      Alias for --no-crc --no-metadata --no-progress\n");
   printf("  --config [key=value ...]  Show or update ~/.zipy/config\n");
@@ -272,6 +274,7 @@ config_default(config_t *config) {
   config->options.save_dir = NULL;
   config->options.flags = ZIPY_EXTRACT_DEFAULT;
   config->options.password = NULL;
+  config->options.jobs = 0;
 }
 
 static const char *
@@ -1111,6 +1114,99 @@ preflight_space(zipy_archive_t *zip, const char *extractdir, int emptyOrMissing)
   return 0;
 }
 
+static void
+write_state_text(FILE *fp, const char *text) {
+  const unsigned char *p = (const unsigned char *)text;
+
+  if (!fp || !text)
+    return;
+
+  while (*p) {
+    unsigned char c = *p++;
+
+    if (c == '\\' || c == '\n' || c == '\r') {
+      fputc('\\', fp);
+      fputc(c == '\n' ? 'n' : c == '\r' ? 'r' : '\\', fp);
+    } else if (c < 32) {
+      fputc('?', fp);
+    } else {
+      fputc((int)c, fp);
+    }
+  }
+}
+
+static void
+write_state_pair(FILE *fp, const char *key, const char *value) {
+  fputs(key, fp);
+  fputs(" = ", fp);
+  write_state_text(fp, value);
+  fputc('\n', fp);
+}
+
+static void
+write_resume_options(const char *extractdir,
+                     const char *zipfile,
+                     const config_t *config,
+                     int argc,
+                     char **argv,
+                     int jobsSpecified,
+                     size_t jobs,
+                     int noProgress) {
+  char *dir;
+  char *path;
+  FILE *fp;
+  int i;
+
+  if (!extractdir || !config)
+    return;
+
+  dir = make_extract_path(extractdir, ".zipy");
+  if (!dir)
+    return;
+  if (!mkdirs(dir)) {
+    free(dir);
+    return;
+  }
+
+  path = make_extract_path(dir, "resume_options.txt");
+  free(dir);
+  if (!path)
+    return;
+
+  fp = fopen(path, "wb");
+  free(path);
+  if (!fp)
+    return;
+
+  fputs("version = 1\n", fp);
+  write_state_pair(fp, "archive", zipfile);
+  write_state_pair(fp, "on_conflict", conflict_name(config->on_conflict));
+  write_state_pair(fp, "save_to", save_to_name(config->options.save_to));
+  fprintf(fp,
+          "flags = 0x%08x\n"
+          "jobs = %zu\n"
+          "jobs_specified = %d\n"
+          "no_progress = %d\n"
+          "password = %s\n",
+          (unsigned)config->options.flags,
+          jobs,
+          jobsSpecified,
+          noProgress,
+          config->options.password ? "set" : "unset");
+
+  fputs("argv =", fp);
+  for (i = 0; i < argc; i++) {
+    fputc(' ', fp);
+    write_state_text(fp, argv[i]);
+  }
+  fputc('\n', fp);
+
+  write_state_pair(fp, "env_ZIPY_CONFIG", getenv("ZIPY_CONFIG"));
+  write_state_pair(fp, "env_ZIPY_ON_CONFLICT", getenv("ZIPY_ON_CONFLICT"));
+  write_state_pair(fp, "env_ZIPY_SAVE_TO", getenv("ZIPY_SAVE_TO"));
+  (void)fclose(fp);
+}
+
 static int
 path_is_absolute(const char *path) {
   if (!path || !*path)
@@ -1381,6 +1477,11 @@ prepare_ask_plan(zipy_archive_t *zip,
   *emptyOrMissingOut = 0;
 
   config->options.on_conflict = cli_policy_to_extract(config->on_conflict);
+  if (config->options.flags & ZIPY_EXTRACT_RESUME) {
+    config->on_conflict = CLI_CONFLICT_OVERWRITE;
+    config->options.on_conflict = ZIPY_CONFLICT_OVERWRITE;
+    return 1;
+  }
   if (config->options.on_conflict == ZIPY_CONFLICT_OVERWRITE)
     return 1;
 
@@ -1757,6 +1858,10 @@ main(int argc, char *argv[]) {
     } else if (strcmp(argv[i], "--no-metadata") == 0
                || strcmp(argv[i], "--no-meta") == 0) {
       config.options.flags |= ZIPY_EXTRACT_NO_METADATA;
+    } else if (strcmp(argv[i], "--atomic") == 0) {
+      config.options.flags |= ZIPY_EXTRACT_ATOMIC;
+    } else if (strcmp(argv[i], "--resume") == 0) {
+      config.options.flags |= ZIPY_EXTRACT_RESUME;
     } else if (strcmp(argv[i], "--no-progress") == 0) {
       noProgress = 1;
     } else if (strcmp(argv[i], "--fast") == 0) {
@@ -1824,11 +1929,22 @@ main(int argc, char *argv[]) {
     config.options.save_dir = save_dir;
   }
 
+  if (config.options.flags & ZIPY_EXTRACT_RESUME)
+    write_resume_options(extractdir,
+                         zipfile,
+                         &config,
+                         argc,
+                         argv,
+                         jobsSpecified,
+                         jobs,
+                         noProgress);
+
   startMs = now_ms();
   directExtract = noProgress
                && !policies
                && !save_dir
                && config.options.on_conflict == ZIPY_CONFLICT_OVERWRITE
+               && !(config.options.flags & ZIPY_EXTRACT_RESUME)
                && !archive_has_encrypted(zip)
                && !archive_has_symlink(zip)
                && !archive_has_unsupported_method(zip);
