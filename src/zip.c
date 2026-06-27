@@ -4072,88 +4072,6 @@ trim_trailing_seps(const char *path) {
   return out;
 }
 
-static int
-path_buf_set_normalized(path_buf_t * __restrict buf,
-                        const char * __restrict path) {
-  size_t len, i, out, rootLen;
-
-  if (!buf || !path)
-    return 0;
-
-  len = strlen(path);
-  if (!path_buf_reserve(buf, len + 2u))
-    return 0;
-
-  i = 0;
-  out = 0;
-  rootLen = 0;
-
-#if defined(_WIN32)
-  if (len >= 2u && isalpha((unsigned char)path[0]) && path[1] == ':') {
-    buf->data[out++] = path[0];
-    buf->data[out++] = ':';
-    i = 2u;
-    rootLen = out;
-    if (i < len && is_fs_sep(path[i])) {
-      buf->data[out++] = PATH_SEP;
-      rootLen = out;
-      while (i < len && is_fs_sep(path[i]))
-        i++;
-    }
-  } else
-#endif
-  if (i < len && is_fs_sep(path[i])) {
-    buf->data[out++] = PATH_SEP;
-    rootLen = out;
-    while (i < len && is_fs_sep(path[i]))
-      i++;
-  }
-
-  while (i < len) {
-    size_t seg, segLen;
-
-    while (i < len && is_fs_sep(path[i]))
-      i++;
-    if (i >= len)
-      break;
-
-    seg = i;
-    while (i < len && !is_fs_sep(path[i]))
-      i++;
-    segLen = i - seg;
-
-    if (segLen == 1u && path[seg] == '.')
-      continue;
-
-    if (segLen == 2u && path[seg] == '.' && path[seg + 1u] == '.') {
-      if (out > rootLen) {
-        while (out > rootLen && !is_fs_sep(buf->data[out - 1u]))
-          out--;
-        if (out > rootLen)
-          out--;
-      } else if (rootLen == 0) {
-        if (out > 0 && !is_fs_sep(buf->data[out - 1u]))
-          buf->data[out++] = PATH_SEP;
-        buf->data[out++] = '.';
-        buf->data[out++] = '.';
-      }
-      continue;
-    }
-
-    if (out > 0 && !is_fs_sep(buf->data[out - 1u]))
-      buf->data[out++] = PATH_SEP;
-    if (out > SIZE_MAX - segLen - 1u)
-      return 0;
-    memcpy(buf->data + out, path + seg, segLen);
-    out += segLen;
-  }
-
-  if (out == 0)
-    buf->data[out++] = '.';
-  buf->data[out] = '\0';
-  return 1;
-}
-
 static char *
 parent_path(const char *path) {
   const char *p, *last = NULL;
@@ -4204,20 +4122,6 @@ path_is_contained(const char *path, const char *root) {
 }
 
 static int
-normalize_abs_into(path_buf_t * __restrict buf,
-                   const char * __restrict path) {
-  char *abs;
-  int ok;
-
-  abs = abs_path(path);
-  if (!abs)
-    return 0;
-  ok = path_buf_set_normalized(buf, abs);
-  free(abs);
-  return ok;
-}
-
-static int
 symlink_target_is_contained(zipy_archive_t * __restrict zipy,
                             const char * __restrict destpath,
                             const char * __restrict rootdir,
@@ -4252,11 +4156,11 @@ symlink_target_is_contained(zipy_archive_t * __restrict zipy,
   targetText[target_len] = '\0';
 
   rootBase = rootdir && *rootdir ? dup_text(rootdir) : parent_path(destpath);
-  if (!rootBase || !normalize_abs_into(rootBuf, rootBase))
+  if (!rootBase || !path_buf_set_canonical(rootBuf, rootBase))
     goto done;
 
   if (is_abs_path(targetText)) {
-    if (!path_buf_set_normalized(targetBuf, targetText))
+    if (!path_buf_set_canonical(targetBuf, targetText))
       goto done;
   } else {
     targetBase = parent_path(destpath);
@@ -4266,15 +4170,11 @@ symlink_target_is_contained(zipy_archive_t * __restrict zipy,
     if (!targetBaseAbs)
       goto done;
     joined = join_path(targetBaseAbs, targetText);
-    if (!joined || !path_buf_set_normalized(targetBuf, joined))
+    if (!joined || !path_buf_set_canonical(targetBuf, joined))
       goto done;
   }
 
   if (!path_is_contained(targetBuf->data, rootBuf->data))
-    goto done;
-  if (parent_has_symlink(targetBuf->data))
-    goto done;
-  if (path_is_symlink(targetBuf->data))
     goto done;
 
   ok = 1;
