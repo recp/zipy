@@ -3107,9 +3107,9 @@ copy_store(zipy_archive_t * __restrict zipy,
 
 static int
 copy_store_mapped(out_file_t * __restrict out,
-                       const uint8_t * __restrict src,
-                       uint64_t len,
-                       uint32_t expectedCrc,
+                  const uint8_t * __restrict src,
+                  uint64_t len,
+                  uint32_t expectedCrc,
                        int check_crc,
                        uint64_t already_written,
                        uint32_t initial_crc,
@@ -3573,6 +3573,8 @@ inflate_raw_mem(FILE *fp,
   *out = NULL;
   *out_len = 0;
 
+  if (!fp)
+    return ZIPY_ZIP_EFILE;
   if (compressed_size > UINT32_MAX || uncompressed_size > UINT32_MAX)
     return ZIPY_ZIP_EUNSUP;
   if (!u64_to_size(compressed_size, &inlen)
@@ -4352,7 +4354,8 @@ default_extract_options(const zipy_extract_options_t *options) {
              | ZIPY_EXTRACT_NO_METADATA
              | ZIPY_EXTRACT_ATOMIC
              | ZIPY_EXTRACT_RESUME
-             | ZIPY_EXTRACT_UNSAFE_SYMLINKS;
+             | ZIPY_EXTRACT_UNSAFE_SYMLINKS
+             | ZIPY_EXTRACT_SKIP_MACOS_METADATA;
   if (out.flags & ZIPY_EXTRACT_RESUME)
     out.on_conflict = ZIPY_CONFLICT_OVERWRITE;
 
@@ -6546,6 +6549,56 @@ apply_directory_metadata(zipy_archive_t *zipy,
 }
 
 static int
+zip_entry_is_macos_metadata(const char *name, size_t len) {
+  size_t i, start, end;
+
+  if (!name)
+    return 0;
+
+  end = len;
+  while (end > 0 && (name[end - 1] == '/' || name[end - 1] == '\\'))
+    end--;
+  if (end == 0)
+    return 0;
+
+  if (end == 8 && memcmp(name, "__MACOSX", 8) == 0)
+    return 1;
+  if (end > 9
+      && memcmp(name, "__MACOSX", 8) == 0
+      && (name[8] == '/' || name[8] == '\\'))
+    return 1;
+
+  start = 0;
+  for (i = 0; i <= end; i++) {
+    if (i == end || name[i] == '/' || name[i] == '\\') {
+      size_t componentLen = i - start;
+
+      if (componentLen == 9 && memcmp(name + start, ".DS_Store", 9) == 0)
+        return 1;
+      if (componentLen >= 2
+          && name[start] == '.'
+          && name[start + 1] == '_')
+        return 1;
+
+      start = i + 1;
+    }
+  }
+
+  return 0;
+}
+
+static int
+mark_extract_skip(unsigned char **skipOut, size_t count, size_t index) {
+  if (!*skipOut) {
+    *skipOut = calloc(count, sizeof(**skipOut));
+    if (!*skipOut)
+      return ZIPY_ZIP_ERR;
+  }
+  (*skipOut)[index] = 1;
+  return ZIPY_ZIP_OK;
+}
+
+static int
 prepare_extract_all(zipy_archive_t *zipy,
                          const char *destdir,
                          const zipy_extract_options_t *options,
@@ -6556,7 +6609,8 @@ prepare_extract_all(zipy_archive_t *zipy,
 
   *skipOut = NULL;
 
-  if (options->on_conflict == ZIPY_CONFLICT_OVERWRITE)
+  if (options->on_conflict == ZIPY_CONFLICT_OVERWRITE
+      && !(options->flags & ZIPY_EXTRACT_SKIP_MACOS_METADATA))
     return ZIPY_ZIP_OK;
   if (!path_buf_set_archive_dir(zipy, destdir, &prefixLen))
     return ZIPY_ZIP_ERR;
@@ -6565,6 +6619,20 @@ prepare_extract_all(zipy_archive_t *zipy,
     entry_info_t *info = &zipy->files[i];
     const char *path;
     int ret;
+
+    if ((options->flags & ZIPY_EXTRACT_SKIP_MACOS_METADATA)
+        && zip_entry_is_macos_metadata(info->entry.name,
+                                       info->entry.name_len)) {
+      ret = mark_extract_skip(skipOut, zipy->file_count, i);
+      if (ret < ZIPY_ZIP_OK) {
+        result = ret;
+        break;
+      }
+      continue;
+    }
+
+    if (options->on_conflict == ZIPY_CONFLICT_OVERWRITE)
+      continue;
 
     path = path_buf_append_name(&zipy->path_buf,
                                      prefixLen,
@@ -6583,14 +6651,11 @@ prepare_extract_all(zipy_archive_t *zipy,
                                       &save_dir);
 
     if (ret == ZIPY_ZIP_SKIPPED) {
-      if (!*skipOut) {
-        *skipOut = calloc(zipy->file_count, sizeof(**skipOut));
-        if (!*skipOut) {
-          result = ZIPY_ZIP_ERR;
-          break;
-        }
+      ret = mark_extract_skip(skipOut, zipy->file_count, i);
+      if (ret < ZIPY_ZIP_OK) {
+        result = ret;
+        break;
       }
-      (*skipOut)[i] = 1;
       continue;
     }
 
