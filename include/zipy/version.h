@@ -13,7 +13,7 @@
 
 #define ZIPY_VERSION_MAJOR 0
 #define ZIPY_VERSION_MINOR 1
-#define ZIPY_VERSION_PATCH 0
+#define ZIPY_VERSION_PATCH 1
 
 #define ZIPY_VERSION_ENCODE(major, minor, patch) \
   (((major) * 10000) + ((minor) * 100) + (patch))

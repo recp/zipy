@@ -17,7 +17,7 @@ fn extract_stored_zip_fast() {
     zipy::extract(&archive, &out, zipy::Options::fast().overwrite()).unwrap();
 
     assert_eq!(fs::read(out.join("hello.txt")).unwrap(), b"hello zipy");
-    assert_eq!(zipy::VERSION_STRING, "0.1.0");
+    assert_eq!(zipy::VERSION_STRING, "0.1.1");
 
     let _ = fs::remove_dir_all(root);
 }

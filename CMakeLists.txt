@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.13)
 project(zipy
-  VERSION 0.1.0
+  VERSION 0.1.1
   HOMEPAGE_URL https://github.com/recp/zipy
   DESCRIPTION "minimal ZIP archive library"
   LANGUAGES C

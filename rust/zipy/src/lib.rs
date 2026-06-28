@@ -17,7 +17,7 @@ pub const VERSION_MAJOR: u32 = zipy_sys::ZIPY_VERSION_MAJOR;
 pub const VERSION_MINOR: u32 = zipy_sys::ZIPY_VERSION_MINOR;
 pub const VERSION_PATCH: u32 = zipy_sys::ZIPY_VERSION_PATCH;
 pub const VERSION: u32 = zipy_sys::ZIPY_VERSION;
-pub const VERSION_STRING: &str = "0.1.0";
+pub const VERSION_STRING: &str = "0.1.1";
 
 #[derive(Debug)]
 pub enum Error {

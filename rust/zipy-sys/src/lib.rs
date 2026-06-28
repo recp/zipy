@@ -7,7 +7,7 @@ pub enum zipy_archive_t {}
 
 pub const ZIPY_VERSION_MAJOR: u32 = 0;
 pub const ZIPY_VERSION_MINOR: u32 = 1;
-pub const ZIPY_VERSION_PATCH: u32 = 0;
+pub const ZIPY_VERSION_PATCH: u32 = 1;
 pub const ZIPY_VERSION: u32 =
     ZIPY_VERSION_MAJOR * 10_000 + ZIPY_VERSION_MINOR * 100 + ZIPY_VERSION_PATCH;
 
