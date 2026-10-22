@@ -1,6 +1,57 @@
 import Foundation
 import Testing
 import Zipy
+import CZipy
+
+@Test
+func indexedExtractionReadsLocalHeaders() throws {
+  let root = try temporaryDirectory()
+  defer { try? FileManager.default.removeItem(at: root) }
+  let source = root.appendingPathComponent("source", isDirectory: true)
+  let contents = Data(repeating: 0x41, count: 4096)
+  try FileManager.default.createDirectory(at: source, withIntermediateDirectories: true)
+  try contents.write(to: source.appendingPathComponent("data.bin"))
+
+  for stored in [false, true] {
+    let archive = root.appendingPathComponent(stored ? "stored.zip" : "deflated.zip")
+    let output = root.appendingPathComponent(stored ? "stored" : "deflated")
+    try FileManager.default.createDirectory(at: output, withIntermediateDirectories: true)
+    try runZip(in: source, archive: archive, storing: stored)
+    let handle = try #require(archive.withUnsafeFileSystemRepresentation { zipy_open($0) })
+    defer { zipy_close(handle) }
+    let entry = try #require(zipy_entry(handle, 0))
+    #expect(entry.pointee.method == (stored ? 0 : 8))
+    let result = output.withUnsafeFileSystemRepresentation {
+      zipy_extract_to(handle, 0, $0, nil)
+    }
+    #expect(result == ZIPY_ZIP_OK.rawValue)
+    #expect(try Data(contentsOf: output.appendingPathComponent("data.bin")) == contents)
+  }
+}
+
+@Test
+func indexedExtractionRejectsInvalidLocalHeader() throws {
+  let root = try temporaryDirectory()
+  defer { try? FileManager.default.removeItem(at: root) }
+  let source = root.appendingPathComponent("source", isDirectory: true)
+  let archive = root.appendingPathComponent("archive.zip")
+  let output = root.appendingPathComponent("output", isDirectory: true)
+  try FileManager.default.createDirectory(at: source, withIntermediateDirectories: true)
+  try FileManager.default.createDirectory(at: output, withIntermediateDirectories: true)
+  try Data("payload".utf8).write(to: source.appendingPathComponent("data.bin"))
+  try runZip(in: source, archive: archive)
+  var bytes = try Data(contentsOf: archive)
+  bytes[0] = 0
+  try bytes.write(to: archive)
+
+  let handle = try #require(archive.withUnsafeFileSystemRepresentation { zipy_open($0) })
+  defer { zipy_close(handle) }
+  let result = output.withUnsafeFileSystemRepresentation {
+    zipy_extract_to(handle, 0, $0, nil)
+  }
+  #expect(result == ZIPY_ZIP_EFILE.rawValue)
+  #expect(!FileManager.default.fileExists(atPath: output.appendingPathComponent("data.bin").path))
+}
 
 @Test
 func extractFast() async throws {
@@ -169,7 +220,8 @@ private func temporaryDirectory() throws -> URL {
 private func runZip(
   in directory: URL,
   archive: URL,
-  preservingSymlinks: Bool = false
+  preservingSymlinks: Bool = false,
+  storing: Bool = false
 ) throws {
   let process = Process()
   process.executableURL = URL(fileURLWithPath: "/usr/bin/zip")
@@ -177,6 +229,7 @@ private func runZip(
   process.arguments = preservingSymlinks
     ? ["-qry", archive.path, "."]
     : ["-qr", archive.path, "."]
+  if storing { process.arguments?.insert("-0", at: 0) }
   try process.run()
   process.waitUntilExit()
 

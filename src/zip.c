@@ -1408,41 +1408,6 @@ verify_local_aes_extra(zipy_archive_t * __restrict zipy,
   return ok;
 }
 
-static void
-cache_local_header(zipy_archive_t * __restrict zipy,
-                        entry_info_t * __restrict info) {
-  const uint8_t *localp;
-  uint16_t flags, method, nameLen, extraLen;
-  uint64_t dataOffset;
-
-  if (!zipy || !info)
-    return;
-
-  localp = mapped_range(zipy, info->local_header_offset, ZIP_LOCAL_FIXED);
-  if (!localp || le32(localp) != ZIP_SIGN_LOCAL_FILE)
-    return;
-
-  flags = le16(localp + 6);
-  method = le16(localp + 8);
-  nameLen = le16(localp + 26);
-  extraLen = le16(localp + 28);
-
-  if (method != info->zip_method || (flags & ZIP_FLAG_STRONG_ENC))
-    return;
-  if (UINT64_MAX - info->local_header_offset
-      < ZIP_LOCAL_FIXED + (uint64_t)nameLen + (uint64_t)extraLen)
-    return;
-
-  dataOffset = info->local_header_offset + ZIP_LOCAL_FIXED + nameLen + extraLen;
-  if (dataOffset > zipy->file_size
-      || info->entry.compressed_size > zipy->file_size - dataOffset)
-    return;
-
-  info->data_offset = dataOffset;
-  info->local_flags = flags;
-  info->has_data_offset = 1;
-}
-
 static bool
 is_zip_sep(char c) {
   return c == '/' || c == '\\';
@@ -4863,7 +4828,8 @@ zipy_open(const char * __restrict path) {
         || info->entry.compressed_size > zipy->file_size
         || UINT64_MAX - info->local_header_offset < ZIP_LOCAL_FIXED)
       goto err;
-    cache_local_header(zipy, info);
+    /* Local headers are read when extracting. Touching every member here
+     * faults pages throughout large archives just to show the file list. */
 
     if (central) {
       cd_pos += record_len;
