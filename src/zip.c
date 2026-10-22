@@ -94,6 +94,7 @@
 #define ZIP_PARALLEL_MAX_IO_JOBS 2u
 #define ZIP_STACK_THREADS     64u
 #define ZIP_WORK_BATCH        8u
+#define ZIP_WORK_BATCH_BYTES  (1024u * 1024u)
 
 #define ZIP_EXTRA_ZIP64       0x0001u
 #define ZIP_EXTRA_EXT_TIME    0x5455u
@@ -6348,6 +6349,7 @@ extract_all_worker(void *arg) {
     entry_info_t *info;
     const char *path;
     size_t end;
+    uint64_t batch_bytes;
     int ret;
 
     mutex_lock(&ctx->lock);
@@ -6355,10 +6357,21 @@ extract_all_worker(void *arg) {
       mutex_unlock(&ctx->lock);
       break;
     }
-    index = ctx->next++;
-    end = index + ZIP_WORK_BATCH;
-    if (end > ctx->count)
-      end = ctx->count;
+    index = ctx->next;
+    end = index + 1u;
+    batch_bytes = ctx->source->files[index].entry.uncompressed_size;
+    /* Keep small-file batching without assigning several large files to
+     * one worker while the other workers run out of entries. */
+    while (end < ctx->count && end - index < ZIP_WORK_BATCH
+           && batch_bytes < ZIP_WORK_BATCH_BYTES) {
+      uint64_t next_bytes;
+
+      next_bytes = ctx->source->files[end].entry.uncompressed_size;
+      if (next_bytes > ZIP_WORK_BATCH_BYTES - batch_bytes)
+        break;
+      batch_bytes += next_bytes;
+      end++;
+    }
     ctx->next = end;
     mutex_unlock(&ctx->lock);
 

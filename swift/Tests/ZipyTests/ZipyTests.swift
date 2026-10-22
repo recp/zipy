@@ -4,6 +4,36 @@ import Zipy
 import CZipy
 
 @Test
+func parallelIndexedExtractionKeepsEveryPayload() throws {
+  let root = try temporaryDirectory()
+  defer { try? FileManager.default.removeItem(at: root) }
+  let source = root.appendingPathComponent("source", isDirectory: true)
+  let archive = root.appendingPathComponent("parallel.zip")
+  let output = root.appendingPathComponent("output", isDirectory: true)
+  try FileManager.default.createDirectory(at: source, withIntermediateDirectories: true)
+  try FileManager.default.createDirectory(at: output, withIntermediateDirectories: true)
+  for index in 0..<11 {
+    try Data(repeating: UInt8(65 + index), count: 2 * 1024 * 1024)
+      .write(to: source.appendingPathComponent("file-\(index).txt"))
+  }
+  try runZip(in: source, archive: archive)
+  let handle = try #require(archive.withUnsafeFileSystemRepresentation { zipy_open($0) })
+  defer { zipy_close(handle) }
+  var options = zipy_extract_options_t()
+  zipy_extract_options_init(&options)
+  options.jobs = 8
+  options.on_conflict = ZIPY_CONFLICT_OVERWRITE
+  let result = output.withUnsafeFileSystemRepresentation {
+    zipy_extract_all(handle, $0, &options)
+  }
+  #expect(result == ZIPY_ZIP_OK.rawValue)
+  for index in 0..<11 {
+    let data = try Data(contentsOf: output.appendingPathComponent("file-\(index).txt"))
+    #expect(data == Data(repeating: UInt8(65 + index), count: 2 * 1024 * 1024))
+  }
+}
+
+@Test
 func indexedModificationTime() throws {
   let root = try temporaryDirectory()
   defer { try? FileManager.default.removeItem(at: root) }
