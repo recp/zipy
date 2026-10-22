@@ -111,6 +111,12 @@ zipy_uncompressed_size(const zipy_archive_t * __restrict zipy);
 ZIPY_EXPORT const zipy_entry_t *
 zipy_entry(const zipy_archive_t * __restrict zipy, size_t index);
 
+/* Returns false when the central directory has no modification time. */
+ZIPY_EXPORT bool
+zipy_entry_mtime(const zipy_archive_t * __restrict zipy,
+                 size_t index,
+                 int64_t * __restrict mtime);
+
 ZIPY_EXPORT int
 zipy_extract(zipy_archive_t * __restrict zipy,
              size_t index,

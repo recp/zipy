@@ -6008,6 +6008,19 @@ zipy_entry(const zipy_archive_t * __restrict zipy, size_t index) {
 }
 
 ZIPY_EXPORT
+bool
+zipy_entry_mtime(const zipy_archive_t * __restrict zipy,
+                 size_t index,
+                 int64_t * __restrict mtime) {
+  if (!zipy || index >= zipy->file_count || !mtime
+      || !zipy->files[index].has_mtime)
+    return false;
+
+  *mtime = (int64_t)zipy->files[index].mtime;
+  return true;
+}
+
+ZIPY_EXPORT
 int
 zipy_extract(zipy_archive_t * __restrict zipy,
              size_t index,

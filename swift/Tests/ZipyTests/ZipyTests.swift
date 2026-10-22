@@ -4,6 +4,29 @@ import Zipy
 import CZipy
 
 @Test
+func indexedModificationTime() throws {
+  let root = try temporaryDirectory()
+  defer { try? FileManager.default.removeItem(at: root) }
+  let source = root.appendingPathComponent("source", isDirectory: true)
+  let archive = root.appendingPathComponent("archive.zip")
+  let file = source.appendingPathComponent("data.bin")
+  let modified = Date(timeIntervalSince1970: 1_600_000_001)
+  try FileManager.default.createDirectory(at: source, withIntermediateDirectories: true)
+  try Data("payload".utf8).write(to: file)
+  try FileManager.default.setAttributes([.modificationDate: modified], ofItemAtPath: file.path)
+  try runZip(in: source, archive: archive)
+
+  let handle = try #require(archive.withUnsafeFileSystemRepresentation { zipy_open($0) })
+  defer { zipy_close(handle) }
+  var timestamp: Int64 = 0
+  #expect(zipy_entry_mtime(handle, 0, &timestamp))
+  #expect(timestamp == Int64(modified.timeIntervalSince1970))
+  #expect(!zipy_entry_mtime(handle, zipy_count(handle), &timestamp))
+  #expect(!zipy_entry_mtime(nil, 0, &timestamp))
+  #expect(!zipy_entry_mtime(handle, 0, nil))
+}
+
+@Test
 func indexedExtractionReadsLocalHeaders() throws {
   let root = try temporaryDirectory()
   defer { try? FileManager.default.removeItem(at: root) }
