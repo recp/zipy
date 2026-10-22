@@ -57,6 +57,58 @@ func indexedModificationTime() throws {
 }
 
 @Test
+func indexedTimestampFallbackAndEpoch() throws {
+  let root = try temporaryDirectory()
+  defer { try? FileManager.default.removeItem(at: root) }
+  let source = root.appendingPathComponent("source", isDirectory: true)
+  let archive = root.appendingPathComponent("archive.zip")
+  let file = source.appendingPathComponent("data.bin")
+  try FileManager.default.createDirectory(at: source, withIntermediateDirectories: true)
+  try Data("payload".utf8).write(to: file)
+  try FileManager.default.setAttributes(
+    [.modificationDate: Date(timeIntervalSince1970: 1_600_000_001)],
+    ofItemAtPath: file.path)
+  try runZip(in: source, archive: archive)
+
+  let original = try Data(contentsOf: archive)
+  let central = try #require(original.range(of: Data([0x50, 0x4b, 0x01, 0x02]))).lowerBound
+  func u16(_ offset: Int) -> Int {
+    Int(original[offset]) | Int(original[offset + 1]) << 8
+  }
+  let date = u16(central + 14)
+  let time = u16(central + 12)
+  var calendar = Calendar(identifier: .gregorian)
+  calendar.timeZone = .current
+  let dosDate = try #require(calendar.date(from: DateComponents(
+    year: 1980 + (date >> 9), month: (date >> 5) & 15, day: date & 31,
+    hour: time >> 11, minute: (time >> 5) & 63, second: (time & 31) * 2)))
+  var position = central + 46 + u16(central + 28)
+  let end = position + u16(central + 30)
+  while position + 4 <= end, u16(position) != 0x5455 {
+    position += 4 + u16(position + 2)
+  }
+  try #require(position + 9 <= end)
+  let timestampField = position
+  for unixTime in [nil, UInt32(0), UInt32(1_600_000_001)] {
+    var bytes = original
+    if var value = unixTime?.littleEndian {
+      withUnsafeBytes(of: &value) {
+        bytes.replaceSubrange((timestampField + 5)..<(timestampField + 9), with: $0)
+      }
+    } else {
+      // An unknown extra field leaves the DOS timestamp as the fallback.
+      bytes[timestampField] = 0x56
+    }
+    try bytes.write(to: archive)
+    let handle = try #require(archive.withUnsafeFileSystemRepresentation { zipy_open($0) })
+    defer { zipy_close(handle) }
+    var timestamp: Int64 = -1
+    #expect(zipy_entry_mtime(handle, 0, &timestamp))
+    #expect(timestamp == unixTime.map(Int64.init) ?? Int64(dosDate.timeIntervalSince1970))
+  }
+}
+
+@Test
 func indexedExtractionReadsLocalHeaders() throws {
   let root = try temporaryDirectory()
   defer { try? FileManager.default.removeItem(at: root) }

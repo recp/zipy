@@ -4774,9 +4774,6 @@ zipy_open(const char * __restrict path) {
       zipy->has_encrypted = 1;
     if (info->is_symlink)
       zipy->has_symlink = 1;
-    info->mtime = dos_time(info->mod_date, info->mod_time);
-    info->has_mtime = info->mtime != (time_t)0;
-
     if (extraLen > 0) {
       if (!central) {
         if (extraLen <= sizeof(extra_stack)) {
@@ -4807,6 +4804,13 @@ zipy_open(const char * __restrict path) {
                || uncomp32 == ZIP64_MAGIC_UINT32
                || offset32 == ZIP64_MAGIC_UINT32) {
       goto err;
+    }
+
+    /* Extended timestamps already contain Unix time. Avoid a redundant
+     * timezone conversion for every central-directory entry that has one. */
+    if (!info->has_mtime) {
+      info->mtime = dos_time(info->mod_date, info->mod_time);
+      info->has_mtime = info->mtime != (time_t)0;
     }
 
     if (info->zip_method == ZIP_METHOD_AES) {
