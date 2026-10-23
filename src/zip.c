@@ -5704,9 +5704,7 @@ extract_entry(zipy_archive_t   *__restrict zipy,
       return ZIPY_ZIP_EFILE;
     }
 
-    if (!mapped_data && seek_set(zipy->fp, dataOffset) != 0)
-      return ZIPY_ZIP_EFILE;
-
+    /* keep the stream position established after any encryption header. */
     if (info->entry.method == ZIPY_ZIP_STORE) {
       if (compressed_size != info->entry.uncompressed_size)
         ret = ZIPY_ZIP_ESIZE;

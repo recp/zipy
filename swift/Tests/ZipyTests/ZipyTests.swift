@@ -452,6 +452,58 @@ func actorProgress() async throws {
 }
 
 @Test
+func encryptedSymlinkExtracts() throws {
+  let root = try temporaryDirectory()
+  defer { try? FileManager.default.removeItem(at: root) }
+
+  let source   = root.appendingPathComponent("source", isDirectory: true)
+  let payload  = Data(String(repeating: "encrypted payload\n", count: 128).utf8)
+  let password = "zipy-test-password"
+
+  try FileManager.default.createDirectory(at: source, withIntermediateDirectories: true)
+  try payload.write(to: source.appendingPathComponent("file.txt"))
+  try FileManager.default.createSymbolicLink(
+    atPath: source.appendingPathComponent("link").path,
+    withDestinationPath: "file.txt"
+  )
+
+  for stored in [false, true] {
+    let archive = root.appendingPathComponent("encrypted-\(stored).zip")
+    let output  = root.appendingPathComponent("output-\(stored)", isDirectory: true)
+
+    try FileManager.default.createDirectory(at: output, withIntermediateDirectories: true)
+    try runZip(
+      in: source,
+      archive: archive,
+      preservingSymlinks: true,
+      storing: stored,
+      password: password
+    )
+
+    let handle = try #require(archive.withUnsafeFileSystemRepresentation { zipy_open($0) })
+    defer { zipy_close(handle) }
+
+    var options = zipy_extract_options_t()
+    zipy_extract_options_init(&options)
+    options.jobs        = 2
+    options.on_conflict = ZIPY_CONFLICT_OVERWRITE
+
+    let result = password.withCString { passwordC in
+      options.password = passwordC
+      return output.withUnsafeFileSystemRepresentation {
+        zipy_extract_all(handle, $0, &options)
+      }
+    }
+
+    try #require(result == ZIPY_ZIP_OK.rawValue)
+
+    let link = output.appendingPathComponent("link")
+    #expect(try FileManager.default.destinationOfSymbolicLink(atPath: link.path) == "file.txt")
+    #expect(try Data(contentsOf: link) == payload)
+  }
+}
+
+@Test
 func containedSymlinkExtracts() async throws {
   let root = try temporaryDirectory()
   let source = root.appendingPathComponent("source", isDirectory: true)
@@ -553,7 +605,8 @@ private func runZip(
   in directory: URL,
   archive: URL,
   preservingSymlinks: Bool = false,
-  storing: Bool = false
+  storing: Bool = false,
+  password: String? = nil
 ) throws {
   let process = Process()
   process.executableURL       = URL(fileURLWithPath: "/usr/bin/zip")
@@ -564,6 +617,10 @@ private func runZip(
 
   if storing {
     process.arguments?.insert("-0", at: 0)
+  }
+
+  if let password {
+    process.arguments?.insert(contentsOf: ["-P", password], at: 0)
   }
 
   try process.run()
