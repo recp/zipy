@@ -6,6 +6,12 @@
  * You may obtain a copy of the License at
  *
  *      http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
  */
 
 #ifndef zipy_zip_h
@@ -18,20 +24,20 @@
 typedef struct zipy_archive_t zipy_archive_t;
 
 typedef enum zipy_zip_result_t {
-  ZIPY_ZIP_OK       =  0,
-  ZIPY_ZIP_SAVED    =  1,
-  ZIPY_ZIP_SKIPPED  =  2,
-  ZIPY_ZIP_ERR      = -1,
-  ZIPY_ZIP_EINFLATE = -2,
-  ZIPY_ZIP_ESIZE    = -3,
-  ZIPY_ZIP_ECRC     = -4,
-  ZIPY_ZIP_EFILE    = -5,
-  ZIPY_ZIP_EUNSUP   = -6,
-  ZIPY_ZIP_EEXIST   = -7,
-  ZIPY_ZIP_EPASS    = -8,
-  ZIPY_ZIP_EAUTH    = -9,
-  ZIPY_ZIP_ENOSPC   = -10,
-  ZIPY_ZIP_ECANCEL  = -11,
+  ZIPY_ZIP_OK          = 0,
+  ZIPY_ZIP_SAVED       = 1,
+  ZIPY_ZIP_SKIPPED     = 2,
+  ZIPY_ZIP_ERR         = -1,
+  ZIPY_ZIP_EINFLATE    = -2,
+  ZIPY_ZIP_ESIZE       = -3,
+  ZIPY_ZIP_ECRC        = -4,
+  ZIPY_ZIP_EFILE       = -5,
+  ZIPY_ZIP_EUNSUP      = -6,
+  ZIPY_ZIP_EEXIST      = -7,
+  ZIPY_ZIP_EPASS       = -8,
+  ZIPY_ZIP_EAUTH       = -9,
+  ZIPY_ZIP_ENOSPC      = -10,
+  ZIPY_ZIP_ECANCEL     = -11,
   ZIPY_ZIP_EINCOMPLETE = -12
 } zipy_zip_result_t;
 
@@ -55,14 +61,14 @@ typedef enum zipy_conflict_policy_t {
 } zipy_conflict_policy_t;
 
 typedef enum zipy_extract_flags_t {
-  ZIPY_EXTRACT_DEFAULT     = 0,
-  ZIPY_EXTRACT_NO_CRC      = 1u << 0,
-  ZIPY_EXTRACT_NO_METADATA = 1u << 1,
-  ZIPY_EXTRACT_ATOMIC      = 1u << 2,
-  ZIPY_EXTRACT_RESUME      = 1u << 3,
-  ZIPY_EXTRACT_UNSAFE_SYMLINKS = 1u << 4,
+  ZIPY_EXTRACT_DEFAULT             = 0,
+  ZIPY_EXTRACT_NO_CRC              = 1u << 0,
+  ZIPY_EXTRACT_NO_METADATA         = 1u << 1,
+  ZIPY_EXTRACT_ATOMIC              = 1u << 2,
+  ZIPY_EXTRACT_RESUME              = 1u << 3,
+  ZIPY_EXTRACT_UNSAFE_SYMLINKS     = 1u << 4,
   ZIPY_EXTRACT_SKIP_MACOS_METADATA = 1u << 5,
-  ZIPY_EXTRACT_FAST        = ZIPY_EXTRACT_NO_CRC | ZIPY_EXTRACT_NO_METADATA
+  ZIPY_EXTRACT_FAST                = ZIPY_EXTRACT_NO_CRC | ZIPY_EXTRACT_NO_METADATA
 } zipy_extract_flags_t;
 
 typedef struct zipy_entry_t {
@@ -76,62 +82,61 @@ typedef struct zipy_entry_t {
   bool        encrypted;
 } zipy_entry_t;
 
-typedef int
-(*zipy_progress_t)(void *userdata,
-                   const zipy_entry_t *entry,
-                   uint64_t done,
-                   uint64_t total);
+typedef int (*zipy_progress_t)(void               *userdata,
+                              const zipy_entry_t *entry,
+                              uint64_t            done,
+                              uint64_t            total);
 
 typedef struct zipy_extract_options_t {
   zipy_conflict_policy_t on_conflict;
-  zipy_save_location_t save_to;
-  const char       *save_dir;
-  uint32_t          flags;
-  const char       *password;
-  size_t            jobs;
-  zipy_progress_t   progress;
-  void             *userdata;
+  zipy_save_location_t   save_to;
+  const char            *save_dir;
+  uint32_t               flags;
+  const char            *password;
+  size_t                 jobs;
+  zipy_progress_t        progress;
+  void                  *userdata;
 } zipy_extract_options_t;
 
 ZIPY_EXPORT void
-zipy_extract_options_init(zipy_extract_options_t * __restrict options);
+zipy_extract_options_init(zipy_extract_options_t *__restrict options);
 
-ZIPY_EXPORT zipy_archive_t *
-zipy_open(const char * __restrict path);
-
-ZIPY_EXPORT size_t
-zipy_count(const zipy_archive_t * __restrict zipy);
+ZIPY_EXPORT zipy_archive_t*
+zipy_open(const char *__restrict path);
 
 ZIPY_EXPORT size_t
-zipy_file_count(const zipy_archive_t * __restrict zipy);
+zipy_count(const zipy_archive_t *__restrict zipy);
+
+ZIPY_EXPORT size_t
+zipy_file_count(const zipy_archive_t *__restrict zipy);
 
 ZIPY_EXPORT uint64_t
-zipy_uncompressed_size(const zipy_archive_t * __restrict zipy);
+zipy_uncompressed_size(const zipy_archive_t *__restrict zipy);
 
-ZIPY_EXPORT const zipy_entry_t *
-zipy_entry(const zipy_archive_t * __restrict zipy, size_t index);
+ZIPY_EXPORT const zipy_entry_t*
+zipy_entry(const zipy_archive_t *__restrict zipy, size_t index);
 
 /* returns false when the central directory has no modification time. */
 ZIPY_EXPORT bool
 zipy_entry_mtime(const zipy_archive_t *__restrict zipy,
-                 size_t                          index,
-                 int64_t             *__restrict mtime);
+                 size_t                           index,
+                 int64_t              *__restrict mtime);
 
 ZIPY_EXPORT int
-zipy_extract(zipy_archive_t * __restrict zipy,
-             size_t index,
-             const char * __restrict destpath);
+zipy_extract(zipy_archive_t *__restrict zipy,
+             size_t                     index,
+             const char     *__restrict destpath);
 
 ZIPY_EXPORT int
-zipy_extract_to(zipy_archive_t * __restrict zipy,
-                size_t index,
-                const char * __restrict destdir,
-                const zipy_extract_options_t * __restrict options);
+zipy_extract_to(zipy_archive_t               *__restrict zipy,
+                size_t                                   index,
+                const char                   *__restrict destdir,
+                const zipy_extract_options_t *__restrict options);
 
 ZIPY_EXPORT int
-zipy_extract_named(zipy_archive_t * __restrict zipy,
-                   const char * __restrict name,
-                   const char * __restrict destpath);
+zipy_extract_named(zipy_archive_t *__restrict zipy,
+                   const char     *__restrict name,
+                   const char     *__restrict destpath);
 
 ZIPY_EXPORT int
 zipy_extract_all(zipy_archive_t               *__restrict zipy,
@@ -139,14 +144,14 @@ zipy_extract_all(zipy_archive_t               *__restrict zipy,
                  const zipy_extract_options_t *__restrict options);
 
 ZIPY_EXPORT int
-zipy_extract_stream(const char * __restrict path,
-                    const char * __restrict destdir,
-                    const zipy_extract_options_t * __restrict options);
+zipy_extract_stream(const char                   *__restrict path,
+                    const char                   *__restrict destdir,
+                    const zipy_extract_options_t *__restrict options);
 
-ZIPY_EXPORT const char *
+ZIPY_EXPORT const char*
 zipy_strerror(int result);
 
 ZIPY_EXPORT void
-zipy_close(zipy_archive_t * __restrict zipy);
+zipy_close(zipy_archive_t *__restrict zipy);
 
 #endif /* zipy_zip_h */

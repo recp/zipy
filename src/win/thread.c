@@ -6,22 +6,31 @@
  * You may obtain a copy of the License at
  *
  *      http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
  */
 
 #include "thread.h"
 
 static DWORD WINAPI
 thread_entry(void *arg) {
-  thread_handle_t *thread = arg;
+  thread_handle_t *thread;
+
+  thread = arg;
 
   thread->func(thread->arg);
+
   return 0;
 }
 
 int
 thread_start(thread_handle_t *thread, void (*func)(void *), void *arg) {
   thread->func = func;
-  thread->arg = arg;
+  thread->arg  = arg;
 
   thread->id = CreateThread(NULL, 0, thread_entry, thread, 0, NULL);
   if (!thread->id)
@@ -61,5 +70,6 @@ cpu_count(void) {
   SYSTEM_INFO info;
 
   GetSystemInfo(&info);
+
   return info.dwNumberOfProcessors > 0 ? (size_t)info.dwNumberOfProcessors : 1u;
 }

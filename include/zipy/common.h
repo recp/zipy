@@ -21,7 +21,7 @@ extern "C" {
 #endif
 
 #ifndef _USE_MATH_DEFINES
-#  define _USE_MATH_DEFINES       /* for windows */
+#  define _USE_MATH_DEFINES /* for windows */
 #endif
 
 #ifndef _CRT_SECURE_NO_WARNINGS
@@ -47,7 +47,7 @@ extern "C" {
 
 #if defined(_MSC_VER) || defined(__MINGW32__) || defined(__MINGW64__)
 #  define ZIPY_WINAPI
-#  pragma warning (disable : 4068) /* disable unknown pragma warnings */
+#  pragma warning(disable : 4068) /* disable unknown pragma warnings */
 #endif
 
 #if defined(_MSC_VER) || defined(__MINGW32__) || defined(__MINGW64__)
@@ -60,20 +60,20 @@ extern "C" {
 #  endif
 #  define ZIPY_HIDE
 #else
-#  define ZIPY_EXPORT   __attribute__((visibility("default")))
-#  define ZIPY_HIDE     __attribute__((visibility("hidden")))
+#  define ZIPY_EXPORT __attribute__((visibility("default")))
+#  define ZIPY_HIDE __attribute__((visibility("hidden")))
 #endif
 
 #if defined(_MSC_VER)
-#  define ZIPY_INLINE      __forceinline
-#  define ZIPY_ALIGN(X)    __declspec(align(X))
+#  define ZIPY_INLINE __forceinline
+#  define ZIPY_ALIGN(X) __declspec(align(X))
 #  define ZIPY_HOT
-#  define ZIPY_HOT_INLINE  __forceinline
+#  define ZIPY_HOT_INLINE __forceinline
 #else
-#  define ZIPY_INLINE      static inline __attribute__((always_inline))
-#  define ZIPY_ALIGN(X)    __attribute__((aligned(X)))
-#  define ZIPY_HOT         __attribute__((hot))
-#  define ZIPY_HOT_INLINE  static inline __attribute__((hot, always_inline))
+#  define ZIPY_INLINE static inline __attribute__((always_inline))
+#  define ZIPY_ALIGN(X) __attribute__((aligned(X)))
+#  define ZIPY_HOT __attribute__((hot))
+#  define ZIPY_HOT_INLINE static inline __attribute__((hot, always_inline))
 #endif
 
 #ifndef __has_builtin
@@ -81,15 +81,15 @@ extern "C" {
 #endif
 
 typedef enum zipy_result_t {
-  ZIPY_UNFINISHED =  2,       /* need more data for streaming */
-  ZIPY_NOOP       =  1,       /* no operation needed */
-  ZIPY_OK         =  0,
-  ZIPY_ERR        = -1,       /* UKNOWN ERR */
+  ZIPY_UNFINISHED = 2, /* need more data for streaming */
+  ZIPY_NOOP       = 1, /* no operation needed */
+  ZIPY_OK         = 0,
+  ZIPY_ERR        = -1, /* unknown error */
   ZIPY_EFOUND     = -1000,
   ZIPY_ENOMEM     = -ENOMEM,
   ZIPY_EPERM      = -EPERM,
-  ZIPY_EBADF      = -EBADF,   /* file couldn't parsed / loaded */
-  ZIPY_EFULL      = -ENOBUFS  /* no space ENOBUFS vs ENOSPC    */
+  ZIPY_EBADF      = -EBADF,  /* file couldn't parsed / loaded */
+  ZIPY_EFULL      = -ENOBUFS /* no space ENOBUFS vs ENOSPC    */
 } zipy_result_t;
 
 #ifdef __cplusplus
