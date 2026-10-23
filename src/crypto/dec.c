@@ -6,6 +6,12 @@
  * You may obtain a copy of the License at
  *
  *      http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
  */
 
 #include "dec.h"
@@ -24,6 +30,7 @@ zipcrypto_crc32(uint32_t crc, uint8_t value) {
   crc ^= value;
   crc = (crc >> 4) ^ table[crc & 0x0Fu];
   crc = (crc >> 4) ^ table[crc & 0x0Fu];
+
   return crc;
 }
 
@@ -37,7 +44,9 @@ zipcrypto_update(zipcrypto_t *ctx, uint8_t value) {
 
 static uint8_t
 zipcrypto_byte(const zipcrypto_t *ctx) {
-  uint32_t temp = ctx->keys[2] | 2u;
+  uint32_t temp;
+
+  temp = ctx->keys[2] | 2u;
 
   return (uint8_t)((temp * (temp ^ 1u)) >> 8);
 }
@@ -57,10 +66,11 @@ zipcrypto_init(zipcrypto_t *ctx, const char *password) {
 
 void
 zipcrypto_decrypt(zipcrypto_t *ctx, uint8_t *buf, size_t len) {
-  size_t i;
+  size_t  i;
+  uint8_t plain;
 
   for (i = 0; i < len; i++) {
-    uint8_t plain = (uint8_t)(buf[i] ^ zipcrypto_byte(ctx));
+    plain = (uint8_t)(buf[i] ^ zipcrypto_byte(ctx));
     zipcrypto_update(ctx, plain);
     buf[i] = plain;
   }
@@ -68,14 +78,15 @@ zipcrypto_decrypt(zipcrypto_t *ctx, uint8_t *buf, size_t len) {
 
 int
 zipcrypto_open(zipcrypto_t *ctx,
-               const char *password,
-               uint8_t header[ZIPCRYPTO_HEADER_SIZE],
-               uint8_t verify) {
+               const char  *password,
+               uint8_t      header[ZIPCRYPTO_HEADER_SIZE],
+               uint8_t      verify) {
   if (!password)
     return 0;
 
   zipcrypto_init(ctx, password);
   zipcrypto_decrypt(ctx, header, ZIPCRYPTO_HEADER_SIZE);
+
   return header[ZIPCRYPTO_HEADER_SIZE - 1] == verify;
 }
 
@@ -86,42 +97,48 @@ dec_init(dec_t *dec) {
 }
 
 int
-dec_open_zipcrypto(dec_t *dec,
-                   FILE *fp,
+dec_open_zipcrypto(dec_t      *dec,
+                   FILE       *fp,
                    const char *password,
-                   uint8_t verify,
-                   uint64_t *compressed_size) {
+                   uint8_t     verify,
+                   uint64_t   *compressed_size) {
   uint8_t header[ZIPCRYPTO_HEADER_SIZE];
 
   if (!dec || !fp || !compressed_size)
     return ZIPY_ZIP_ERR;
+
   if (!password)
     return ZIPY_ZIP_EPASS;
+
   if (*compressed_size < ZIPCRYPTO_HEADER_SIZE)
     return ZIPY_ZIP_ESIZE;
+
   if (fread(header, 1, sizeof(header), fp) != sizeof(header))
     return ZIPY_ZIP_EFILE;
+
   if (!zipcrypto_open(&dec->u.zipcrypto, password, header, verify))
     return ZIPY_ZIP_EPASS;
 
   *compressed_size -= ZIPCRYPTO_HEADER_SIZE;
   dec->kind = DEC_ZIPCRYPTO;
+
   return ZIPY_ZIP_OK;
 }
 
 int
-dec_open_aes_wg(dec_t *dec,
-                FILE *fp,
+dec_open_aes_wg(dec_t      *dec,
+                FILE       *fp,
                 const char *password,
-                uint8_t strength,
-                uint64_t *compressed_size) {
-  uint8_t salt[AES_WG_MAX_SALT_SIZE];
-  uint8_t verify[AES_WG_VERIFY_SIZE];
-  size_t salt_size;
+                uint8_t     strength,
+                uint64_t   *compressed_size) {
+  uint8_t  salt[AES_WG_MAX_SALT_SIZE];
+  uint8_t  verify[AES_WG_VERIFY_SIZE];
+  size_t   salt_size;
   uint64_t overhead;
 
   if (!dec || !fp || !compressed_size)
     return ZIPY_ZIP_ERR;
+
   if (!password)
     return ZIPY_ZIP_EPASS;
 
@@ -142,6 +159,7 @@ dec_open_aes_wg(dec_t *dec,
 
   *compressed_size -= overhead;
   dec->kind = DEC_AES_WG;
+
   return ZIPY_ZIP_OK;
 }
 
@@ -163,10 +181,12 @@ dec_finish(dec_t *dec, FILE *fp) {
 
   if (!dec)
     return ZIPY_ZIP_OK;
+
   if (dec->kind != DEC_AES_WG) {
     dec->kind = DEC_NONE;
     return ZIPY_ZIP_OK;
   }
+
   if (!fp)
     return ZIPY_ZIP_ERR;
 
@@ -174,7 +194,6 @@ dec_finish(dec_t *dec, FILE *fp) {
     return ZIPY_ZIP_EFILE;
 
   dec->kind = DEC_NONE;
-  return aes_wg_auth(&dec->u.aes_wg, auth)
-       ? ZIPY_ZIP_OK
-       : ZIPY_ZIP_EAUTH;
+
+  return aes_wg_auth(&dec->u.aes_wg, auth) ? ZIPY_ZIP_OK : ZIPY_ZIP_EAUTH;
 }

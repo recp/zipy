@@ -6,6 +6,12 @@
  * You may obtain a copy of the License at
  *
  *      http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
  */
 
 #ifndef CRYPTO_DEC_H
@@ -47,26 +53,26 @@ zipcrypto_decrypt(zipcrypto_t *ctx, uint8_t *buf, size_t len);
 
 int
 zipcrypto_open(zipcrypto_t *ctx,
-               const char *password,
-               uint8_t header[ZIPCRYPTO_HEADER_SIZE],
-               uint8_t verify);
+               const char  *password,
+               uint8_t      header[ZIPCRYPTO_HEADER_SIZE],
+               uint8_t      verify);
 
 void
 dec_init(dec_t *dec);
 
 int
-dec_open_zipcrypto(dec_t *dec,
-                   FILE *fp,
+dec_open_zipcrypto(dec_t      *dec,
+                   FILE       *fp,
                    const char *password,
-                   uint8_t verify,
-                   uint64_t *compressed_size);
+                   uint8_t     verify,
+                   uint64_t   *compressed_size);
 
 int
-dec_open_aes_wg(dec_t *dec,
-                FILE *fp,
+dec_open_aes_wg(dec_t      *dec,
+                FILE       *fp,
                 const char *password,
-                uint8_t strength,
-                uint64_t *compressed_size);
+                uint8_t     strength,
+                uint64_t   *compressed_size);
 
 void
 dec_decrypt(dec_t *dec, uint8_t *buf, size_t len);

@@ -6,6 +6,12 @@
  * You may obtain a copy of the License at
  *
  *      http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
  */
 
 #ifndef CRYPTO_SHA1_H
@@ -14,7 +20,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#define SHA1_SIZE       20u
+#define SHA1_SIZE 20u
 #define SHA1_BLOCK_SIZE 64u
 
 typedef struct sha1_t {
@@ -49,11 +55,11 @@ hmac_sha1_final(hmac_sha1_t *ctx, uint8_t out[SHA1_SIZE]);
 
 int
 pbkdf2_hmac_sha1(const uint8_t *password,
-                 size_t password_len,
+                 size_t         password_len,
                  const uint8_t *salt,
-                 size_t salt_len,
-                 uint32_t iterations,
-                 uint8_t *out,
-                 size_t out_len);
+                 size_t         salt_len,
+                 uint32_t       iterations,
+                 uint8_t       *out,
+                 size_t         out_len);
 
 #endif /* CRYPTO_SHA1_H */

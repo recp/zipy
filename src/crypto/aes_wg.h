@@ -6,6 +6,12 @@
  * You may obtain a copy of the License at
  *
  *      http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
  */
 
 #ifndef CRYPTO_AES_WG_H
@@ -16,11 +22,11 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#define AES_WG_BLOCK_SIZE        16u
-#define AES_WG_MAX_KEY_SIZE      32u
-#define AES_WG_MAX_SALT_SIZE     16u
-#define AES_WG_VERIFY_SIZE       2u
-#define AES_WG_AUTH_SIZE         10u
+#define AES_WG_BLOCK_SIZE 16u
+#define AES_WG_MAX_KEY_SIZE 32u
+#define AES_WG_MAX_SALT_SIZE 16u
+#define AES_WG_VERIFY_SIZE 2u
+#define AES_WG_AUTH_SIZE 10u
 #define AES_WG_KEYING_ITERATIONS 1000u
 
 typedef struct aes_key_t {
@@ -43,11 +49,11 @@ size_t
 aes_wg_key_size(uint8_t strength);
 
 int
-aes_wg_open(aes_wg_t *ctx,
-            const char *password,
-            uint8_t strength,
+aes_wg_open(aes_wg_t      *ctx,
+            const char    *password,
+            uint8_t        strength,
             const uint8_t *salt,
-            const uint8_t verify[AES_WG_VERIFY_SIZE]);
+            const uint8_t  verify[AES_WG_VERIFY_SIZE]);
 
 void
 aes_wg_decrypt(aes_wg_t *ctx, uint8_t *buf, size_t len);
