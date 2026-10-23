@@ -4,6 +4,85 @@ import Zipy
 import CZipy
 
 @Test
+func zip64OffsetCanEqualZIP32Sentinel() throws {
+  let root = try temporaryDirectory()
+  defer { try? FileManager.default.removeItem(at: root) }
+  let archive = root.appendingPathComponent("sentinel.zip")
+  let output = root.appendingPathComponent("payload.bin")
+  let offset = UInt64(UInt32.max)
+  let name = Data("file.bin".utf8)
+  let crc: UInt32 = 0xb7b2364b // IEEE CRC32 of "X".
+  func put<T: FixedWidthInteger>(_ value: T, at offset: Int, in data: inout Data) {
+    var little = value.littleEndian
+    withUnsafeBytes(of: &little) {
+      data.replaceSubrange(offset..<(offset + $0.count), with: $0)
+    }
+  }
+  var local = Data(count: 30)
+  put(UInt32(0x04034b50), at: 0, in: &local)
+  put(UInt16(45), at: 4, in: &local)
+  put(UInt16(0x0800), at: 6, in: &local)
+  put(UInt16(0x5021), at: 12, in: &local)
+  put(crc, at: 14, in: &local)
+  put(UInt32(1), at: 18, in: &local)
+  put(UInt32(1), at: 22, in: &local)
+  put(UInt16(name.count), at: 26, in: &local)
+  local.append(name)
+  local.append(88)
+
+  var central = Data(count: 46)
+  put(UInt32(0x02014b50), at: 0, in: &central)
+  put(UInt16(0x032d), at: 4, in: &central)
+  put(UInt16(45), at: 6, in: &central)
+  put(UInt16(0x0800), at: 8, in: &central)
+  put(UInt16(0x5021), at: 14, in: &central)
+  put(crc, at: 16, in: &central)
+  put(UInt32(1), at: 20, in: &central)
+  put(UInt32(1), at: 24, in: &central)
+  put(UInt16(name.count), at: 28, in: &central)
+  put(UInt16(12), at: 30, in: &central)
+  put(UInt32(0o100644 << 16), at: 38, in: &central)
+  put(UInt32.max, at: 42, in: &central)
+  central.append(name)
+  var extra = Data(count: 12)
+  put(UInt16(1), at: 0, in: &extra)
+  put(UInt16(8), at: 2, in: &extra)
+  put(offset, at: 4, in: &extra)
+  central.append(extra)
+  let centralOffset = offset + UInt64(local.count)
+  var end = Data(count: 98)
+  put(UInt32(0x06064b50), at: 0, in: &end)
+  put(UInt64(44), at: 4, in: &end)
+  put(UInt16(0x032d), at: 12, in: &end)
+  put(UInt16(45), at: 14, in: &end)
+  put(UInt64(1), at: 24, in: &end)
+  put(UInt64(1), at: 32, in: &end)
+  put(UInt64(central.count), at: 40, in: &end)
+  put(centralOffset, at: 48, in: &end)
+  put(UInt32(0x07064b50), at: 56, in: &end)
+  put(centralOffset + UInt64(central.count), at: 64, in: &end)
+  put(UInt32(1), at: 72, in: &end)
+  put(UInt32(0x06054b50), at: 76, in: &end)
+  put(UInt16(1), at: 84, in: &end)
+  put(UInt16(1), at: 86, in: &end)
+  put(UInt32(central.count), at: 88, in: &end)
+  put(UInt32.max, at: 92, in: &end)
+  _ = FileManager.default.createFile(atPath: archive.path, contents: nil)
+  let file = try FileHandle(forWritingTo: archive)
+  try file.seek(toOffset: offset)
+  try file.write(contentsOf: local)
+  try file.write(contentsOf: central)
+  try file.write(contentsOf: end)
+  try file.close()
+  let handle = try #require(archive.withUnsafeFileSystemRepresentation { zipy_open($0) })
+  defer { zipy_close(handle) }
+  #expect(zipy_count(handle) == 1)
+  #expect(output.withUnsafeFileSystemRepresentation { zipy_extract(handle, 0, $0) }
+    == ZIPY_ZIP_OK.rawValue)
+  #expect(try Data(contentsOf: output) == Data("X".utf8))
+}
+
+@Test
 func parallelIndexedExtractionKeepsEveryPayload() throws {
   let root = try temporaryDirectory()
   defer { try? FileManager.default.removeItem(at: root) }

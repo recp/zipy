@@ -1245,6 +1245,7 @@ parse_zip64_extra(entry_info_t *info,
                       uint16_t disk32) {
   size_t pos = 0;
   uint32_t disk = disk32;
+  bool has_zip64 = false;
 
   while (len - pos >= 4) {
     uint16_t id = le16(extra + pos);
@@ -1287,6 +1288,7 @@ parse_zip64_extra(entry_info_t *info,
           return 0;
         disk = le32(p);
       }
+      has_zip64 = true;
     }
 
     pos += size;
@@ -1294,12 +1296,11 @@ parse_zip64_extra(entry_info_t *info,
 
   return pos == len
       && disk == 0
-      && (comp32 != ZIP64_MAGIC_UINT32
-          || info->entry.compressed_size != ZIP64_MAGIC_UINT32)
-      && (uncomp32 != ZIP64_MAGIC_UINT32
-          || info->entry.uncompressed_size != ZIP64_MAGIC_UINT32)
-      && (offset32 != ZIP64_MAGIC_UINT32
-          || info->local_header_offset != ZIP64_MAGIC_UINT32);
+      /* A resolved 64-bit value can legitimately equal the ZIP32 sentinel. */
+      && (has_zip64
+          || (comp32 != ZIP64_MAGIC_UINT32
+              && uncomp32 != ZIP64_MAGIC_UINT32
+              && offset32 != ZIP64_MAGIC_UINT32));
 }
 
 static int
