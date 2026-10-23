@@ -4898,9 +4898,9 @@ extract_store_data_descriptor(zipy_archive_t   *__restrict zipy,
                               const char       *__restrict part_destdir,
                               progress_state_t *__restrict progress) {
   out_file_t  outfile;
+  uint8_t     tail[15];
   uint8_t    *buf;
   const char *part_path = NULL;
-  uint8_t     tail[15];
   size_t      tail_len      = 0;
   uint64_t    base_len      = 0;
   uint64_t    resume_offset = 0;
@@ -5204,11 +5204,11 @@ extract_deflate_data_descriptor(zipy_archive_t   *__restrict zipy,
                                 const char       *__restrict password,
                                 int                          zip64_descriptor,
                                 progress_state_t *__restrict progress) {
-  out_file_t  outfile;
-  out_map_t   outmap;
   dec_t       dec;
-  dec_t      *dec_ptr = NULL;
   dec_t       chunk_dec;
+  out_map_t   outmap;
+  out_file_t  outfile;
+  dec_t      *dec_ptr = NULL;
   uint8_t    *inbuf;
   uint8_t    *plainbuf = NULL;
   const char *part_path;
@@ -5557,14 +5557,17 @@ extract_entry(zipy_archive_t   *__restrict zipy,
               const char       *__restrict state_path,
               const char       *__restrict part_destdir,
               progress_state_t *__restrict progress) {
+  /* retain declaration order for the Intel frame size; see CODE_STYLE.md. */
   uint8_t        local[ZIP_LOCAL_FIXED];
   const uint8_t *localp;
   const uint8_t *mapped_data = NULL;
   uint16_t       flags, method, nameLen, extraLen;
   uint64_t       dataOffset, compressed_size;
+
   dec_t          dec;
   dec_t         *dec_ptr = NULL;
   out_file_t     outfile;
+
   const char    *output_path    = destpath;
   const char    *part_path      = NULL;
   uint64_t       resume_offset  = 0;
