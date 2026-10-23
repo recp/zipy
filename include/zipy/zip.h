@@ -111,11 +111,11 @@ zipy_uncompressed_size(const zipy_archive_t * __restrict zipy);
 ZIPY_EXPORT const zipy_entry_t *
 zipy_entry(const zipy_archive_t * __restrict zipy, size_t index);
 
-/* Returns false when the central directory has no modification time. */
+/* returns false when the central directory has no modification time. */
 ZIPY_EXPORT bool
-zipy_entry_mtime(const zipy_archive_t * __restrict zipy,
-                 size_t index,
-                 int64_t * __restrict mtime);
+zipy_entry_mtime(const zipy_archive_t *__restrict zipy,
+                 size_t                          index,
+                 int64_t             *__restrict mtime);
 
 ZIPY_EXPORT int
 zipy_extract(zipy_archive_t * __restrict zipy,
@@ -134,9 +134,9 @@ zipy_extract_named(zipy_archive_t * __restrict zipy,
                    const char * __restrict destpath);
 
 ZIPY_EXPORT int
-zipy_extract_all(zipy_archive_t * __restrict zipy,
-                 const char * __restrict destdir,
-                 const zipy_extract_options_t * __restrict options);
+zipy_extract_all(zipy_archive_t               *__restrict zipy,
+                 const char                   *__restrict destdir,
+                 const zipy_extract_options_t *__restrict options);
 
 ZIPY_EXPORT int
 zipy_extract_stream(const char * __restrict path,

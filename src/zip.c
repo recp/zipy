@@ -104,7 +104,7 @@
 #define ZIP_FLAG_STRONG_ENC   0x0040u
 #define ZIP_METHOD_AES        99u
 #define EXTRACT_DELAY_PARTS_CLEANUP (1u << 30)
-#define EXTRACT_DELAY_DIR_METADATA (1u << 31)
+#define EXTRACT_DELAY_DIR_METADATA  (1u << 31)
 
 #define ZIP_HOST_UNIX         3u
 #define ZIP_HOST_OSX          19u
@@ -1237,71 +1237,85 @@ next:
 }
 
 static int
-parse_zip64_extra(entry_info_t *info,
-                      const uint8_t *extra,
-                      size_t len,
-                      uint32_t comp32,
-                      uint32_t uncomp32,
-                      uint32_t offset32,
-                      uint16_t disk32) {
-  size_t pos = 0;
-  uint32_t disk = disk32;
-  bool has_zip64 = false;
+parse_zip64_extra(entry_info_t  *info,
+                  const uint8_t *extra,
+                  size_t         len,
+                  uint32_t       comp32,
+                  uint32_t       uncomp32,
+                  uint32_t       offset32,
+                  uint16_t       disk32) {
+  const uint8_t *p;
+  size_t         pos = 0, rem;
+  uint32_t       disk;
+  uint16_t       id, size;
+  bool           has_zip64;
+
+  disk      = disk32;
+  has_zip64 = false;
 
   while (len - pos >= 4) {
-    uint16_t id = le16(extra + pos);
-    uint16_t size = le16(extra + pos + 2);
-    const uint8_t *p = extra + pos + 4;
-    size_t rem;
+    id   = le16(extra + pos);
+    size = le16(extra + pos + 2);
+    p    = extra + pos + 4;
 
     pos += 4;
+
     if (size > len - pos)
       return 0;
 
     rem = size;
+
     if (id == ZIP_EXTRA_ZIP64) {
       if (uncomp32 == ZIP64_MAGIC_UINT32) {
         if (rem < 8)
           return 0;
+
         info->entry.uncompressed_size = le64(p);
-        p += 8;
+
+        p   += 8;
         rem -= 8;
       }
 
       if (comp32 == ZIP64_MAGIC_UINT32) {
         if (rem < 8)
           return 0;
+
         info->entry.compressed_size = le64(p);
-        p += 8;
+
+        p   += 8;
         rem -= 8;
       }
 
       if (offset32 == ZIP64_MAGIC_UINT32) {
         if (rem < 8)
           return 0;
+
         info->local_header_offset = le64(p);
-        p += 8;
+
+        p   += 8;
         rem -= 8;
       }
 
       if (disk32 == ZIP64_MAGIC_UINT16) {
         if (rem < 4)
           return 0;
+
         disk = le32(p);
       }
+
       has_zip64 = true;
     }
 
     pos += size;
   }
 
+  /* a resolved 64-bit value can legitimately equal the ZIP32 sentinel. */
   return pos == len
-      && disk == 0
-      /* A resolved 64-bit value can legitimately equal the ZIP32 sentinel. */
-      && (has_zip64
-          || (comp32 != ZIP64_MAGIC_UINT32
-              && uncomp32 != ZIP64_MAGIC_UINT32
-              && offset32 != ZIP64_MAGIC_UINT32));
+         && disk == 0
+         && (has_zip64
+             || (comp32 != ZIP64_MAGIC_UINT32
+                 && uncomp32 != ZIP64_MAGIC_UINT32
+                 && offset32 != ZIP64_MAGIC_UINT32));
 }
 
 static int
@@ -2197,8 +2211,7 @@ write_resume_state(const char *state_path,
           (unsigned long long)info->entry.compressed_size,
           (unsigned long long)info->entry.uncompressed_size,
           (unsigned)info->entry.crc32,
-          (unsigned)(flags & ~(EXTRACT_DELAY_DIR_METADATA
-                            | EXTRACT_DELAY_PARTS_CLEANUP)));
+          (unsigned)(flags & ~(EXTRACT_DELAY_DIR_METADATA | EXTRACT_DELAY_PARTS_CLEANUP)));
 
   if (fclose(fp) != 0) {
     remove_file(tmp);
@@ -4809,10 +4822,10 @@ zipy_open(const char * __restrict path) {
       goto err;
     }
 
-    /* Extended timestamps already contain Unix time. Avoid a redundant
+    /* extended timestamps already contain Unix time. avoid a redundant
      * timezone conversion for every central-directory entry that has one. */
     if (!info->has_mtime) {
-      info->mtime = dos_time(info->mod_date, info->mod_time);
+      info->mtime     = dos_time(info->mod_date, info->mod_time);
       info->has_mtime = info->mtime != (time_t)0;
     }
 
@@ -4836,7 +4849,8 @@ zipy_open(const char * __restrict path) {
         || info->entry.compressed_size > zipy->file_size
         || UINT64_MAX - info->local_header_offset < ZIP_LOCAL_FIXED)
       goto err;
-    /* Local headers are read when extracting. Touching every member here
+
+    /* local headers are read when extracting. touching every member here
      * faults pages throughout large archives just to show the file list. */
 
     if (central) {
@@ -6018,14 +6032,15 @@ zipy_entry(const zipy_archive_t * __restrict zipy, size_t index) {
 
 ZIPY_EXPORT
 bool
-zipy_entry_mtime(const zipy_archive_t * __restrict zipy,
-                 size_t index,
-                 int64_t * __restrict mtime) {
+zipy_entry_mtime(const zipy_archive_t *__restrict zipy,
+                 size_t                          index,
+                 int64_t             *__restrict mtime) {
   if (!zipy || index >= zipy->file_count || !mtime
       || !zipy->files[index].has_mtime)
     return false;
 
   *mtime = (int64_t)zipy->files[index].mtime;
+
   return true;
 }
 
@@ -6331,12 +6346,20 @@ extract_all_serial(zipy_archive_t *zipy,
 
 static void
 extract_all_worker(void *arg) {
+  zipy_archive_t         clone;
+  progress_state_t       progress;
   extract_all_context_t *ctx;
-  zipy_archive_t clone;
-  zipy_archive_t *zipy = &clone;
-  size_t index, prefixLen;
+  zipy_archive_t        *zipy;
+  entry_info_t          *info;
+  progress_state_t      *progress_ptr;
+  const char            *path;
+  size_t                 index, prefixLen, end;
+  uint64_t               batch_bytes;
+  int                    ret;
 
-  ctx = arg;
+  zipy = &clone;
+  ctx  = arg;
+
   if (!clone_init(zipy, ctx->source)) {
     mutex_lock(&ctx->lock);
     if (ctx->result == ZIPY_ZIP_OK)
@@ -6344,6 +6367,7 @@ extract_all_worker(void *arg) {
     mutex_unlock(&ctx->lock);
     return;
   }
+
   if (!path_buf_set_archive_dir(zipy, ctx->destdir, &prefixLen)) {
     mutex_lock(&ctx->lock);
     if (ctx->result == ZIPY_ZIP_OK)
@@ -6354,22 +6378,20 @@ extract_all_worker(void *arg) {
   }
 
   for (;;) {
-    entry_info_t *info;
-    const char *path;
-    size_t end;
-    uint64_t batch_bytes;
-    int ret;
-
     mutex_lock(&ctx->lock);
     if (ctx->result != ZIPY_ZIP_OK || ctx->next >= ctx->count) {
       mutex_unlock(&ctx->lock);
       break;
     }
+
     index = ctx->next;
-    end = index + 1u;
+    end   = index + 1u;
+
     batch_bytes = ctx->source->files[index].entry.uncompressed_size;
-    /* Keep small-file batching without assigning several large files to
-     * one worker while the other workers run out of entries. */
+
+    /* keep small-file batching without assigning several large files to
+     * one worker while the other workers run out of entries. keep the inner
+     * counter local to preserve Intel loop code. */
     while (end < ctx->count && end - index < ZIP_WORK_BATCH
            && batch_bytes < ZIP_WORK_BATCH_BYTES) {
       uint64_t next_bytes;
@@ -6377,20 +6399,22 @@ extract_all_worker(void *arg) {
       next_bytes = ctx->source->files[end].entry.uncompressed_size;
       if (next_bytes > ZIP_WORK_BATCH_BYTES - batch_bytes)
         break;
+
       batch_bytes += next_bytes;
       end++;
     }
+
     ctx->next = end;
     mutex_unlock(&ctx->lock);
 
     for (; index < end; index++) {
-      progress_state_t progress;
-      progress_state_t *progress_ptr = NULL;
+      progress_ptr = NULL;
 
       if (index >= zipy->file_count) {
         ret = ZIPY_ZIP_EFILE;
         goto fail;
       }
+
       info = &zipy->files[index];
       if (ctx->options->progress) {
         progress_init_entry(&progress,
@@ -6412,25 +6436,24 @@ extract_all_worker(void *arg) {
         continue;
       }
 
-      path = path_buf_append_name(&zipy->path_buf,
-                                       prefixLen,
-                                       info->entry.name,
-                                       info->entry.name_len,
-                                       info->name_has_backslash);
-      if (!path) {
+      if (!(path = path_buf_append_name(&zipy->path_buf,
+                                        prefixLen,
+                                        info->entry.name,
+                                        info->entry.name_len,
+                                        info->name_has_backslash))) {
         ret = ZIPY_ZIP_ERR;
         goto fail;
       }
 
       ret = extract_entry(zipy,
-                               info,
-                               path,
-                               extract_parent_len(info, prefixLen),
-                               ctx->options->flags | EXTRACT_DELAY_DIR_METADATA,
-                               ctx->options->password,
-                               ctx->state_path,
-                               ctx->destdir,
-                               progress_ptr);
+                          info,
+                          path,
+                          extract_parent_len(info, prefixLen),
+                          ctx->options->flags | EXTRACT_DELAY_DIR_METADATA,
+                          ctx->options->password,
+                          ctx->state_path,
+                          ctx->destdir,
+                          progress_ptr);
       if (ret < ZIPY_ZIP_OK)
         goto fail;
 
@@ -6670,15 +6693,16 @@ prepare_extract_all(zipy_archive_t *zipy,
 }
 
 static void
-cleanup_extract_all_parts(zipy_archive_t *zipy,
-                          const char *destdir,
+cleanup_extract_all_parts(zipy_archive_t      *zipy,
+                          const char          *destdir,
                           const unsigned char *skip) {
   entry_info_t *info;
-  size_t i, prefixLen;
+  size_t        i, prefixLen;
 
   if (!path_buf_set_dir(&zipy->part_buf, destdir, &prefixLen)
       || !path_buf_append_name(&zipy->part_buf, prefixLen, ".zipy/parts/", 12u, 0))
     return;
+
   prefixLen = strlen(zipy->part_buf.data);
 
   for (i = 0; i < zipy->file_count; i++) {
@@ -6687,6 +6711,7 @@ cleanup_extract_all_parts(zipy_archive_t *zipy,
         || (skip && skip[i])
         || is_internal_state_name(info->entry.name, info->entry.name_len))
       continue;
+
     if (!path_buf_append_name(&zipy->part_buf,
                               prefixLen,
                               info->entry.name,
@@ -6694,25 +6719,28 @@ cleanup_extract_all_parts(zipy_archive_t *zipy,
                               info->name_has_backslash)
         || !path_buf_append_suffix(&zipy->part_buf, ".part"))
       return;
+
     cleanup_empty_parts_dirs(zipy, destdir, zipy->part_buf.data);
   }
+
   zipy->parent_cache_valid = 0;
 }
 
 ZIPY_EXPORT
 int
-zipy_extract_all(zipy_archive_t * __restrict zipy,
-                 const char * __restrict destdir,
-                 const zipy_extract_options_t * __restrict options) {
+zipy_extract_all(zipy_archive_t               *__restrict zipy,
+                 const char                   *__restrict destdir,
+                 const zipy_extract_options_t *__restrict options) {
   zipy_extract_options_t opts;
-  unsigned char *skip = NULL;
-  path_buf_t canonical_destdir;
-  const char *state_path = NULL;
-  size_t jobs;
-  int ret;
+  path_buf_t             canonical_destdir;
+  unsigned char         *skip = NULL;
+  const char            *state_path = NULL;
+  size_t                 jobs;
+  int                    ret, fastNoConflict;
 
   if (!zipy || !destdir)
     return ZIPY_ZIP_ERR;
+
   if (zipy->has_unsupported_method)
     return ZIPY_ZIP_EUNSUP;
 
@@ -6724,7 +6752,7 @@ zipy_extract_all(zipy_archive_t * __restrict zipy,
 
   opts = default_extract_options(options);
   if (opts.on_conflict != ZIPY_CONFLICT_OVERWRITE) {
-    int fastNoConflict = 0;
+    fastNoConflict = 0;
 
     if (target_empty_or_missing(canonical_destdir.data, &fastNoConflict) && fastNoConflict)
       opts.on_conflict = ZIPY_CONFLICT_OVERWRITE;
@@ -6735,12 +6763,14 @@ zipy_extract_all(zipy_archive_t * __restrict zipy,
 
   ret = prepare_extract_all(zipy, canonical_destdir.data, &opts, &skip);
   if (ret >= ZIPY_ZIP_OK) {
-    /* A worker may have created its part directory but not opened the file
-     * yet. Another worker must not remove that empty directory in between. */
+    /* a worker may have created its part directory but not opened the file
+     * yet. another worker must not remove that empty directory in between. */
     if ((opts.flags & (ZIPY_EXTRACT_ATOMIC | ZIPY_EXTRACT_RESUME)) == ZIPY_EXTRACT_ATOMIC)
       opts.flags |= EXTRACT_DELAY_PARTS_CLEANUP;
+
     jobs = opts.jobs ? extract_clamp_jobs(zipy, opts.jobs)
                      : extract_default_jobs(zipy);
+
     ret = extract_all_parallel(zipy,
                                canonical_destdir.data,
                                jobs,
@@ -6750,8 +6780,10 @@ zipy_extract_all(zipy_archive_t * __restrict zipy,
     if (ret == ZIPY_ZIP_OK && (opts.flags & EXTRACT_DELAY_PARTS_CLEANUP))
       cleanup_extract_all_parts(zipy, canonical_destdir.data, skip);
   }
+
   if (ret == ZIPY_ZIP_OK && !(opts.flags & ZIPY_EXTRACT_NO_METADATA))
     ret = apply_directory_metadata(zipy, canonical_destdir.data, skip);
+
   if (state_path)
     write_resume_run_state(state_path,
                            zipy,
