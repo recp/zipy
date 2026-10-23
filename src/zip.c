@@ -103,6 +103,7 @@
 #define ZIP_FLAG_DATA_DESC    0x0008u
 #define ZIP_FLAG_STRONG_ENC   0x0040u
 #define ZIP_METHOD_AES        99u
+#define EXTRACT_DELAY_PARTS_CLEANUP (1u << 30)
 #define EXTRACT_DELAY_DIR_METADATA (1u << 31)
 
 #define ZIP_HOST_UNIX         3u
@@ -2196,7 +2197,8 @@ write_resume_state(const char *state_path,
           (unsigned long long)info->entry.compressed_size,
           (unsigned long long)info->entry.uncompressed_size,
           (unsigned)info->entry.crc32,
-          (unsigned)(flags & ~EXTRACT_DELAY_DIR_METADATA));
+          (unsigned)(flags & ~(EXTRACT_DELAY_DIR_METADATA
+                            | EXTRACT_DELAY_PARTS_CLEANUP)));
 
   if (fclose(fp) != 0) {
     remove_file(tmp);
@@ -5980,7 +5982,8 @@ extract_entry(zipy_archive_t * __restrict zipy,
                        resume_offset,
                        extract_flags,
                        ret == ZIPY_ZIP_OK ? "done" : "failed");
-  if (use_part && !keep_part && part_destdir)
+  if (use_part && !keep_part && part_destdir
+      && !(extract_flags & EXTRACT_DELAY_PARTS_CLEANUP))
     cleanup_empty_parts_dirs(zipy, part_destdir, output_path);
 
   return ret;
@@ -6666,6 +6669,36 @@ prepare_extract_all(zipy_archive_t *zipy,
   return result;
 }
 
+static void
+cleanup_extract_all_parts(zipy_archive_t *zipy,
+                          const char *destdir,
+                          const unsigned char *skip) {
+  entry_info_t *info;
+  size_t i, prefixLen;
+
+  if (!path_buf_set_dir(&zipy->part_buf, destdir, &prefixLen)
+      || !path_buf_append_name(&zipy->part_buf, prefixLen, ".zipy/parts/", 12u, 0))
+    return;
+  prefixLen = strlen(zipy->part_buf.data);
+
+  for (i = 0; i < zipy->file_count; i++) {
+    info = &zipy->files[i];
+    if (!info->safe_name || info->entry.is_directory || is_symlink(info)
+        || (skip && skip[i])
+        || is_internal_state_name(info->entry.name, info->entry.name_len))
+      continue;
+    if (!path_buf_append_name(&zipy->part_buf,
+                              prefixLen,
+                              info->entry.name,
+                              info->entry.name_len,
+                              info->name_has_backslash)
+        || !path_buf_append_suffix(&zipy->part_buf, ".part"))
+      return;
+    cleanup_empty_parts_dirs(zipy, destdir, zipy->part_buf.data);
+  }
+  zipy->parent_cache_valid = 0;
+}
+
 ZIPY_EXPORT
 int
 zipy_extract_all(zipy_archive_t * __restrict zipy,
@@ -6702,6 +6735,10 @@ zipy_extract_all(zipy_archive_t * __restrict zipy,
 
   ret = prepare_extract_all(zipy, canonical_destdir.data, &opts, &skip);
   if (ret >= ZIPY_ZIP_OK) {
+    /* A worker may have created its part directory but not opened the file
+     * yet. Another worker must not remove that empty directory in between. */
+    if ((opts.flags & (ZIPY_EXTRACT_ATOMIC | ZIPY_EXTRACT_RESUME)) == ZIPY_EXTRACT_ATOMIC)
+      opts.flags |= EXTRACT_DELAY_PARTS_CLEANUP;
     jobs = opts.jobs ? extract_clamp_jobs(zipy, opts.jobs)
                      : extract_default_jobs(zipy);
     ret = extract_all_parallel(zipy,
@@ -6710,6 +6747,8 @@ zipy_extract_all(zipy_archive_t * __restrict zipy,
                                skip,
                                &opts,
                                state_path);
+    if (ret == ZIPY_ZIP_OK && (opts.flags & EXTRACT_DELAY_PARTS_CLEANUP))
+      cleanup_extract_all_parts(zipy, canonical_destdir.data, skip);
   }
   if (ret == ZIPY_ZIP_OK && !(opts.flags & ZIPY_EXTRACT_NO_METADATA))
     ret = apply_directory_metadata(zipy, canonical_destdir.data, skip);

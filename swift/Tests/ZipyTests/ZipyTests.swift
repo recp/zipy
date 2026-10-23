@@ -113,6 +113,75 @@ func parallelIndexedExtractionKeepsEveryPayload() throws {
 }
 
 @Test
+func parallelAtomicExtractionKeepsSharedPartDirectories() throws {
+  let root = try temporaryDirectory()
+  defer { try? FileManager.default.removeItem(at: root) }
+  let source = root.appendingPathComponent("source", isDirectory: true)
+  let shared = source.appendingPathComponent("shared/deep", isDirectory: true)
+  try FileManager.default.createDirectory(at: shared, withIntermediateDirectories: true)
+  let payloads = (0..<512).map { Data(String(repeating: "payload-\($0)\n", count: 512).utf8) }
+  for index in payloads.indices {
+    try payloads[index].write(to: shared.appendingPathComponent("file-\(index).txt"))
+  }
+  for stored in [false, true] {
+    let archive = root.appendingPathComponent("atomic-\(stored).zip")
+    try runZip(in: source, archive: archive, storing: stored)
+    let handle = try #require(archive.withUnsafeFileSystemRepresentation { zipy_open($0) })
+    defer { zipy_close(handle) }
+    for round in 0..<2 {
+      let output = root.appendingPathComponent("output-\(stored)-\(round)", isDirectory: true)
+      try FileManager.default.createDirectory(at: output, withIntermediateDirectories: true)
+      var options = zipy_extract_options_t()
+      zipy_extract_options_init(&options)
+      options.jobs = 8
+      options.flags = ZIPY_EXTRACT_ATOMIC.rawValue | ZIPY_EXTRACT_NO_METADATA.rawValue
+      options.on_conflict = ZIPY_CONFLICT_OVERWRITE
+      let result = output.withUnsafeFileSystemRepresentation {
+        zipy_extract_all(handle, $0, &options)
+      }
+      try #require(result == ZIPY_ZIP_OK.rawValue)
+      for index in payloads.indices {
+        #expect(try Data(contentsOf: output.appendingPathComponent("shared/deep/file-\(index).txt"))
+          == payloads[index])
+      }
+      #expect(!FileManager.default.fileExists(atPath: output.appendingPathComponent(".zipy").path))
+    }
+  }
+}
+
+@Test
+func cancelledParallelAtomicExtractionRemovesPartialPayloads() throws {
+  let root = try temporaryDirectory()
+  defer { try? FileManager.default.removeItem(at: root) }
+  let source = root.appendingPathComponent("source/shared", isDirectory: true)
+  let archive = root.appendingPathComponent("cancelled.zip")
+  let output = root.appendingPathComponent("output", isDirectory: true)
+  try FileManager.default.createDirectory(at: source, withIntermediateDirectories: true)
+  try FileManager.default.createDirectory(at: output, withIntermediateDirectories: true)
+  for index in 0..<128 {
+    try Data(repeating: UInt8(index), count: 64 * 1024)
+      .write(to: source.appendingPathComponent("file-\(index).txt"))
+  }
+  try runZip(in: source, archive: archive)
+  let handle = try #require(archive.withUnsafeFileSystemRepresentation { zipy_open($0) })
+  defer { zipy_close(handle) }
+  var options = zipy_extract_options_t()
+  zipy_extract_options_init(&options)
+  options.jobs = 8
+  options.flags = ZIPY_EXTRACT_ATOMIC.rawValue | ZIPY_EXTRACT_NO_METADATA.rawValue
+  options.on_conflict = ZIPY_CONFLICT_OVERWRITE
+  options.progress = { _, _, done, _ in done < 32 * 1024 ? 1 : 0 }
+  let result = output.withUnsafeFileSystemRepresentation {
+    zipy_extract_all(handle, $0, &options)
+  }
+  #expect(result == ZIPY_ZIP_ECANCEL.rawValue)
+  let contents = try #require(FileManager.default.enumerator(at: output, includingPropertiesForKeys: nil))
+  for case let file as URL in contents {
+    #expect(!file.lastPathComponent.hasSuffix(".part"))
+  }
+}
+
+@Test
 func indexedModificationTime() throws {
   let root = try temporaryDirectory()
   defer { try? FileManager.default.removeItem(at: root) }
