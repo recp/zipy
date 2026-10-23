@@ -7,17 +7,21 @@ import CZipy
 func zip64OffsetCanEqualZIP32Sentinel() throws {
   let root = try temporaryDirectory()
   defer { try? FileManager.default.removeItem(at: root) }
+
   let archive = root.appendingPathComponent("sentinel.zip")
-  let output = root.appendingPathComponent("payload.bin")
-  let offset = UInt64(UInt32.max)
-  let name = Data("file.bin".utf8)
+  let output  = root.appendingPathComponent("payload.bin")
+  let offset  = UInt64(UInt32.max)
+  let name    = Data("file.bin".utf8)
   let crc: UInt32 = 0xb7b2364b // IEEE CRC32 of "X".
+
   func put<T: FixedWidthInteger>(_ value: T, at offset: Int, in data: inout Data) {
     var little = value.littleEndian
+
     withUnsafeBytes(of: &little) {
       data.replaceSubrange(offset..<(offset + $0.count), with: $0)
     }
   }
+
   var local = Data(count: 30)
   put(UInt32(0x04034b50), at: 0, in: &local)
   put(UInt16(45), at: 4, in: &local)
@@ -44,11 +48,13 @@ func zip64OffsetCanEqualZIP32Sentinel() throws {
   put(UInt32(0o100644 << 16), at: 38, in: &central)
   put(UInt32.max, at: 42, in: &central)
   central.append(name)
+
   var extra = Data(count: 12)
   put(UInt16(1), at: 0, in: &extra)
   put(UInt16(8), at: 2, in: &extra)
   put(offset, at: 4, in: &extra)
   central.append(extra)
+
   let centralOffset = offset + UInt64(local.count)
   var end = Data(count: 98)
   put(UInt32(0x06064b50), at: 0, in: &end)
@@ -67,6 +73,7 @@ func zip64OffsetCanEqualZIP32Sentinel() throws {
   put(UInt16(1), at: 86, in: &end)
   put(UInt32(central.count), at: 88, in: &end)
   put(UInt32.max, at: 92, in: &end)
+
   _ = FileManager.default.createFile(atPath: archive.path, contents: nil)
   let file = try FileHandle(forWritingTo: archive)
   try file.seek(toOffset: offset)
@@ -74,11 +81,15 @@ func zip64OffsetCanEqualZIP32Sentinel() throws {
   try file.write(contentsOf: central)
   try file.write(contentsOf: end)
   try file.close()
+
   let handle = try #require(archive.withUnsafeFileSystemRepresentation { zipy_open($0) })
   defer { zipy_close(handle) }
+
   #expect(zipy_count(handle) == 1)
-  #expect(output.withUnsafeFileSystemRepresentation { zipy_extract(handle, 0, $0) }
-    == ZIPY_ZIP_OK.rawValue)
+  #expect(
+    output.withUnsafeFileSystemRepresentation { zipy_extract(handle, 0, $0) }
+      == ZIPY_ZIP_OK.rawValue
+  )
   #expect(try Data(contentsOf: output) == Data("X".utf8))
 }
 
@@ -86,28 +97,38 @@ func zip64OffsetCanEqualZIP32Sentinel() throws {
 func parallelIndexedExtractionKeepsEveryPayload() throws {
   let root = try temporaryDirectory()
   defer { try? FileManager.default.removeItem(at: root) }
-  let source = root.appendingPathComponent("source", isDirectory: true)
+
+  let source  = root.appendingPathComponent("source", isDirectory: true)
   let archive = root.appendingPathComponent("parallel.zip")
-  let output = root.appendingPathComponent("output", isDirectory: true)
+  let output  = root.appendingPathComponent("output", isDirectory: true)
+
   try FileManager.default.createDirectory(at: source, withIntermediateDirectories: true)
   try FileManager.default.createDirectory(at: output, withIntermediateDirectories: true)
+
   for index in 0..<11 {
     try Data(repeating: UInt8(65 + index), count: 2 * 1024 * 1024)
       .write(to: source.appendingPathComponent("file-\(index).txt"))
   }
+
   try runZip(in: source, archive: archive)
+
   let handle = try #require(archive.withUnsafeFileSystemRepresentation { zipy_open($0) })
   defer { zipy_close(handle) }
+
   var options = zipy_extract_options_t()
   zipy_extract_options_init(&options)
-  options.jobs = 8
+  options.jobs        = 8
   options.on_conflict = ZIPY_CONFLICT_OVERWRITE
+
   let result = output.withUnsafeFileSystemRepresentation {
     zipy_extract_all(handle, $0, &options)
   }
+
   #expect(result == ZIPY_ZIP_OK.rawValue)
+
   for index in 0..<11 {
     let data = try Data(contentsOf: output.appendingPathComponent("file-\(index).txt"))
+
     #expect(data == Data(repeating: UInt8(65 + index), count: 2 * 1024 * 1024))
   }
 }
@@ -116,34 +137,46 @@ func parallelIndexedExtractionKeepsEveryPayload() throws {
 func parallelAtomicExtractionKeepsSharedPartDirectories() throws {
   let root = try temporaryDirectory()
   defer { try? FileManager.default.removeItem(at: root) }
+
   let source = root.appendingPathComponent("source", isDirectory: true)
   let shared = source.appendingPathComponent("shared/deep", isDirectory: true)
   try FileManager.default.createDirectory(at: shared, withIntermediateDirectories: true)
+
   let payloads = (0..<512).map { Data(String(repeating: "payload-\($0)\n", count: 512).utf8) }
   for index in payloads.indices {
     try payloads[index].write(to: shared.appendingPathComponent("file-\(index).txt"))
   }
+
   for stored in [false, true] {
     let archive = root.appendingPathComponent("atomic-\(stored).zip")
     try runZip(in: source, archive: archive, storing: stored)
+
     let handle = try #require(archive.withUnsafeFileSystemRepresentation { zipy_open($0) })
     defer { zipy_close(handle) }
+
     for round in 0..<2 {
       let output = root.appendingPathComponent("output-\(stored)-\(round)", isDirectory: true)
       try FileManager.default.createDirectory(at: output, withIntermediateDirectories: true)
+
       var options = zipy_extract_options_t()
       zipy_extract_options_init(&options)
-      options.jobs = 8
-      options.flags = ZIPY_EXTRACT_ATOMIC.rawValue | ZIPY_EXTRACT_NO_METADATA.rawValue
+      options.jobs        = 8
+      options.flags       = ZIPY_EXTRACT_ATOMIC.rawValue | ZIPY_EXTRACT_NO_METADATA.rawValue
       options.on_conflict = ZIPY_CONFLICT_OVERWRITE
+
       let result = output.withUnsafeFileSystemRepresentation {
         zipy_extract_all(handle, $0, &options)
       }
+
       try #require(result == ZIPY_ZIP_OK.rawValue)
+
       for index in payloads.indices {
-        #expect(try Data(contentsOf: output.appendingPathComponent("shared/deep/file-\(index).txt"))
-          == payloads[index])
+        #expect(
+          try Data(contentsOf: output.appendingPathComponent("shared/deep/file-\(index).txt"))
+            == payloads[index]
+        )
       }
+
       #expect(!FileManager.default.fileExists(atPath: output.appendingPathComponent(".zipy").path))
     }
   }
@@ -153,28 +186,37 @@ func parallelAtomicExtractionKeepsSharedPartDirectories() throws {
 func cancelledParallelAtomicExtractionRemovesPartialPayloads() throws {
   let root = try temporaryDirectory()
   defer { try? FileManager.default.removeItem(at: root) }
-  let source = root.appendingPathComponent("source/shared", isDirectory: true)
+
+  let source  = root.appendingPathComponent("source/shared", isDirectory: true)
   let archive = root.appendingPathComponent("cancelled.zip")
-  let output = root.appendingPathComponent("output", isDirectory: true)
+  let output  = root.appendingPathComponent("output", isDirectory: true)
+
   try FileManager.default.createDirectory(at: source, withIntermediateDirectories: true)
   try FileManager.default.createDirectory(at: output, withIntermediateDirectories: true)
+
   for index in 0..<128 {
     try Data(repeating: UInt8(index), count: 64 * 1024)
       .write(to: source.appendingPathComponent("file-\(index).txt"))
   }
+
   try runZip(in: source, archive: archive)
+
   let handle = try #require(archive.withUnsafeFileSystemRepresentation { zipy_open($0) })
   defer { zipy_close(handle) }
+
   var options = zipy_extract_options_t()
   zipy_extract_options_init(&options)
-  options.jobs = 8
-  options.flags = ZIPY_EXTRACT_ATOMIC.rawValue | ZIPY_EXTRACT_NO_METADATA.rawValue
+  options.jobs        = 8
+  options.flags       = ZIPY_EXTRACT_ATOMIC.rawValue | ZIPY_EXTRACT_NO_METADATA.rawValue
   options.on_conflict = ZIPY_CONFLICT_OVERWRITE
-  options.progress = { _, _, done, _ in done < 32 * 1024 ? 1 : 0 }
+  options.progress    = { _, _, done, _ in done < 32 * 1024 ? 1 : 0 }
+
   let result = output.withUnsafeFileSystemRepresentation {
     zipy_extract_all(handle, $0, &options)
   }
+
   #expect(result == ZIPY_ZIP_ECANCEL.rawValue)
+
   let contents = try #require(FileManager.default.enumerator(at: output, includingPropertiesForKeys: nil))
   for case let file as URL in contents {
     #expect(!file.lastPathComponent.hasSuffix(".part"))
@@ -185,10 +227,12 @@ func cancelledParallelAtomicExtractionRemovesPartialPayloads() throws {
 func indexedModificationTime() throws {
   let root = try temporaryDirectory()
   defer { try? FileManager.default.removeItem(at: root) }
-  let source = root.appendingPathComponent("source", isDirectory: true)
-  let archive = root.appendingPathComponent("archive.zip")
-  let file = source.appendingPathComponent("data.bin")
+
+  let source   = root.appendingPathComponent("source", isDirectory: true)
+  let archive  = root.appendingPathComponent("archive.zip")
+  let file     = source.appendingPathComponent("data.bin")
   let modified = Date(timeIntervalSince1970: 1_600_000_001)
+
   try FileManager.default.createDirectory(at: source, withIntermediateDirectories: true)
   try Data("payload".utf8).write(to: file)
   try FileManager.default.setAttributes([.modificationDate: modified], ofItemAtPath: file.path)
@@ -196,6 +240,7 @@ func indexedModificationTime() throws {
 
   let handle = try #require(archive.withUnsafeFileSystemRepresentation { zipy_open($0) })
   defer { zipy_close(handle) }
+
   var timestamp: Int64 = 0
   #expect(zipy_entry_mtime(handle, 0, &timestamp))
   #expect(timestamp == Int64(modified.timeIntervalSince1970))
@@ -208,48 +253,70 @@ func indexedModificationTime() throws {
 func indexedTimestampFallbackAndEpoch() throws {
   let root = try temporaryDirectory()
   defer { try? FileManager.default.removeItem(at: root) }
-  let source = root.appendingPathComponent("source", isDirectory: true)
+
+  let source  = root.appendingPathComponent("source", isDirectory: true)
   let archive = root.appendingPathComponent("archive.zip")
-  let file = source.appendingPathComponent("data.bin")
+  let file    = source.appendingPathComponent("data.bin")
+
   try FileManager.default.createDirectory(at: source, withIntermediateDirectories: true)
   try Data("payload".utf8).write(to: file)
   try FileManager.default.setAttributes(
     [.modificationDate: Date(timeIntervalSince1970: 1_600_000_001)],
-    ofItemAtPath: file.path)
+    ofItemAtPath: file.path
+  )
   try runZip(in: source, archive: archive)
 
   let original = try Data(contentsOf: archive)
-  let central = try #require(original.range(of: Data([0x50, 0x4b, 0x01, 0x02]))).lowerBound
+  let central  = try #require(original.range(of: Data([0x50, 0x4b, 0x01, 0x02]))).lowerBound
+
   func u16(_ offset: Int) -> Int {
     Int(original[offset]) | Int(original[offset + 1]) << 8
   }
+
   let date = u16(central + 14)
   let time = u16(central + 12)
+
   var calendar = Calendar(identifier: .gregorian)
   calendar.timeZone = .current
-  let dosDate = try #require(calendar.date(from: DateComponents(
-    year: 1980 + (date >> 9), month: (date >> 5) & 15, day: date & 31,
-    hour: time >> 11, minute: (time >> 5) & 63, second: (time & 31) * 2)))
+
+  let dosDate = try #require(
+    calendar.date(from: DateComponents(
+      year: 1980 + (date >> 9),
+      month: (date >> 5) & 15,
+      day: date & 31,
+      hour: time >> 11,
+      minute: (time >> 5) & 63,
+      second: (time & 31) * 2
+    ))
+  )
+
   var position = central + 46 + u16(central + 28)
   let end = position + u16(central + 30)
+
   while position + 4 <= end, u16(position) != 0x5455 {
     position += 4 + u16(position + 2)
   }
+
   try #require(position + 9 <= end)
+
   let timestampField = position
   for unixTime in [nil, UInt32(0), UInt32(1_600_000_001)] {
     var bytes = original
+
     if var value = unixTime?.littleEndian {
       withUnsafeBytes(of: &value) {
         bytes.replaceSubrange((timestampField + 5)..<(timestampField + 9), with: $0)
       }
     } else {
-      // An unknown extra field leaves the DOS timestamp as the fallback.
+      // an unknown extra field leaves the DOS timestamp as the fallback.
       bytes[timestampField] = 0x56
     }
+
     try bytes.write(to: archive)
+
     let handle = try #require(archive.withUnsafeFileSystemRepresentation { zipy_open($0) })
     defer { zipy_close(handle) }
+
     var timestamp: Int64 = -1
     #expect(zipy_entry_mtime(handle, 0, &timestamp))
     #expect(timestamp == unixTime.map(Int64.init) ?? Int64(dosDate.timeIntervalSince1970))
@@ -260,23 +327,30 @@ func indexedTimestampFallbackAndEpoch() throws {
 func indexedExtractionReadsLocalHeaders() throws {
   let root = try temporaryDirectory()
   defer { try? FileManager.default.removeItem(at: root) }
-  let source = root.appendingPathComponent("source", isDirectory: true)
+
+  let source   = root.appendingPathComponent("source", isDirectory: true)
   let contents = Data(repeating: 0x41, count: 4096)
+
   try FileManager.default.createDirectory(at: source, withIntermediateDirectories: true)
   try contents.write(to: source.appendingPathComponent("data.bin"))
 
   for stored in [false, true] {
     let archive = root.appendingPathComponent(stored ? "stored.zip" : "deflated.zip")
-    let output = root.appendingPathComponent(stored ? "stored" : "deflated")
+    let output  = root.appendingPathComponent(stored ? "stored" : "deflated")
+
     try FileManager.default.createDirectory(at: output, withIntermediateDirectories: true)
     try runZip(in: source, archive: archive, storing: stored)
+
     let handle = try #require(archive.withUnsafeFileSystemRepresentation { zipy_open($0) })
     defer { zipy_close(handle) }
+
     let entry = try #require(zipy_entry(handle, 0))
     #expect(entry.pointee.method == (stored ? 0 : 8))
+
     let result = output.withUnsafeFileSystemRepresentation {
       zipy_extract_to(handle, 0, $0, nil)
     }
+
     #expect(result == ZIPY_ZIP_OK.rawValue)
     #expect(try Data(contentsOf: output.appendingPathComponent("data.bin")) == contents)
   }
@@ -286,22 +360,27 @@ func indexedExtractionReadsLocalHeaders() throws {
 func indexedExtractionRejectsInvalidLocalHeader() throws {
   let root = try temporaryDirectory()
   defer { try? FileManager.default.removeItem(at: root) }
-  let source = root.appendingPathComponent("source", isDirectory: true)
+
+  let source  = root.appendingPathComponent("source", isDirectory: true)
   let archive = root.appendingPathComponent("archive.zip")
-  let output = root.appendingPathComponent("output", isDirectory: true)
+  let output  = root.appendingPathComponent("output", isDirectory: true)
+
   try FileManager.default.createDirectory(at: source, withIntermediateDirectories: true)
   try FileManager.default.createDirectory(at: output, withIntermediateDirectories: true)
   try Data("payload".utf8).write(to: source.appendingPathComponent("data.bin"))
   try runZip(in: source, archive: archive)
+
   var bytes = try Data(contentsOf: archive)
   bytes[0] = 0
   try bytes.write(to: archive)
 
   let handle = try #require(archive.withUnsafeFileSystemRepresentation { zipy_open($0) })
   defer { zipy_close(handle) }
+
   let result = output.withUnsafeFileSystemRepresentation {
     zipy_extract_to(handle, 0, $0, nil)
   }
+
   #expect(result == ZIPY_ZIP_EFILE.rawValue)
   #expect(!FileManager.default.fileExists(atPath: output.appendingPathComponent("data.bin").path))
 }
@@ -477,12 +556,16 @@ private func runZip(
   storing: Bool = false
 ) throws {
   let process = Process()
-  process.executableURL = URL(fileURLWithPath: "/usr/bin/zip")
+  process.executableURL       = URL(fileURLWithPath: "/usr/bin/zip")
   process.currentDirectoryURL = directory
   process.arguments = preservingSymlinks
     ? ["-qry", archive.path, "."]
     : ["-qr", archive.path, "."]
-  if storing { process.arguments?.insert("-0", at: 0) }
+
+  if storing {
+    process.arguments?.insert("-0", at: 0)
+  }
+
   try process.run()
   process.waitUntilExit()
 
