@@ -134,6 +134,47 @@ func parallelIndexedExtractionKeepsEveryPayload() throws {
 }
 
 @Test
+func extractionGrowsSmallOutputBuffers() throws {
+  let root = try temporaryDirectory()
+  defer { try? FileManager.default.removeItem(at: root) }
+
+  let source  = root.appendingPathComponent("source", isDirectory: true)
+  let archive = root.appendingPathComponent("sizes.zip")
+  let sizes   = [0, 1, 4095, 4096, 4097, 8192, 262143, 262144, 262145]
+  var payloads: [Data] = []
+
+  try FileManager.default.createDirectory(at: source, withIntermediateDirectories: true)
+
+  for (index, size) in sizes.enumerated() {
+    let data = Data((0..<size).map { UInt8(truncatingIfNeeded: $0 * 31 + index) })
+    try data.write(to: source.appendingPathComponent("file-\(index).bin"))
+    payloads.append(data)
+  }
+
+  try runZip(in: source, archive: archive)
+
+  let handle = try #require(archive.withUnsafeFileSystemRepresentation { zipy_open($0) })
+  defer { zipy_close(handle) }
+
+  for jobs in [1, 4] {
+    let output = root.appendingPathComponent("output-\(jobs)", isDirectory: true)
+    var options = zipy_extract_options_t()
+    zipy_extract_options_init(&options)
+    options.jobs        = jobs
+    options.on_conflict = ZIPY_CONFLICT_OVERWRITE
+
+    let result = output.withUnsafeFileSystemRepresentation {
+      zipy_extract_all(handle, $0, &options)
+    }
+    try #require(result == ZIPY_ZIP_OK.rawValue)
+
+    for (index, payload) in payloads.enumerated() {
+      #expect(try Data(contentsOf: output.appendingPathComponent("file-\(index).bin")) == payload)
+    }
+  }
+}
+
+@Test
 func extractionRejectsLinkedDirectoryParents() throws {
   let root = try temporaryDirectory()
   defer { try? FileManager.default.removeItem(at: root) }

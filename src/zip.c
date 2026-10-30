@@ -91,6 +91,7 @@
 #define ZIP64_LOCATOR_FIXED 20u
 #define ZIP_MAX_EOCD_SEARCH (ZIP_EOCD_FIXED + 65535u)
 
+#define ZIP_BUFFER_MIN             (4u * 1024u)
 #define ZIP_IO_CHUNK               (256u * 1024u)
 #define ZIP_INFLATE_STREAM_CHUNK   (1024u * 1024u)
 #define ZIP_MAPPED_WRITE_CHUNK     (16u * 1024u * 1024u)
@@ -580,7 +581,8 @@ reserve_bytes(uint8_t **buf, size_t *cap, size_t len) {
   if (len <= *cap)
     return 1;
 
-  next = *cap ? *cap : ZIP_IO_CHUNK;
+  /* tiny mapped entries need only their output, not a full I/O chunk. */
+  next = *cap ? *cap : ZIP_BUFFER_MIN;
   while (next < len) {
     if (next > SIZE_MAX / 2u) {
       next = len;
