@@ -64,6 +64,9 @@
 #  include <sys/types.h>
 #  include <utime.h>
 #  include <unistd.h>
+#  if defined(__APPLE__)
+#    include <sys/attr.h>
+#  endif
 #  define os_getcwd getcwd
 #endif
 
@@ -2631,8 +2634,44 @@ apply_time(const char *path, const entry_info_t *info) {
 #endif
 }
 
+#if defined(__APPLE__)
+static int
+apply_apple_metadata(const char         *path,
+                     int                 fd,
+                     const entry_info_t *info) {
+  struct {
+    struct timespec times[2];
+    uint32_t        mode;
+  } values = {0};
+  struct attrlist attrs = {0};
+
+  if (!info || !info->has_mtime || is_symlink(info))
+    return 0;
+
+  values.mode = unix_mode(info) & 07777u;
+  if (values.mode == 0)
+    return 0;
+
+  attrs.bitmapcount = ATTR_BIT_MAP_COUNT;
+  attrs.commonattr  = ATTR_CMN_MODTIME | ATTR_CMN_ACCTIME | ATTR_CMN_ACCESSMASK;
+
+  values.times[0].tv_sec = info->mtime;
+  values.times[1].tv_sec = info->mtime;
+
+  /* combine mode and timestamps; retain the portable path for other volumes. */
+  if (fd >= 0)
+    return fsetattrlist(fd, &attrs, &values, sizeof(values), 0) == 0;
+
+  return path && setattrlist(path, &attrs, &values, sizeof(values), 0) == 0;
+}
+#endif
+
 static int
 apply_entry_metadata(const char *path, const entry_info_t *info) {
+#if defined(__APPLE__)
+  if (apply_apple_metadata(path, -1, info))
+    return 1;
+#endif
   return apply_attrs(path, info) && apply_time(path, info);
 }
 
@@ -2647,6 +2686,11 @@ apply_open_file_metadata(out_file_t *out, const entry_info_t *info) {
 
   if (!out || out->fd < 0 || !info || is_symlink(info))
     return 0;
+
+#if defined(__APPLE__)
+  if (apply_apple_metadata(NULL, out->fd, info))
+    return 1;
+#endif
 
   if (mode != 0 && fchmod(out->fd, (mode_t)(mode & 07777u)) != 0)
     return 0;

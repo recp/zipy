@@ -134,6 +134,63 @@ func parallelIndexedExtractionKeepsEveryPayload() throws {
 }
 
 @Test
+func extractionPreservesFileAndDirectoryMetadata() throws {
+  let root = try temporaryDirectory()
+  defer { try? FileManager.default.removeItem(at: root) }
+
+  let source  = root.appendingPathComponent("source", isDirectory: true)
+  let nested  = source.appendingPathComponent("nested", isDirectory: true)
+  let archive = root.appendingPathComponent("metadata.zip")
+
+  let payload    = Data("metadata payload".utf8)
+  let fileDate   = Date(timeIntervalSince1970: 1_600_000_001)
+  let folderDate = Date(timeIntervalSince1970: 1_600_000_000)
+
+  try FileManager.default.createDirectory(at: nested, withIntermediateDirectories: true)
+  try payload.write(to: nested.appendingPathComponent("file.txt"))
+  try FileManager.default.setAttributes([
+    .posixPermissions: 0o640,
+    .modificationDate: fileDate
+  ], ofItemAtPath: nested.appendingPathComponent("file.txt").path)
+  try FileManager.default.setAttributes([
+    .posixPermissions: 0o750,
+    .modificationDate: folderDate
+  ], ofItemAtPath: nested.path)
+  try runZip(in: source, archive: archive)
+
+  let handle = try #require(archive.withUnsafeFileSystemRepresentation { zipy_open($0) })
+  defer { zipy_close(handle) }
+
+  for jobs in [1, 4] {
+    for atomic in [false, true] {
+      let output = root.appendingPathComponent("output-\(jobs)-\(atomic)", isDirectory: true)
+
+      var options = zipy_extract_options_t()
+      zipy_extract_options_init(&options)
+      options.jobs        = jobs
+      options.on_conflict = ZIPY_CONFLICT_OVERWRITE
+      options.flags       = atomic ? ZIPY_EXTRACT_ATOMIC.rawValue : 0
+
+      let result = output.withUnsafeFileSystemRepresentation {
+        zipy_extract_all(handle, $0, &options)
+      }
+      try #require(result == ZIPY_ZIP_OK.rawValue)
+
+      let folder = output.appendingPathComponent("nested")
+      let file   = folder.appendingPathComponent("file.txt")
+      let folderAttributes = try FileManager.default.attributesOfItem(atPath: folder.path)
+      let fileAttributes   = try FileManager.default.attributesOfItem(atPath: file.path)
+
+      #expect((folderAttributes[.posixPermissions] as? NSNumber)?.intValue == 0o750)
+      #expect((fileAttributes[.posixPermissions] as? NSNumber)?.intValue == 0o640)
+      #expect(folderAttributes[.modificationDate] as? Date == folderDate)
+      #expect(fileAttributes[.modificationDate] as? Date == fileDate)
+      #expect(try Data(contentsOf: file) == payload)
+    }
+  }
+}
+
+@Test
 func parallelAtomicExtractionKeepsSharedPartDirectories() throws {
   let root = try temporaryDirectory()
   defer { try? FileManager.default.removeItem(at: root) }
