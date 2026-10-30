@@ -2510,40 +2510,18 @@ parent_has_symlink(const char *path) {
 }
 
 static int
-parent_has_symlink_buf(const char *path, path_buf_t *buf) {
+directory_has_symlink_mut(char *path) {
 #if defined(_WIN32)
   (void)path;
-  (void)buf;
   return 0;
 #else
-  char  *p, *last = NULL;
-  size_t len;
-  int    found = 0;
+  char *p;
+  int   found = 0;
 
   if (!path || !*path)
     return 0;
 
-  len = strlen(path);
-  if (!path_buf_reserve(buf, len + 1u))
-    return 1;
-
-  memcpy(buf->data, path, len + 1u);
-
-  for (p = buf->data; *p; p++) {
-    if (is_fs_sep(*p))
-      last = p;
-  }
-
-  if (!last)
-    return 0;
-
-  if (last == buf->data && is_fs_sep(buf->data[0])) {
-    buf->data[1] = '\0';
-  } else {
-    *last = '\0';
-  }
-
-  p = buf->data;
+  p = path;
   while (is_fs_sep(*p))
     p++;
 
@@ -2552,7 +2530,7 @@ parent_has_symlink_buf(const char *path, path_buf_t *buf) {
       continue;
 
     *p = '\0';
-    if (*buf->data && path_is_symlink(buf->data)) {
+    if (*path && path_is_symlink(path)) {
       found = 1;
       *p    = '/';
       break;
@@ -2565,10 +2543,8 @@ parent_has_symlink_buf(const char *path, path_buf_t *buf) {
     }
   }
 
-  if (!found
-      && *buf->data
-      && !(strlen(buf->data) == 1 && is_fs_sep(buf->data[0])))
-    found = path_is_symlink(buf->data);
+  if (!found && *path && !(is_fs_sep(path[0]) && !path[1]))
+    found = path_is_symlink(path);
 
   return found;
 #endif
@@ -2778,7 +2754,8 @@ prepare_parent_dir_len(zipy_archive_t *__restrict zipy,
   if (!mkdirs_mut(zipy->parent_buf.data))
     return 0;
 
-  has_symlink = parent_has_symlink_buf(path, &zipy->parent_buf);
+  /* reuse the prepared parent without copying or rescanning the leaf name. */
+  has_symlink = directory_has_symlink_mut(zipy->parent_buf.data);
   if (has_symlink)
     return 0;
 
