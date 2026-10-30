@@ -134,6 +134,93 @@ func parallelIndexedExtractionKeepsEveryPayload() throws {
 }
 
 @Test
+func extractionRejectsLinkedDirectoryParents() throws {
+  let root = try temporaryDirectory()
+  defer { try? FileManager.default.removeItem(at: root) }
+
+  let source  = root.appendingPathComponent("source", isDirectory: true)
+  let nested  = source.appendingPathComponent("link/created", isDirectory: true)
+  let outside = root.appendingPathComponent("outside", isDirectory: true)
+  let payload = Data("directory boundary".utf8)
+
+  try FileManager.default.createDirectory(at: nested, withIntermediateDirectories: true)
+  try FileManager.default.createDirectory(at: outside, withIntermediateDirectories: true)
+  try payload.write(to: source.appendingPathComponent("file.txt"))
+  try payload.write(to: nested.appendingPathComponent("payload.txt"))
+  for preservingLinks in [false, true] {
+    if preservingLinks {
+      try FileManager.default.createSymbolicLink(
+        atPath: source.appendingPathComponent("unrelated-link").path,
+        withDestinationPath: "file.txt"
+      )
+    }
+
+    let archive = root.appendingPathComponent("linked-parent-\(preservingLinks).zip")
+    try runZip(in: source, archive: archive, preservingSymlinks: preservingLinks)
+
+    let handle = try #require(archive.withUnsafeFileSystemRepresentation { zipy_open($0) })
+    defer { zipy_close(handle) }
+
+    for jobs in [1, 4] {
+      let output = root.appendingPathComponent("output-\(preservingLinks)-\(jobs)", isDirectory: true)
+      try FileManager.default.createDirectory(at: output, withIntermediateDirectories: true)
+      try FileManager.default.createSymbolicLink(
+        atPath: output.appendingPathComponent("link").path,
+        withDestinationPath: outside.path
+      )
+
+      var options = zipy_extract_options_t()
+      zipy_extract_options_init(&options)
+      options.jobs        = jobs
+      options.on_conflict = ZIPY_CONFLICT_OVERWRITE
+      options.flags       = ZIPY_EXTRACT_UNSAFE_SYMLINKS.rawValue
+
+      let result = output.withUnsafeFileSystemRepresentation {
+        zipy_extract_all(handle, $0, &options)
+      }
+
+      #expect(result == ZIPY_ZIP_EFILE.rawValue)
+      #expect(!FileManager.default.fileExists(atPath: outside.appendingPathComponent("created").path))
+      #expect(try FileManager.default.contentsOfDirectory(atPath: outside.path).isEmpty)
+    }
+  }
+}
+
+@Test
+func extractionCreatesImplicitAndExistingParents() throws {
+  let root = try temporaryDirectory()
+  defer { try? FileManager.default.removeItem(at: root) }
+
+  let source  = root.appendingPathComponent("source", isDirectory: true)
+  let nested  = source.appendingPathComponent("first/second", isDirectory: true)
+  let archive = root.appendingPathComponent("implicit.zip")
+  let output  = root.appendingPathComponent("output", isDirectory: true)
+  let payload = Data("implicit directory payload".utf8)
+
+  try FileManager.default.createDirectory(at: nested, withIntermediateDirectories: true)
+  try payload.write(to: nested.appendingPathComponent("file.txt"))
+  try runZip(in: source, archive: archive, omittingDirectories: true)
+
+  let handle = try #require(archive.withUnsafeFileSystemRepresentation { zipy_open($0) })
+  defer { zipy_close(handle) }
+
+  #expect(zipy_count(handle) == 1)
+
+  for _ in 0..<2 {
+    var options = zipy_extract_options_t()
+    zipy_extract_options_init(&options)
+    options.on_conflict = ZIPY_CONFLICT_OVERWRITE
+
+    let result = output.withUnsafeFileSystemRepresentation {
+      zipy_extract_all(handle, $0, &options)
+    }
+
+    try #require(result == ZIPY_ZIP_OK.rawValue)
+    #expect(try Data(contentsOf: output.appendingPathComponent("first/second/file.txt")) == payload)
+  }
+}
+
+@Test
 func extractionPreservesFileAndDirectoryMetadata() throws {
   let root = try temporaryDirectory()
   defer { try? FileManager.default.removeItem(at: root) }
@@ -663,7 +750,8 @@ private func runZip(
   archive: URL,
   preservingSymlinks: Bool = false,
   storing: Bool = false,
-  password: String? = nil
+  password: String? = nil,
+  omittingDirectories: Bool = false
 ) throws {
   let process = Process()
   process.executableURL       = URL(fileURLWithPath: "/usr/bin/zip")
@@ -678,6 +766,10 @@ private func runZip(
 
   if let password {
     process.arguments?.insert(contentsOf: ["-P", password], at: 0)
+  }
+
+  if omittingDirectories {
+    process.arguments?.insert("-D", at: 0)
   }
 
   try process.run()

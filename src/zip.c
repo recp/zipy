@@ -1937,6 +1937,10 @@ mkdir_one(const char *path) {
   if (!path || !*path)
     return 1;
 
+  /* existing directories need no mkdir syscall; keep component checks. */
+  if (path_is_dir(path))
+    return 1;
+
 #if defined(_WIN32)
   if (_mkdir(path) == 0)
     return 1;
