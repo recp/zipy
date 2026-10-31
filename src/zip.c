@@ -6534,6 +6534,12 @@ prepare_extract_all(zipy_archive_t                *zipy,
       continue;
     }
 
+    /* conflict handling can move existing files before extraction starts. */
+    if (!info->safe_name) {
+      result = ZIPY_ZIP_EFILE;
+      break;
+    }
+
     if (options->on_conflict == ZIPY_CONFLICT_OVERWRITE)
       continue;
 
@@ -7008,6 +7014,11 @@ zipy_extract_to(zipy_archive_t               *__restrict zipy,
 
   opts = default_extract_options(options);
   info = &zipy->files[index];
+  if (!info->safe_name) {
+    ret = ZIPY_ZIP_EFILE;
+    goto done;
+  }
+
   if (opts.progress) {
     progress_init_entry(&progress,
                         &opts,

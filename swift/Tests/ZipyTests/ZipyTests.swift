@@ -227,6 +227,54 @@ func extractionGrowsSmallOutputBuffers() throws {
 }
 
 @Test
+func unsafeNamesCannotMoveExistingFilesDuringConflictPreparation() throws {
+  let root = try temporaryDirectory()
+  defer { try? FileManager.default.removeItem(at: root) }
+
+  let source  = root.appendingPathComponent("source", isDirectory: true)
+  let archive = root.appendingPathComponent("unsafe.zip")
+  let victim  = root.appendingPathComponent("victim.txt")
+
+  let original = Data("keep the original".utf8)
+  let name     = Data("xx/victim.txt".utf8)
+
+  try FileManager.default.createDirectory(at: source.appendingPathComponent("xx"),
+                                          withIntermediateDirectories: true)
+  try Data("archive payload".utf8).write(to: source.appendingPathComponent("xx/victim.txt"))
+  try runZip(in: source, archive: archive, omittingDirectories: true)
+  let valid = try Data(contentsOf: archive)
+
+  for unsafe in ["../victim.txt", "..\\victim.txt"] {
+    var data = valid
+    var replacements = 0
+    while let range = data.range(of: name) {
+      data.replaceSubrange(range, with: Data(unsafe.utf8))
+      replacements += 1
+    }
+    try #require(replacements == 2)
+    try data.write(to: archive)
+
+    let handle = try #require(archive.withUnsafeFileSystemRepresentation { zipy_open($0) })
+    defer { zipy_close(handle) }
+    for all in [false, true] {
+      let output = root.appendingPathComponent("out-\(unsafe.contains("\\"))-\(all)")
+      try FileManager.default.createDirectory(at: output, withIntermediateDirectories: true)
+      try Data("existing entry".utf8).write(to: output.appendingPathComponent("marker.txt"))
+      try original.write(to: victim)
+      var options = zipy_extract_options_t()
+      zipy_extract_options_init(&options)
+      options.jobs = 1
+
+      let result = output.withUnsafeFileSystemRepresentation {
+        all ? zipy_extract_all(handle, $0, &options) : zipy_extract_to(handle, 0, $0, &options)
+      }
+      #expect(result == ZIPY_ZIP_EFILE.rawValue)
+      #expect((try? Data(contentsOf: victim)) == original)
+    }
+  }
+}
+
+@Test
 func extractionRejectsLinkedDirectoryParents() throws {
   let root = try temporaryDirectory()
   defer { try? FileManager.default.removeItem(at: root) }
