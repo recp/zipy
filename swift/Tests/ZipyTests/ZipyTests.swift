@@ -1307,6 +1307,78 @@ func aesExtractionValidatesAllKeySizes() throws {
 }
 
 @Test
+func aesStreamDescriptorsValidateAuthentication() throws {
+  let root = try temporaryDirectory()
+  defer { try? FileManager.default.removeItem(at: root) }
+
+  let payload  = Data(String(repeating: "unknown-size AES payload.\n", count: 256).utf8)
+  let original = Data("keep the existing file".utf8)
+
+  // identical AES-256 DEFLATE payloads with signed and unsigned descriptors.
+  let fixtures = [
+    """
+    UEsDBDMACQBjAHUUYV0AAAAAAAAAAAAAAAALAAsAcGF5bG9hZC50eHQBmQcAAgBBRQMIAKjNFg4zOkxs
+    U/8Rdq2CERqYBstU5uPrDZBxSAoNkmzyaBwroql8xfJ8S8n2NGqQkcfHoJZiGdclMPIHaHPssPbZwKU4
+    ZGA82VG45TEEwfBAj1c/1L3Dob9iwSeri8OrClBLBwgAAAAAYAAAAAAaAABQSwECPwMzAAkAYwB1FGFd
+    AAAAAGAAAAAAGgAACwAvAAAAAAAAACCApIEAAAAAcGF5bG9hZC50eHQKACAAAAAAAAEAGABnEKuKkGnd
+    AQAAAAAAAAAAAAAAAAAAAAABmQcAAgBBRQMIAFBLBQYAAAAAAQABAGgAAACkAAAAAAA=
+    """,
+    """
+    UEsDBDMACQBjAHUUYV0AAAAAAAAAAAAAAAALAAsAcGF5bG9hZC50eHQBmQcAAgBBRQMIAKjNFg4zOkxs
+    U/8Rdq2CERqYBstU5uPrDZBxSAoNkmzyaBwroql8xfJ8S8n2NGqQkcfHoJZiGdclMPIHaHPssPbZwKU4
+    ZGA82VG45TEEwfBAj1c/1L3Dob9iwSeri8OrCgAAAABgAAAAABoAAFBLAQI/AzMACQBjAHUUYV0AAAAA
+    YAAAAAAaAAALAC8AAAAAAAAAIICkgQAAAABwYXlsb2FkLnR4dAoAIAAAAAAAAQAYAGcQq4qQad0BAAAA
+    AAAAAAAAAAAAAAAAAAGZBwACAEFFAwgAUEsFBgAAAAABAAEAaAAAAKAAAAAAAA==
+    """
+  ]
+
+  for (index, fixture) in fixtures.enumerated() {
+    let data = try #require(Data(base64Encoded: fixture, options: .ignoreUnknownCharacters))
+    let end  = data.count - 22
+    var centralOffset = 0
+
+    for byte in 0..<4 {
+      centralOffset |= Int(data[end + 16 + byte]) << (byte * 8)
+    }
+
+    let authOffset = centralOffset - (index == 0 ? 16 : 12) - 1
+
+    for corrupt in [false, true] {
+      var contents = data
+      if corrupt { contents[authOffset] ^= 1 }
+
+      let archive = root.appendingPathComponent("descriptor-\(index)-\(corrupt).zip")
+      try contents.write(to: archive)
+
+      for skipCRC in [false, true] {
+        let output = root.appendingPathComponent("out-\(index)-\(corrupt)-\(skipCRC)")
+        try FileManager.default.createDirectory(at: output, withIntermediateDirectories: true)
+        try original.write(to: output.appendingPathComponent("payload.txt"))
+
+        var options = zipy_extract_options_t()
+        zipy_extract_options_init(&options)
+        options.flags       = ZIPY_EXTRACT_ATOMIC.rawValue
+        options.on_conflict = ZIPY_CONFLICT_OVERWRITE
+
+        if skipCRC { options.flags |= ZIPY_EXTRACT_NO_CRC.rawValue }
+
+        let result = "zipy-test-password".withCString { password in
+          options.password = password
+          return archive.withUnsafeFileSystemRepresentation { archivePath in
+            output.withUnsafeFileSystemRepresentation {
+              zipy_extract_stream(archivePath, $0, &options)
+            }
+          }
+        }
+        #expect(result == (corrupt ? ZIPY_ZIP_EAUTH.rawValue : ZIPY_ZIP_OK.rawValue))
+        #expect(try Data(contentsOf: output.appendingPathComponent("payload.txt")) == (corrupt ? original : payload))
+        #expect(!FileManager.default.fileExists(atPath: output.appendingPathComponent("payload.txt.part").path))
+      }
+    }
+  }
+}
+
+@Test
 func encryptedExtractionGrowsInputBuffers() throws {
   let root = try temporaryDirectory()
   defer { try? FileManager.default.removeItem(at: root) }

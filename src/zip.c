@@ -5378,7 +5378,7 @@ extract_deflate_data_descriptor(zipy_archive_t   *__restrict zipy,
                                 int                          zip64_descriptor,
                                 progress_state_t *__restrict progress) {
   dec_t       dec;
-  dec_t       chunk_dec;
+  hmac_sha1_t chunk_hmac;
   out_map_t   outmap;
   out_file_t  outfile;
   dec_t      *dec_ptr = NULL;
@@ -5531,7 +5531,7 @@ extract_deflate_data_descriptor(zipy_archive_t   *__restrict zipy,
     supplied += n;
     remaining -= n;
     if (dec.kind == DEC_AES_WG) {
-      chunk_dec = dec;
+      chunk_hmac = dec.u.aes_wg.hmac;
       memcpy(plainbuf, inbuf, n);
       dec_decrypt(&dec, plainbuf, n);
       feed = plainbuf;
@@ -5593,11 +5593,10 @@ extract_deflate_data_descriptor(zipy_archive_t   *__restrict zipy,
         if ((uint64_t)payload_consumed < supplied) {
           size_t used = (size_t)((uint64_t)payload_consumed - supplied_before);
 
-          dec = chunk_dec;
-          if (used > 0) {
-            memcpy(plainbuf, inbuf, used);
-            dec_decrypt(&dec, plainbuf, used);
-          }
+          /* only authentication is needed after the deflate stream ends. */
+          dec.u.aes_wg.hmac = chunk_hmac;
+          if (used > 0)
+            hmac_sha1_update(&dec.u.aes_wg.hmac, inbuf, used);
         }
       }
       break;
