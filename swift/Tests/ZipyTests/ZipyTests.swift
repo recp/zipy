@@ -426,6 +426,70 @@ func missingParentsDoNotHideLaterFileConflicts() throws {
 }
 
 @Test
+func directoryConflictsPreservePathsAcrossBufferGrowth() throws {
+  let root = try temporaryDirectory()
+  defer { try? FileManager.default.removeItem(at: root) }
+
+  let source  = root.appendingPathComponent("source", isDirectory: true)
+  let archive = root.appendingPathComponent("directory-paths.zip")
+
+  let component = String(repeating: "long", count: 40)
+  let folders   = ["short/deep", "\(component)/\(component)/\(component)/deep"]
+  let payload   = Data("directory payload".utf8)
+  let original  = Data("original parent file".utf8)
+
+  for folder in folders {
+    let directory = source.appendingPathComponent(folder, isDirectory: true)
+    try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+    try payload.write(to: directory.appendingPathComponent("file.txt"))
+  }
+  try runZip(in: source, archive: archive)
+  let handle = try #require(archive.withUnsafeFileSystemRepresentation { zipy_open($0) })
+  defer { zipy_close(handle) }
+
+  for mode in 0..<3 {
+    let output = root.appendingPathComponent("out-\(mode)", isDirectory: true)
+    try FileManager.default.createDirectory(at: output, withIntermediateDirectories: true)
+    for name in ["short", component] {
+      try original.write(to: output.appendingPathComponent(name))
+    }
+    var options = zipy_extract_options_t()
+    zipy_extract_options_init(&options)
+    options.jobs = 1
+
+    if mode == 0 {
+      for index in 0..<zipy_count(handle) {
+        let result = output.withUnsafeFileSystemRepresentation {
+          zipy_extract_to(handle, index, $0, &options)
+        }
+        #expect(result >= ZIPY_ZIP_OK.rawValue)
+      }
+    } else {
+      let result = output.withUnsafeFileSystemRepresentation { destination in
+        if mode == 2 {
+          return archive.withUnsafeFileSystemRepresentation {
+            zipy_extract_stream($0, destination, &options)
+          }
+        }
+        return zipy_extract_all(handle, destination, &options)
+      }
+      #expect(result == ZIPY_ZIP_OK.rawValue)
+    }
+
+    for folder in folders {
+      #expect(try Data(contentsOf: output.appendingPathComponent("\(folder)/file.txt")) == payload)
+    }
+    let paths = try FileManager.default.contentsOfDirectory(at: output,
+                                                            includingPropertiesForKeys: nil)
+    for name in ["short", component] {
+      #expect(paths.contains {
+        (try? Data(contentsOf: $0.appendingPathComponent(name))) == original
+      })
+    }
+  }
+}
+
+@Test
 func extractionRejectsLinkedDirectoryParents() throws {
   let root = try temporaryDirectory()
   defer { try? FileManager.default.removeItem(at: root) }

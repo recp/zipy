@@ -4364,10 +4364,11 @@ path_buf_set_canonical(path_buf_t *__restrict buf,
 #endif
 }
 
-static char*
-trim_trailing_seps(const char *path) {
-  char  *out;
+static const char*
+trim_trailing_seps(const char *path, char **owned) {
   size_t len;
+
+  *owned = NULL;
 
   if (!path)
     return NULL;
@@ -4381,13 +4382,16 @@ trim_trailing_seps(const char *path) {
     len--;
   }
 
-  out = malloc(len + 1);
-  if (!out)
+  /* most file paths are already trimmed and can be borrowed. */
+  if (path[len] == '\0')
+    return path;
+
+  if (!(*owned = malloc(len + 1)))
     return NULL;
 
-  memcpy(out, path, len);
-  out[len] = '\0';
-  return out;
+  memcpy(*owned, path, len);
+  (*owned)[len] = '\0';
+  return *owned;
 }
 
 static char*
@@ -4800,17 +4804,17 @@ prepare_conflict(const char                    *destdir,
                  const char                    *destpath,
                  const zipy_extract_options_t  *options,
                  char                         **save_dir) {
-  char *savePath, *cleanDestPath, *cleanSavePath, *originalAbs;
-  int   exists, isDir, ret, nowExists, nowIsDir;
+  const char *cleanDestPath, *cleanSavePath;
+  char       *savePath, *destCopy, *saveCopy, *originalAbs;
+  int         exists, isDir, ret, nowExists, nowIsDir;
 
-  savePath      = NULL;
-  cleanDestPath = NULL;
-  cleanSavePath = NULL;
-  originalAbs   = NULL;
-  ret           = ZIPY_ZIP_OK;
+  savePath    = NULL;
+  destCopy    = NULL;
+  saveCopy    = NULL;
+  originalAbs = NULL;
+  ret         = ZIPY_ZIP_OK;
 
-  cleanDestPath = trim_trailing_seps(destpath);
-  if (!cleanDestPath)
+  if (!(cleanDestPath = trim_trailing_seps(destpath, &destCopy)))
     return ZIPY_ZIP_ERR;
 
   if (!path_info(cleanDestPath, &exists, &isDir)) {
@@ -4865,8 +4869,7 @@ prepare_conflict(const char                    *destdir,
     goto done;
   }
 
-  cleanSavePath = trim_trailing_seps(savePath);
-  if (!cleanSavePath) {
+  if (!(cleanSavePath = trim_trailing_seps(savePath, &saveCopy))) {
     ret = ZIPY_ZIP_ERR;
     goto done;
   }
@@ -4898,15 +4901,17 @@ prepare_conflict(const char                    *destdir,
 
 done:
   free(originalAbs);
-  free(cleanSavePath);
-  free(cleanDestPath);
+  free(saveCopy);
+  free(destCopy);
   free(savePath);
   return ret;
 }
 
 static int
-prepare_parent_conflicts(const char                    *destdir,
+prepare_parent_conflicts(zipy_archive_t                *zipy,
+                         const char                    *destdir,
                          const zipy_entry_t            *entry,
+                         const char                    *destpath,
                          const zipy_extract_options_t  *options,
                          char                         **save_dir) {
   zipy_entry_t parentEntry;
@@ -4923,11 +4928,12 @@ prepare_parent_conflicts(const char                    *destdir,
   if (!memchr(entry->name, '/', len) && !memchr(entry->name, '\\', len))
     return ZIPY_ZIP_OK;
 
-  /* normalize once; each parent is a temporary prefix of this owned path. */
-  if (!(path = extract_path_len(destdir, entry->name, len)))
+  /* reuse the normalized destination; each parent is a temporary prefix. */
+  if (!path_buf_set_text(&zipy->parent_buf, destpath))
     return ZIPY_ZIP_ERR;
 
-  rel = path + strlen(path) - len;
+  path = zipy->parent_buf.data;
+  rel  = path + strlen(path) - len;
 
   parentEntry              = *entry;
   parentEntry.name         = rel;
@@ -4962,12 +4968,12 @@ prepare_parent_conflicts(const char                    *destdir,
     rel[i] = '/';
   }
 
-  free(path);
   return result;
 }
 
 static int
-prepare_entry_conflict(const char                    *destdir,
+prepare_entry_conflict(zipy_archive_t                *zipy,
+                       const char                    *destdir,
                        const zipy_entry_t            *entry,
                        const char                    *destpath,
                        const zipy_extract_options_t  *options,
@@ -4977,7 +4983,12 @@ prepare_entry_conflict(const char                    *destdir,
   if (options->on_conflict == ZIPY_CONFLICT_OVERWRITE)
     return ZIPY_ZIP_OK;
 
-  parentRet = prepare_parent_conflicts(destdir, entry, options, save_dir);
+  parentRet = prepare_parent_conflicts(zipy,
+                                       destdir,
+                                       entry,
+                                       destpath,
+                                       options,
+                                       save_dir);
   if (parentRet != ZIPY_ZIP_OK && parentRet != ZIPY_ZIP_SAVED)
     return parentRet;
 
@@ -6610,7 +6621,8 @@ prepare_extract_all(zipy_archive_t                *zipy,
       break;
     }
 
-    ret = prepare_entry_conflict(destdir,
+    ret = prepare_entry_conflict(zipy,
+                                 destdir,
                                  &info->entry,
                                  path,
                                  options,
@@ -7113,7 +7125,8 @@ zipy_extract_to(zipy_archive_t               *__restrict zipy,
 
   parentLen = extract_parent_len(info, prefixLen);
 
-  conflictRet = prepare_entry_conflict(canonical_destdir.data,
+  conflictRet = prepare_entry_conflict(zipy,
+                                       canonical_destdir.data,
                                        &info->entry,
                                        destpath,
                                        &opts,
@@ -7533,7 +7546,8 @@ zipy_extract_stream(const char                   *__restrict path,
       progress_ptr = &progress;
     }
 
-    conflictRet = prepare_entry_conflict(canonical_destdir.data,
+    conflictRet = prepare_entry_conflict(&zipy,
+                                         canonical_destdir.data,
                                          &info.entry,
                                          destpath,
                                          &opts,
