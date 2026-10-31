@@ -226,6 +226,12 @@ typedef struct dir_info_t {
   uint64_t entries;
 } dir_info_t;
 
+typedef struct dos_time_cache_t {
+  time_t   mtime;
+  uint32_t stamp;
+  int      valid;
+} dos_time_cache_t;
+
 typedef struct out_map_t {
   uint8_t *data;
   size_t   len;
@@ -1185,6 +1191,21 @@ dos_time(uint16_t date, uint16_t timev) {
     return (time_t)0;
 
   return mktime(&tmv);
+}
+
+static time_t
+cached_dos_time(dos_time_cache_t *cache, uint16_t date, uint16_t timev) {
+  uint32_t stamp;
+
+  /* reuse stays within one parse; members often share the exact DOS fields. */
+  stamp = ((uint32_t)date << 16) | timev;
+  if (cache->valid && cache->stamp == stamp)
+    return cache->mtime;
+
+  cache->mtime = dos_time(date, timev);
+  cache->stamp = stamp;
+  cache->valid = 1;
+  return cache->mtime;
 }
 
 static int
@@ -6632,6 +6653,8 @@ zipy_extract_options_init(zipy_extract_options_t *__restrict options) {
 ZIPY_EXPORT
 zipy_archive_t*
 zipy_open(const char *__restrict path) {
+  dos_time_cache_t time_cache = { 0 };
+
   dir_info_t      dir;
   uint8_t         extra_stack[512];
   zipy_archive_t *zipy;
@@ -6841,7 +6864,7 @@ zipy_open(const char *__restrict path) {
     /* extended timestamps already contain Unix time. avoid a redundant
      * timezone conversion for every central-directory entry that has one. */
     if (!info->has_mtime) {
-      info->mtime     = dos_time(info->mod_date, info->mod_time);
+      info->mtime     = cached_dos_time(&time_cache, info->mod_date, info->mod_time);
       info->has_mtime = info->mtime != (time_t)0;
     }
 
@@ -7214,6 +7237,7 @@ zipy_extract_stream(const char                   *__restrict path,
   zipy_extract_options_t opts;
   char                   extra_stack[512];
   path_buf_t             canonical_destdir;
+  dos_time_cache_t        time_cache = { 0 };
   char                  *save_dir;
   uint8_t               *extra_buf;
   const char            *state_path;
@@ -7407,7 +7431,7 @@ zipy_extract_stream(const char                   *__restrict path,
                                               info.entry.name_len);
     info.entry.encrypted    = (flags & ZIP_FLAG_ENCRYPTED) != 0;
     if (!info.has_mtime) {
-      info.mtime     = dos_time(info.mod_date, info.mod_time);
+      info.mtime     = cached_dos_time(&time_cache, info.mod_date, info.mod_time);
       info.has_mtime = info.mtime != (time_t)0;
     }
     unknownDataDesc         = hasDataDesc

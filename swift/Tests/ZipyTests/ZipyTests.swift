@@ -498,6 +498,61 @@ func extractionPreservesFileAndDirectoryMetadata() throws {
 }
 
 @Test
+func repeatedDOSTimestampsPreserveEntryTimes() throws {
+  let root = try temporaryDirectory()
+  defer { try? FileManager.default.removeItem(at: root) }
+
+  let source  = root.appendingPathComponent("source", isDirectory: true)
+  let archive = root.appendingPathComponent("dos-times.zip")
+  let payload = Data("timestamp payload".utf8)
+  let seconds = [1_600_000_000, 1_600_000_000, 1_600_000_002,
+                 1_600_086_402, 1_600_086_402, 1_600_000_000]
+  var expected: [String: Date] = [:]
+
+  try FileManager.default.createDirectory(at: source, withIntermediateDirectories: true)
+  for (index, timestamp) in seconds.enumerated() {
+    let name = "file-\(index).txt"
+    let file = source.appendingPathComponent(name)
+    let date = Date(timeIntervalSince1970: Double(timestamp))
+    try payload.write(to: file)
+    try FileManager.default.setAttributes([.modificationDate: date], ofItemAtPath: file.path)
+    expected[name] = date
+  }
+  try runZip(in: source, archive: archive, omittingDirectories: true, omittingExtraFields: true)
+
+  let handle = try #require(archive.withUnsafeFileSystemRepresentation { zipy_open($0) })
+  defer { zipy_close(handle) }
+  #expect(zipy_count(handle) == expected.count)
+
+  for index in 0..<zipy_count(handle) {
+    let entry   = try #require(zipy_entry(handle, index))
+    let pointer = try #require(entry.pointee.name)
+    let name    = URL(fileURLWithPath: String(cString: pointer)).lastPathComponent
+    var timestamp: Int64 = 0
+    #expect(zipy_entry_mtime(handle, index, &timestamp))
+    #expect(Date(timeIntervalSince1970: Double(timestamp)) == expected[name])
+  }
+
+  for streaming in [false, true] {
+    let output = root.appendingPathComponent("out-\(streaming)")
+    let result = output.withUnsafeFileSystemRepresentation { destination in
+      if streaming {
+        return archive.withUnsafeFileSystemRepresentation { zipy_extract_stream($0, destination, nil) }
+      }
+      return zipy_extract_all(handle, destination, nil)
+    }
+    try #require(result == ZIPY_ZIP_OK.rawValue)
+
+    for (name, date) in expected {
+      let file  = output.appendingPathComponent(name)
+      let attrs = try FileManager.default.attributesOfItem(atPath: file.path)
+      #expect(attrs[.modificationDate] as? Date == date)
+      #expect(try Data(contentsOf: file) == payload)
+    }
+  }
+}
+
+@Test
 func streamedExtendedTimestampsPreserveExactSeconds() throws {
   let root = try temporaryDirectory()
   defer { try? FileManager.default.removeItem(at: root) }
@@ -1156,7 +1211,8 @@ private func runZip(
   preservingSymlinks: Bool = false,
   storing: Bool = false,
   password: String? = nil,
-  omittingDirectories: Bool = false
+  omittingDirectories: Bool = false,
+  omittingExtraFields: Bool = false
 ) throws {
   let process = Process()
   process.executableURL       = URL(fileURLWithPath: "/usr/bin/zip")
@@ -1175,6 +1231,10 @@ private func runZip(
 
   if omittingDirectories {
     process.arguments?.insert("-D", at: 0)
+  }
+
+  if omittingExtraFields {
+    process.arguments?.insert("-X", at: 0)
   }
 
   try process.run()
