@@ -91,6 +91,8 @@
 #define ZIP64_LOCATOR_FIXED 20u
 #define ZIP_MAX_EOCD_SEARCH (ZIP_EOCD_FIXED + 65535u)
 
+#define ZIP_CRC_SEGMENT (16u * 1024u)
+
 #define ZIP_BUFFER_MIN             (4u * 1024u)
 #define ZIP_IO_CHUNK               (256u * 1024u)
 #define ZIP_INFLATE_STREAM_CHUNK   (1024u * 1024u)
@@ -330,6 +332,31 @@ static const uint32_t crc32_base_table[256] = {
   0xB3667A2Eu, 0xC4614AB8u, 0x5D681B02u, 0x2A6F2B94u,
   0xB40BBE37u, 0xC30C8EA1u, 0x5A05DF1Bu, 0x2D02EF8Du
 };
+
+#if ZIPY_HAVE_ARM_CRC32
+/* columns advance a raw CRC state through zero bytes, polynomial 0xedb88320. */
+static const uint32_t crc32_shift16k[32] = {
+  0x9D9129BFu, 0xE053553Fu, 0x1BD7AC3Fu, 0x37AF587Eu,
+  0x6F5EB0FCu, 0xDEBD61F8u, 0x660BC5B1u, 0xCC178B62u,
+  0x435E1085u, 0x86BC210Au, 0xD6094455u, 0x77638EEBu,
+  0xEEC71DD6u, 0x06FF3DEDu, 0x0DFE7BDAu, 0x1BFCF7B4u,
+  0x37F9EF68u, 0x6FF3DED0u, 0xDFE7BDA0u, 0x64BE7D01u,
+  0xC97CFA02u, 0x4988F245u, 0x9311E48Au, 0xFD52CF55u,
+  0x21D498EBu, 0x43A931D6u, 0x875263ACu, 0xD5D5C119u,
+  0x70DA8473u, 0xE1B508E6u, 0x181B178Du, 0x30362F1Au
+};
+
+static const uint32_t crc32_shift32k[32] = {
+  0x2EE43A2Cu, 0x5DC87458u, 0xBB90E8B0u, 0xAC50D721u,
+  0x83D0A803u, 0xDCD05647u, 0x62D1AACFu, 0xC5A3559Eu,
+  0x5037AD7Du, 0xA06F5AFAu, 0x9BAFB3B5u, 0xEC2E612Bu,
+  0x032DC417u, 0x065B882Eu, 0x0CB7105Cu, 0x196E20B8u,
+  0x32DC4170u, 0x65B882E0u, 0xCB7105C0u, 0x4D930DC1u,
+  0x9B261B82u, 0xED3D3145u, 0x010B64CBu, 0x0216C996u,
+  0x042D932Cu, 0x085B2658u, 0x10B64CB0u, 0x216C9960u,
+  0x42D932C0u, 0x85B26580u, 0xD015CD41u, 0x7B5A9CC3u
+};
+#endif
 
 static uint32_t crc32_tables[16][256];
 
@@ -2928,11 +2955,49 @@ crc32_init_tables(void) {
 #endif
 
 #if ZIPY_HAVE_ARM_CRC32
+static uint32_t
+crc32_shift(const uint32_t *columns, uint32_t value) {
+  size_t   i      = 0;
+  uint32_t result = 0;
+
+  while (value) {
+    if (value & 1u)
+      result ^= columns[i];
+
+    value >>= 1;
+    i++;
+  }
+
+  return result;
+}
+
 static uint32_t ZIPY_ARM_CRC32_TARGET
 crc32_update_arm(uint32_t                  crc,
                  const uint8_t *__restrict buf,
                  size_t                    len) {
+  size_t   i;
+  uint32_t first, second, third;
+
   crc = ~crc;
+
+  /* independent chains hide CRC instruction latency; combine raw states. */
+  while (len >= 3u * ZIP_CRC_SEGMENT) {
+    first  = crc;
+    second = 0;
+    third  = 0;
+
+    for (i = 0; i < ZIP_CRC_SEGMENT; i += 8u) {
+      first  = __crc32d(first, load_le64(buf + i));
+      second = __crc32d(second, load_le64(buf + ZIP_CRC_SEGMENT + i));
+      third  = __crc32d(third, load_le64(buf + 2u * ZIP_CRC_SEGMENT + i));
+    }
+
+    crc = crc32_shift(crc32_shift32k, first)
+          ^ crc32_shift(crc32_shift16k, second)
+          ^ third;
+    buf += 3u * ZIP_CRC_SEGMENT;
+    len -= 3u * ZIP_CRC_SEGMENT;
+  }
 
   while (len >= 64u) {
     crc = __crc32d(crc, load_le64(buf));

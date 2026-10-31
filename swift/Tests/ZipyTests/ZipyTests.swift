@@ -134,6 +134,58 @@ func parallelIndexedExtractionKeepsEveryPayload() throws {
 }
 
 @Test
+func largePayloadChecksumsRejectCorruption() throws {
+  let root = try temporaryDirectory()
+  defer { try? FileManager.default.removeItem(at: root) }
+
+  let source  = root.appendingPathComponent("source", isDirectory: true)
+  let archive = root.appendingPathComponent("checksums.zip")
+  let sizes   = [49152, 49153, 98304, 98311]
+  var payloads: [Data] = []
+
+  try FileManager.default.createDirectory(at: source, withIntermediateDirectories: true)
+  for (index, size) in sizes.enumerated() {
+    let data = Data((0..<size).map { UInt8(truncatingIfNeeded: $0 * 17) })
+    try data.write(to: source.appendingPathComponent("file-\(index).bin"))
+    payloads.append(data)
+  }
+
+  try runZip(in: source, archive: archive, omittingDirectories: true)
+
+  for corrupt in [false, true] {
+    if corrupt {
+      var data = try Data(contentsOf: archive)
+      let end = data.count - 22
+      try #require(data[end..<(end + 4)].elementsEqual([0x50, 0x4b, 0x05, 0x06]))
+      var central = 0
+      for index in 0..<4 {
+        central |= Int(data[end + 16 + index]) << (index * 8)
+      }
+      data[central + 16] ^= 1
+      try data.write(to: archive, options: .atomic)
+    }
+
+    let handle = try #require(archive.withUnsafeFileSystemRepresentation { zipy_open($0) })
+    defer { zipy_close(handle) }
+    let output = root.appendingPathComponent("output-\(corrupt)")
+    var options = zipy_extract_options_t()
+    zipy_extract_options_init(&options)
+    options.jobs        = 4
+    options.on_conflict = ZIPY_CONFLICT_OVERWRITE
+
+    let result = output.withUnsafeFileSystemRepresentation {
+      zipy_extract_all(handle, $0, &options)
+    }
+    #expect(result == (corrupt ? ZIPY_ZIP_ECRC.rawValue : ZIPY_ZIP_OK.rawValue))
+    if !corrupt {
+      for (index, payload) in payloads.enumerated() {
+        #expect(try Data(contentsOf: output.appendingPathComponent("file-\(index).bin")) == payload)
+      }
+    }
+  }
+}
+
+@Test
 func extractionGrowsSmallOutputBuffers() throws {
   let root = try temporaryDirectory()
   defer { try? FileManager.default.removeItem(at: root) }
