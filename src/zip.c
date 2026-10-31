@@ -3951,11 +3951,6 @@ extract_path_len(const char *dir, const char *name, size_t nameLen) {
   return path;
 }
 
-static char*
-extract_path(const char *dir, const char *name) {
-  return extract_path_len(dir, name, strlen(name));
-}
-
 static int
 path_buf_set_dir(path_buf_t *__restrict buf,
                  const char *__restrict dir,
@@ -4852,11 +4847,8 @@ prepare_parent_conflicts(const char                    *destdir,
                          char                         **save_dir) {
   zipy_entry_t parentEntry;
   char        *rel, *path;
-  size_t       len, i, j;
+  size_t       len, i;
   int          result, exists, isDir;
-
-  rel  = NULL;
-  path = NULL;
 
   result = ZIPY_ZIP_OK;
 
@@ -4864,49 +4856,45 @@ prepare_parent_conflicts(const char                    *destdir,
     return ZIPY_ZIP_ERR;
 
   len = entry->name_len;
-  rel = malloc(len + 1);
-  if (!rel)
+  if (!memchr(entry->name, '/', len) && !memchr(entry->name, '\\', len))
+    return ZIPY_ZIP_OK;
+
+  /* normalize once; each parent is a temporary prefix of this owned path. */
+  if (!(path = extract_path_len(destdir, entry->name, len)))
     return ZIPY_ZIP_ERR;
+
+  rel = path + strlen(path) - len;
 
   parentEntry              = *entry;
   parentEntry.name         = rel;
   parentEntry.is_directory = false;
 
   for (i = 0; i < len; i++) {
-    if (!is_zip_sep(entry->name[i]) || i == 0)
+    if (!is_fs_sep(rel[i]) || i == 0)
       continue;
 
-    for (j = 0; j < i; j++) {
-      rel[j] = is_zip_sep(entry->name[j]) ? '/' : entry->name[j];
-    }
     rel[i] = '\0';
-
-    free(path);
-    path = extract_path(destdir, rel);
-    if (!path) {
-      result = ZIPY_ZIP_ERR;
-      break;
-    }
+    parentEntry.name_len = i;
 
     if (!path_info(path, &exists, &isDir)) {
       result = ZIPY_ZIP_EFILE;
       break;
     }
 
-    if (!exists || isDir)
-      continue;
+    if (exists && !isDir) {
+      result = prepare_conflict(destdir,
+                                &parentEntry,
+                                path,
+                                options,
+                                save_dir);
+      if (result != ZIPY_ZIP_OK && result != ZIPY_ZIP_SAVED)
+        break;
+    }
 
-    result = prepare_conflict(destdir,
-                              &parentEntry,
-                              path,
-                              options,
-                              save_dir);
-    if (result != ZIPY_ZIP_OK && result != ZIPY_ZIP_SAVED)
-      break;
+    rel[i] = '/';
   }
 
   free(path);
-  free(rel);
   return result;
 }
 
