@@ -4945,7 +4945,11 @@ prepare_parent_conflicts(const char                    *destdir,
       break;
     }
 
-    if (exists && !isDir) {
+    /* deeper parents cannot exist; the caller still checks the full path. */
+    if (!exists)
+      break;
+
+    if (!isDir) {
       result = prepare_conflict(destdir,
                                 &parentEntry,
                                 path,

@@ -354,6 +354,78 @@ func parentFileConflictsPreserveSaveSkipAndFailPolicies() throws {
 }
 
 @Test
+func missingParentsDoNotHideLaterFileConflicts() throws {
+  let root = try temporaryDirectory()
+  defer { try? FileManager.default.removeItem(at: root) }
+
+  let source  = root.appendingPathComponent("source", isDirectory: true)
+  let archive = root.appendingPathComponent("missing-parents.zip")
+
+  let payload  = Data("nested payload".utf8)
+  let original = Data("keep this newer file".utf8)
+
+  try FileManager.default.createDirectory(at: source.appendingPathComponent("parent/deep"),
+                                          withIntermediateDirectories: true)
+  try payload.write(to: source.appendingPathComponent("parent/deep/file.txt"))
+  try runZip(in: source, archive: archive, omittingDirectories: true)
+  let handle = try #require(archive.withUnsafeFileSystemRepresentation { zipy_open($0) })
+  defer { zipy_close(handle) }
+
+  for policy in [ZIPY_CONFLICT_SAVE, ZIPY_CONFLICT_SKIP, ZIPY_CONFLICT_FAIL] {
+    for mode in 0..<3 {
+      let output = root.appendingPathComponent("out-\(policy.rawValue)-\(mode)")
+      let file   = output.appendingPathComponent("parent/deep/file.txt")
+      let marker = output.appendingPathComponent("marker.txt")
+      try FileManager.default.createDirectory(at: output, withIntermediateDirectories: true)
+      try original.write(to: marker)
+
+      var options = zipy_extract_options_t()
+      zipy_extract_options_init(&options)
+      options.on_conflict = policy
+      options.jobs        = 1
+
+      func extract() -> Int32 {
+        output.withUnsafeFileSystemRepresentation { destination in
+          if mode == 2 {
+            return archive.withUnsafeFileSystemRepresentation {
+              zipy_extract_stream($0, destination, &options)
+            }
+          }
+          return mode == 1 ? zipy_extract_all(handle, destination, &options)
+                           : zipy_extract_to(handle, 0, destination, &options)
+        }
+      }
+
+      #expect(extract() == ZIPY_ZIP_OK.rawValue)
+      #expect(try Data(contentsOf: file) == payload)
+      try original.write(to: file)
+      let result = extract()
+
+      if policy == ZIPY_CONFLICT_SAVE {
+        let paths = try FileManager.default.contentsOfDirectory(at: output,
+                                                                includingPropertiesForKeys: nil)
+        let saved = try #require(paths.first {
+          FileManager.default.fileExists(atPath: $0.appendingPathComponent("zipy_saved_original_paths.txt").path)
+        })
+        #expect(result >= ZIPY_ZIP_OK.rawValue)
+        #expect(try Data(contentsOf: file) == payload)
+        #expect(try Data(contentsOf: saved.appendingPathComponent("parent/deep/file.txt")) == original)
+      } else {
+        let expected: Int32
+        if policy == ZIPY_CONFLICT_FAIL {
+          expected = ZIPY_ZIP_EEXIST.rawValue
+        } else {
+          expected = mode == 0 ? ZIPY_ZIP_SKIPPED.rawValue : ZIPY_ZIP_OK.rawValue
+        }
+        #expect(result == expected)
+        #expect(try Data(contentsOf: file) == original)
+      }
+      #expect(try Data(contentsOf: marker) == original)
+    }
+  }
+}
+
+@Test
 func extractionRejectsLinkedDirectoryParents() throws {
   let root = try temporaryDirectory()
   defer { try? FileManager.default.removeItem(at: root) }
