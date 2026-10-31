@@ -7406,8 +7406,10 @@ zipy_extract_stream(const char                   *__restrict path,
     info.entry.is_directory = is_dir_name_len(info.entry.name,
                                               info.entry.name_len);
     info.entry.encrypted    = (flags & ZIP_FLAG_ENCRYPTED) != 0;
-    info.mtime              = dos_time(info.mod_date, info.mod_time);
-    info.has_mtime          = info.mtime != (time_t)0;
+    if (!info.has_mtime) {
+      info.mtime     = dos_time(info.mod_date, info.mod_time);
+      info.has_mtime = info.mtime != (time_t)0;
+    }
     unknownDataDesc         = hasDataDesc
                               && !info.entry.is_directory
                               && info.entry.compressed_size == 0

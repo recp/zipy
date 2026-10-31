@@ -498,6 +498,56 @@ func extractionPreservesFileAndDirectoryMetadata() throws {
 }
 
 @Test
+func streamedExtendedTimestampsPreserveExactSeconds() throws {
+  let root = try temporaryDirectory()
+  defer { try? FileManager.default.removeItem(at: root) }
+
+  let source  = root.appendingPathComponent("source", isDirectory: true)
+  let archive = root.appendingPathComponent("timestamps.zip")
+  let file    = source.appendingPathComponent("file.txt")
+  let payload = Data("timestamp payload".utf8)
+
+  try FileManager.default.createDirectory(at: source, withIntermediateDirectories: true)
+  try payload.write(to: file)
+  try FileManager.default.setAttributes(
+    [.modificationDate: Date(timeIntervalSince1970: 1_600_000_001)], ofItemAtPath: file.path)
+  try runZip(in: source, archive: archive, omittingDirectories: true)
+
+  let original = try Data(contentsOf: archive)
+  func u16(_ offset: Int) -> Int {
+    Int(original[offset]) | Int(original[offset + 1]) << 8
+  }
+
+  var position = 30 + u16(26)
+  let end = position + u16(28)
+  while position + 4 <= end, u16(position) != 0x5455 {
+    position += 4 + u16(position + 2)
+  }
+  try #require(position + 9 <= end)
+
+  for timestamp in [UInt32(0), UInt32(1_600_000_001)] {
+    var data  = original
+    var value = timestamp.littleEndian
+    withUnsafeBytes(of: &value) {
+      data.replaceSubrange((position + 5)..<(position + 9), with: $0)
+    }
+    try data.write(to: archive)
+
+    let output = root.appendingPathComponent("out-\(timestamp)")
+    let result = archive.withUnsafeFileSystemRepresentation { input in
+      output.withUnsafeFileSystemRepresentation { zipy_extract_stream(input, $0, nil) }
+    }
+    try #require(result == ZIPY_ZIP_OK.rawValue)
+
+    let extracted = output.appendingPathComponent("file.txt")
+    let attributes = try FileManager.default.attributesOfItem(atPath: extracted.path)
+    #expect(attributes[.modificationDate] as? Date
+              == Date(timeIntervalSince1970: Double(timestamp)))
+    #expect(try Data(contentsOf: extracted) == payload)
+  }
+}
+
+@Test
 func deflatedSymlinksReadTheirOwnPayload() throws {
   let root = try temporaryDirectory()
   defer { try? FileManager.default.removeItem(at: root) }
