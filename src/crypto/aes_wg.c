@@ -205,6 +205,56 @@ aes_encrypt_block(const aes_key_t *ctx,
 #endif
 }
 
+#if defined(__ARM_FEATURE_AES) && defined(__BYTE_ORDER__) \
+    && __BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__
+static void
+aes_wg_decrypt4(aes_wg_t *ctx, uint8_t *buf) {
+  uint64x2_t counter, step;
+  uint8x16_t s0, s1, s2, s3, rk;
+  unsigned   round;
+
+  counter = vreinterpretq_u64_u8(vld1q_u8(ctx->nonce));
+  step    = vsetq_lane_u64(1, vdupq_n_u64(0), 0);
+
+  counter = vaddq_u64(counter, step);
+  s0      = vreinterpretq_u8_u64(counter);
+  counter = vaddq_u64(counter, step);
+  s1      = vreinterpretq_u8_u64(counter);
+  counter = vaddq_u64(counter, step);
+  s2      = vreinterpretq_u8_u64(counter);
+  counter = vaddq_u64(counter, step);
+  s3      = vreinterpretq_u8_u64(counter);
+  vst1q_u8(ctx->nonce, s3);
+
+  /* independent counters share keys and hide AES round dependencies. */
+  for (round = 1; round < ctx->key.rounds; round++) {
+    rk = vld1q_u8(ctx->key.round_key + (round - 1u) * AES_WG_BLOCK_SIZE);
+    s0 = vaesmcq_u8(vaeseq_u8(s0, rk));
+    s1 = vaesmcq_u8(vaeseq_u8(s1, rk));
+    s2 = vaesmcq_u8(vaeseq_u8(s2, rk));
+    s3 = vaesmcq_u8(vaeseq_u8(s3, rk));
+  }
+
+  rk = vld1q_u8(ctx->key.round_key + (round - 1u) * AES_WG_BLOCK_SIZE);
+  s0 = vaeseq_u8(s0, rk);
+  s1 = vaeseq_u8(s1, rk);
+  s2 = vaeseq_u8(s2, rk);
+  s3 = vaeseq_u8(s3, rk);
+
+  rk = vld1q_u8(ctx->key.round_key + round * AES_WG_BLOCK_SIZE);
+  s0 = veorq_u8(s0, rk);
+  s1 = veorq_u8(s1, rk);
+  s2 = veorq_u8(s2, rk);
+  s3 = veorq_u8(s3, rk);
+  vst1q_u8(ctx->stream, s3);
+
+  vst1q_u8(buf, veorq_u8(vld1q_u8(buf), s0));
+  vst1q_u8(buf + 16u, veorq_u8(vld1q_u8(buf + 16u), s1));
+  vst1q_u8(buf + 32u, veorq_u8(vld1q_u8(buf + 32u), s2));
+  vst1q_u8(buf + 48u, veorq_u8(vld1q_u8(buf + 48u), s3));
+}
+#endif
+
 static void
 aes_wg_next_stream(aes_wg_t *ctx) {
   unsigned i;
@@ -298,8 +348,18 @@ aes_wg_decrypt(aes_wg_t *ctx, uint8_t *buf, size_t len) {
   }
 
   while (len > 0) {
-    if (ctx->stream_pos == AES_WG_BLOCK_SIZE)
+    if (ctx->stream_pos == AES_WG_BLOCK_SIZE) {
+#if defined(__ARM_FEATURE_AES) && defined(__BYTE_ORDER__) \
+    && __BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__
+      if (len >= 4u * AES_WG_BLOCK_SIZE) {
+        aes_wg_decrypt4(ctx, buf);
+        buf += 4u * AES_WG_BLOCK_SIZE;
+        len -= 4u * AES_WG_BLOCK_SIZE;
+        continue;
+      }
+#endif
       aes_wg_next_stream(ctx);
+    }
 
     n = AES_WG_BLOCK_SIZE - ctx->stream_pos;
     if (n > len)
