@@ -1175,6 +1175,40 @@ func actorProgress() async throws {
 }
 
 @Test
+func aesExtractionAcceptsLongPasswords() throws {
+  let root = try temporaryDirectory()
+  defer { try? FileManager.default.removeItem(at: root) }
+
+  let archive  = root.appendingPathComponent("long-password.zip")
+  let output   = root.appendingPathComponent("output")
+  let password = String(repeating: "zipy-test-", count: 8)
+  let payload  = Data("AES with a long password.\n".utf8)
+
+  let data = try #require(Data(base64Encoded:
+    """
+    UEsDBDMAAQBjAKwJYV0AAAAANgAAABoAAAALAAsAcGF5bG9hZC50eHQBmQcAAgBBRQMAAO2bd/OTThoE
+    /85gjhaM3Khx2VeVv+9woewPgM38NMs0uYHHYuAeut8He+T/KehU4EuqsckIr1BLAQI/AzMAAQBjAKwJ
+    YV0AAAAANgAAABoAAAALAC8AAAAAAAAAIICkgQAAAABwYXlsb2FkLnR4dAoAIAAAAAAAAQAYABFSlguF
+    ad0BAAAAAAAAAAAAAAAAAAAAAAGZBwACAEFFAwAAUEsFBgAAAAABAAEAaAAAAGoAAAAAAA==
+    """, options: .ignoreUnknownCharacters))
+  try data.write(to: archive)
+
+  let handle = try #require(archive.withUnsafeFileSystemRepresentation { zipy_open($0) })
+  defer { zipy_close(handle) }
+
+  var options = zipy_extract_options_t()
+  zipy_extract_options_init(&options)
+  options.flags = ZIPY_EXTRACT_ATOMIC.rawValue
+
+  let result = password.withCString { password in
+    options.password = password
+    return output.withUnsafeFileSystemRepresentation { zipy_extract_all(handle, $0, &options) }
+  }
+  try #require(result == ZIPY_ZIP_OK.rawValue)
+  #expect(try Data(contentsOf: output.appendingPathComponent("payload.txt")) == payload)
+}
+
+@Test
 func aesExtractionValidatesAllKeySizes() throws {
   let root = try temporaryDirectory()
   defer { try? FileManager.default.removeItem(at: root) }

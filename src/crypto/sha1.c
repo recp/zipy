@@ -224,14 +224,21 @@ pbkdf2_hmac_sha1(const uint8_t *password,
                  uint32_t       iterations,
                  uint8_t       *out,
                  size_t         out_len) {
-  uint8_t  u[SHA1_SIZE];
-  uint8_t  t[SHA1_SIZE];
-  uint8_t  counter[4];
-  size_t   done = 0, n, i;
-  uint32_t block = 1, iter;
+  hmac_sha1_t seed;
+  uint8_t     u[SHA1_SIZE];
+  uint8_t     t[SHA1_SIZE];
+  uint8_t     counter[4];
+  size_t      done = 0, n, i;
+  uint32_t    block = 1, iter;
 
   if (!out || iterations == 0)
     return 0;
+
+  if (out_len == 0)
+    return 1;
+
+  /* the password pads are identical for every HMAC invocation. */
+  hmac_sha1_init(&seed, password, password_len);
 
   while (done < out_len) {
     /* reuse one scratch HMAC state for the current output block. */
@@ -242,14 +249,14 @@ pbkdf2_hmac_sha1(const uint8_t *password,
     counter[2] = (uint8_t)(block >> 8);
     counter[3] = (uint8_t)block;
 
-    hmac_sha1_init(&hmac, password, password_len);
+    hmac = seed;
     hmac_sha1_update(&hmac, salt, salt_len);
     hmac_sha1_update(&hmac, counter, sizeof(counter));
     hmac_sha1_final(&hmac, u);
     memcpy(t, u, sizeof(t));
 
     for (iter = 1; iter < iterations; iter++) {
-      hmac_sha1_init(&hmac, password, password_len);
+      hmac = seed;
       hmac_sha1_update(&hmac, u, sizeof(u));
       hmac_sha1_final(&hmac, u);
 
