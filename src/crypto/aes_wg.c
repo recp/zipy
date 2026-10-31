@@ -277,18 +277,51 @@ aes_wg_open(aes_wg_t      *ctx,
 
 void
 aes_wg_decrypt(aes_wg_t *ctx, uint8_t *buf, size_t len) {
-  size_t i;
+  uint64_t       block[2], mask[2];
+  const uint8_t *stream;
+  size_t         i, n;
 
   if (!ctx || !buf || len == 0)
     return;
 
   hmac_sha1_update(&ctx->hmac, buf, len);
 
-  for (i = 0; i < len; i++) {
+  /* preserve the byte path for fragmented calls smaller than one block. */
+  if (len < AES_WG_BLOCK_SIZE) {
+    for (i = 0; i < len; i++) {
+      if (ctx->stream_pos == AES_WG_BLOCK_SIZE)
+        aes_wg_next_stream(ctx);
+
+      buf[i] ^= ctx->stream[ctx->stream_pos++];
+    }
+    return;
+  }
+
+  while (len > 0) {
     if (ctx->stream_pos == AES_WG_BLOCK_SIZE)
       aes_wg_next_stream(ctx);
 
-    buf[i] ^= ctx->stream[ctx->stream_pos++];
+    n = AES_WG_BLOCK_SIZE - ctx->stream_pos;
+    if (n > len)
+      n = len;
+
+    stream = ctx->stream + ctx->stream_pos;
+    if (n == AES_WG_BLOCK_SIZE) {
+      /* memcpy permits unaligned buffers without violating strict aliasing. */
+      memcpy(block, buf, sizeof(block));
+      memcpy(mask, stream, sizeof(mask));
+      block[0] ^= mask[0];
+      block[1] ^= mask[1];
+      memcpy(buf, block, sizeof(block));
+    } else {
+      for (i = 0; i < n; i++) {
+        buf[i] ^= stream[i];
+      }
+    }
+
+    ctx->stream_pos += n;
+    buf            += n;
+    len            -= n;
   }
 }
 
