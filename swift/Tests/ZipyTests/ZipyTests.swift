@@ -1175,6 +1175,97 @@ func actorProgress() async throws {
 }
 
 @Test
+func aesExtractionValidatesAllKeySizes() throws {
+  let root = try temporaryDirectory()
+  defer { try? FileManager.default.removeItem(at: root) }
+
+  let payload = Data("AES payload across block boundaries.\n".utf8)
+
+  // 7-Zip AES-128, AES-192 and AES-256 STORE fixtures share this payload.
+  let fixtures = [
+    """
+    UEsDBDMAAQBjAFR7LVEAAAAAOQAAACUAAAALAAsAcGF5bG9hZC50eHQBmQcAAgBBRQEAAOLE61h+1MBG
+    TgbqS6S1Nu1Iq7pZOfDolwLQ5RKSoJfbPrYAGxNw8vAUv9EYRO7VPFDUoZ3ns6ThbFBLAQI/AzMAAQBj
+    AFR7LVEAAAAAOQAAACUAAAALAC8AAAAAAAAAIICkgQAAAABwYXlsb2FkLnR4dAoAIAAAAAAAAQAYAACA
+    piHJidYBAAAAAAAAAAAAAAAAAAAAAAGZBwACAEFFAQAAUEsFBgAAAAABAAEAaAAAAG0AAAAAAA==
+    """,
+    """
+    UEsDBDMAAQBjAFR7LVEAAAAAPQAAACUAAAALAAsAcGF5bG9hZC50eHQBmQcAAgBBRQIAAIpvisRAkZpO
+    2o5vOkpNYrQyqXKOjNMg3sQ7xJCErzfu93ESzP7FcUkZHFhiqJa7Q6ZqpF6/S/x5YhrQrpNQSwECPwMz
+    AAEAYwBUey1RAAAAAD0AAAAlAAAACwAvAAAAAAAAACCApIEAAAAAcGF5bG9hZC50eHQKACAAAAAAAAEA
+    GAAAgKYhyYnWAQAAAAAAAAAAAAAAAAAAAAABmQcAAgBBRQIAAFBLBQYAAAAAAQABAGgAAABxAAAAAAA=
+    """,
+    """
+    UEsDBDMAAQBjAFR7LVEAAAAAQQAAACUAAAALAAsAcGF5bG9hZC50eHQBmQcAAgBBRQMAAHF40FgchHkH
+    08lJAS7lH9YCLbOijXZq37BwzAodzQWuKs4dUY03N4C55nKft75jHtT93OoO4wjgQFQUtbwRSDcgUEsB
+    Aj8DMwABAGMAVHstUQAAAABBAAAAJQAAAAsALwAAAAAAAAAggKSBAAAAAHBheWxvYWQudHh0CgAgAAAA
+    AAABABgAAICmIcmJ1gEAAAAAAAAAAAAAAAAAAAAAAZkHAAIAQUUDAABQSwUGAAAAAAEAAQBoAAAAdQAA
+    AAAA
+    """
+  ]
+
+  for (index, fixture) in fixtures.enumerated() {
+    let archive = root.appendingPathComponent("aes-\(index).zip")
+    let data    = try #require(Data(base64Encoded: fixture, options: .ignoreUnknownCharacters))
+    try data.write(to: archive)
+
+    let handle = try #require(archive.withUnsafeFileSystemRepresentation { zipy_open($0) })
+    defer { zipy_close(handle) }
+
+    var options = zipy_extract_options_t()
+    zipy_extract_options_init(&options)
+    options.flags       = ZIPY_EXTRACT_ATOMIC.rawValue
+    options.on_conflict = ZIPY_CONFLICT_OVERWRITE
+
+    for streaming in [false, true] {
+      let output = root.appendingPathComponent("out-\(index)-\(streaming)")
+      let result = "zipy-test-password".withCString { password in
+        options.password = password
+        return output.withUnsafeFileSystemRepresentation { destination in
+          if streaming {
+            return archive.withUnsafeFileSystemRepresentation {
+              zipy_extract_stream($0, destination, &options)
+            }
+          }
+          return zipy_extract_all(handle, destination, &options)
+        }
+      }
+      try #require(result == ZIPY_ZIP_OK.rawValue)
+      #expect(try Data(contentsOf: output.appendingPathComponent("payload.txt")) == payload)
+    }
+
+    let entry = try #require(zipy_entry(handle, 0))
+
+    let nameLength  = Int(data[26]) | Int(data[27]) << 8
+    let extraLength = Int(data[28]) | Int(data[29]) << 8
+    let authOffset  = 30 + nameLength + extraLength + Int(entry.pointee.compressed_size) - 1
+
+    var damaged = data
+    damaged[authOffset] ^= 1
+
+    let badArchive = root.appendingPathComponent("bad-aes-\(index).zip")
+    let output     = root.appendingPathComponent("protected-\(index)")
+
+    let original = Data("keep the existing file".utf8)
+    try damaged.write(to: badArchive)
+    try FileManager.default.createDirectory(at: output, withIntermediateDirectories: true)
+    try original.write(to: output.appendingPathComponent("payload.txt"))
+
+    let badHandle = try #require(badArchive.withUnsafeFileSystemRepresentation { zipy_open($0) })
+    defer { zipy_close(badHandle) }
+
+    let result = "zipy-test-password".withCString { password in
+      options.password = password
+      return output.withUnsafeFileSystemRepresentation {
+        zipy_extract_to(badHandle, 0, $0, &options)
+      }
+    }
+    #expect(result == ZIPY_ZIP_EAUTH.rawValue)
+    #expect(try Data(contentsOf: output.appendingPathComponent("payload.txt")) == original)
+  }
+}
+
+@Test
 func encryptedExtractionGrowsInputBuffers() throws {
   let root = try temporaryDirectory()
   defer { try? FileManager.default.removeItem(at: root) }

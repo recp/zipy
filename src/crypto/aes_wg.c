@@ -18,6 +18,10 @@
 
 #include <string.h>
 
+#if defined(__ARM_FEATURE_AES)
+#  include <arm_neon.h>
+#endif
+
 static const uint8_t sbox[256] = {
   0x63, 0x7c, 0x77, 0x7b, 0xf2, 0x6b, 0x6f, 0xc5, 0x30, 0x01, 0x67, 0x2b, 0xfe, 0xd7, 0xab, 0x76,
   0xca, 0x82, 0xc9, 0x7d, 0xfa, 0x59, 0x47, 0xf0, 0xad, 0xd4, 0xa2, 0xaf, 0x9c, 0xa4, 0x72, 0xc0,
@@ -100,6 +104,7 @@ aes_set_encrypt_key(aes_key_t *ctx, const uint8_t *key, size_t key_len) {
   return 1;
 }
 
+#if !defined(__ARM_FEATURE_AES)
 static void
 add_round_key(uint8_t s[16], const uint8_t *rk) {
   unsigned i;
@@ -160,11 +165,26 @@ mix_columns(uint8_t s[16]) {
     p[3] ^= (uint8_t)(t ^ xtime((uint8_t)(a3 ^ a0)));
   }
 }
+#endif
 
 static void
 aes_encrypt_block(const aes_key_t *ctx,
                   const uint8_t    in[AES_WG_BLOCK_SIZE],
                   uint8_t          out[AES_WG_BLOCK_SIZE]) {
+#if defined(__ARM_FEATURE_AES)
+  uint8x16_t s;
+  unsigned   round;
+
+  s = vld1q_u8(in);
+  for (round = 1; round < ctx->rounds; round++) {
+    s = vaeseq_u8(s, vld1q_u8(ctx->round_key + (round - 1u) * AES_WG_BLOCK_SIZE));
+    s = vaesmcq_u8(s);
+  }
+
+  s = vaeseq_u8(s, vld1q_u8(ctx->round_key + (round - 1u) * AES_WG_BLOCK_SIZE));
+  s = veorq_u8(s, vld1q_u8(ctx->round_key + round * AES_WG_BLOCK_SIZE));
+  vst1q_u8(out, s);
+#else
   uint8_t  s[AES_WG_BLOCK_SIZE];
   unsigned round;
 
@@ -182,6 +202,7 @@ aes_encrypt_block(const aes_key_t *ctx,
   shift_rows(s);
   add_round_key(s, ctx->round_key + ctx->rounds * AES_WG_BLOCK_SIZE);
   memcpy(out, s, sizeof(s));
+#endif
 }
 
 static void
