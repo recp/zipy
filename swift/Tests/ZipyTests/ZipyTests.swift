@@ -689,6 +689,68 @@ func actorProgress() async throws {
 }
 
 @Test
+func encryptedExtractionGrowsInputBuffers() throws {
+  let root = try temporaryDirectory()
+  defer { try? FileManager.default.removeItem(at: root) }
+
+  let source   = root.appendingPathComponent("source", isDirectory: true)
+  let password = "zipy-test-password"
+  let small    = Data(String(repeating: "small payload\n", count: 200).utf8)
+  var large    = Data()
+  var block    = [UInt8](repeating: 0, count: 16384)
+  var state: UInt32 = 0x31415926
+
+  // adjacent duplicates compress while unique blocks keep the input above 1 MiB.
+  for _ in 0..<70 {
+    for index in block.indices {
+      state ^= state << 13
+      state ^= state >> 17
+      state ^= state << 5
+      block[index] = UInt8(truncatingIfNeeded: state)
+    }
+    large.append(contentsOf: block)
+    large.append(contentsOf: block)
+  }
+
+  try FileManager.default.createDirectory(at: source, withIntermediateDirectories: true)
+  try small.write(to: source.appendingPathComponent("small.bin"))
+  try large.write(to: source.appendingPathComponent("large.bin"))
+
+  for stored in [false, true] {
+    let archive = root.appendingPathComponent("encrypted-\(stored).zip")
+    let output  = root.appendingPathComponent("output-\(stored)", isDirectory: true)
+    try runZip(in: source, archive: archive, storing: stored, password: password)
+
+    let handle = try #require(archive.withUnsafeFileSystemRepresentation { zipy_open($0) })
+    defer { zipy_close(handle) }
+    let indices = (0..<zipy_count(handle)).sorted {
+      zipy_entry(handle, $0)!.pointee.uncompressed_size < zipy_entry(handle, $1)!.pointee.uncompressed_size
+    }
+    let last = try #require(indices.last)
+    let entry = try #require(zipy_entry(handle, last))
+    #expect(entry.pointee.method == (stored ? 0 : 8))
+    #expect(entry.pointee.compressed_size > 1024 * 1024)
+
+    var options = zipy_extract_options_t()
+    zipy_extract_options_init(&options)
+    options.on_conflict = ZIPY_CONFLICT_OVERWRITE
+
+    try password.withCString { passwordC in
+      options.password = passwordC
+      for index in indices {
+        let result = output.withUnsafeFileSystemRepresentation {
+          zipy_extract_to(handle, index, $0, &options)
+        }
+        try #require(result == ZIPY_ZIP_OK.rawValue)
+      }
+    }
+
+    #expect(try Data(contentsOf: output.appendingPathComponent("small.bin")) == small)
+    #expect(try Data(contentsOf: output.appendingPathComponent("large.bin")) == large)
+  }
+}
+
+@Test
 func encryptedSymlinkExtracts() throws {
   let root = try temporaryDirectory()
   defer { try? FileManager.default.removeItem(at: root) }

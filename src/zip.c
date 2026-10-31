@@ -3203,7 +3203,7 @@ crc32_file_prefix(zipy_archive_t *__restrict zipy,
   if (!zipy || !path || !crcOut)
     return ZIPY_ZIP_ERR;
 
-  if (!reserve_bytes(&zipy->copy_buf, &zipy->copy_cap, ZIP_IO_CHUNK))
+  if (!reserve_bytes(&zipy->copy_buf, &zipy->copy_cap, chunk_size(len)))
     return ZIPY_ZIP_ERR;
 
   fp = fopen(path, "rb");
@@ -3285,7 +3285,7 @@ copy_store(zipy_archive_t   *__restrict zipy,
   if (already_written > len)
     return ZIPY_ZIP_ESIZE;
 
-  if (!reserve_bytes(&zipy->copy_buf, &zipy->copy_cap, ZIP_IO_CHUNK))
+  if (!reserve_bytes(&zipy->copy_buf, &zipy->copy_cap, chunk_size(len - already_written)))
     return ZIPY_ZIP_ERR;
 
   fp        = zipy->fp;
@@ -3420,9 +3420,12 @@ inflate_raw_streamed(zipy_archive_t   *__restrict zipy,
     outbuf = zipy->inflate_out;
   }
 
+  n = compressed_size > ZIP_INFLATE_STREAM_CHUNK
+        ? ZIP_INFLATE_STREAM_CHUNK
+        : (size_t)compressed_size;
   if (!reserve_bytes(&zipy->inflate_in,
                      &zipy->inflate_in_cap,
-                     ZIP_INFLATE_STREAM_CHUNK)) {
+                     n)) {
     ret = ZIPY_ZIP_ERR;
     goto done;
   }
