@@ -256,8 +256,8 @@ func unsafeNamesCannotMoveExistingFilesDuringConflictPreparation() throws {
 
     let handle = try #require(archive.withUnsafeFileSystemRepresentation { zipy_open($0) })
     defer { zipy_close(handle) }
-    for all in [false, true] {
-      let output = root.appendingPathComponent("out-\(unsafe.contains("\\"))-\(all)")
+    for mode in 0..<3 {
+      let output = root.appendingPathComponent("out-\(unsafe.contains("\\"))-\(mode)")
       try FileManager.default.createDirectory(at: output, withIntermediateDirectories: true)
       try Data("existing entry".utf8).write(to: output.appendingPathComponent("marker.txt"))
       try original.write(to: victim)
@@ -265,8 +265,14 @@ func unsafeNamesCannotMoveExistingFilesDuringConflictPreparation() throws {
       zipy_extract_options_init(&options)
       options.jobs = 1
 
-      let result = output.withUnsafeFileSystemRepresentation {
-        all ? zipy_extract_all(handle, $0, &options) : zipy_extract_to(handle, 0, $0, &options)
+      let result = output.withUnsafeFileSystemRepresentation { destination in
+        if mode == 2 {
+          return archive.withUnsafeFileSystemRepresentation {
+            zipy_extract_stream($0, destination, &options)
+          }
+        }
+        return mode == 1 ? zipy_extract_all(handle, destination, &options)
+                         : zipy_extract_to(handle, 0, destination, &options)
       }
       #expect(result == ZIPY_ZIP_EFILE.rawValue)
       #expect((try? Data(contentsOf: victim)) == original)

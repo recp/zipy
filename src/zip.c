@@ -7343,7 +7343,8 @@ zipy_extract_stream(const char                   *__restrict path,
                           nameLen,
                           &info.safe_name,
                           &info.name_has_backslash,
-                          &info.name_parent_len)) {
+                          &info.name_parent_len)
+        || !info.safe_name) {
       ret = ZIPY_ZIP_EFILE;
       break;
     }
