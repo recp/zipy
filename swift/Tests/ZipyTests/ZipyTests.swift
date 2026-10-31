@@ -1198,8 +1198,10 @@ func encryptedExtractionGrowsInputBuffers() throws {
     large.append(contentsOf: block)
   }
 
+  let medium = Data(large.prefix(256 * 1024))
   try FileManager.default.createDirectory(at: source, withIntermediateDirectories: true)
   try small.write(to: source.appendingPathComponent("small.bin"))
+  try medium.write(to: source.appendingPathComponent("medium.bin"))
   try large.write(to: source.appendingPathComponent("large.bin"))
 
   for stored in [false, true] {
@@ -1223,7 +1225,7 @@ func encryptedExtractionGrowsInputBuffers() throws {
 
     try password.withCString { passwordC in
       options.password = passwordC
-      for index in indices {
+      for index in indices + indices.reversed() {
         let result = output.withUnsafeFileSystemRepresentation {
           zipy_extract_to(handle, index, $0, &options)
         }
@@ -1232,6 +1234,7 @@ func encryptedExtractionGrowsInputBuffers() throws {
     }
 
     #expect(try Data(contentsOf: output.appendingPathComponent("small.bin")) == small)
+    #expect(try Data(contentsOf: output.appendingPathComponent("medium.bin")) == medium)
     #expect(try Data(contentsOf: output.appendingPathComponent("large.bin")) == large)
   }
 }

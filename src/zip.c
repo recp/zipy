@@ -3419,7 +3419,7 @@ inflate_raw_streamed(zipy_archive_t   *__restrict zipy,
   uint64_t  remaining;
   size_t    outlen, n;
   uint32_t  crc, produced;
-  int       mapped_out, track_output, zret, ret;
+  int       mapped_out, track_output, whole_input, zret, ret;
 
   crc          = 0;
   produced     = 0;
@@ -3434,7 +3434,8 @@ inflate_raw_streamed(zipy_archive_t   *__restrict zipy,
   if (compressed_size > UINT32_MAX || uncompressed_size > UINT32_MAX)
     return ZIPY_ZIP_EUNSUP;
 
-  outlen = uncompressed_size > 0 ? (size_t)uncompressed_size : 1u;
+  whole_input = compressed_size <= ZIP_INFLATE_STREAM_CHUNK;
+  outlen      = uncompressed_size > 0 ? (size_t)uncompressed_size : 1u;
   memset(&outmap, 0, sizeof(outmap));
   if (uncompressed_size >= ZIP_OUTPUT_MMAP_MIN
       && map_output(out, uncompressed_size, &outmap)) {
@@ -3484,8 +3485,18 @@ inflate_raw_streamed(zipy_archive_t   *__restrict zipy,
     if (dec)
       dec_decrypt(dec, inbuf, n);
 
-    zret = infl_stream(zipy->inflate_stream, inbuf, (uint32_t)n);
-    if (zret < UNZ_OK) {
+    /* the complete input stays valid until the next decoder reset. */
+    if (whole_input) {
+      if (infl_set_input(zipy->inflate_stream, inbuf, (uint32_t)n) != UNZ_OK) {
+        ret = ZIPY_ZIP_ERR;
+        goto done;
+      }
+
+      zret = infl(zipy->inflate_stream);
+    } else {
+      zret = infl_stream(zipy->inflate_stream, inbuf, (uint32_t)n);
+    }
+    if (zret < UNZ_OK || (whole_input && zret != UNZ_OK)) {
       ret = ZIPY_ZIP_EINFLATE;
       goto done;
     }
@@ -5469,6 +5480,9 @@ extract_deflate_data_descriptor(zipy_archive_t   *__restrict zipy,
     goto done;
   }
 
+  if (zipy->inflate_stream)
+    infl_reset(zipy->inflate_stream, outmap.data, (uint32_t)output_cap, 0);
+
   if (!reserve_bytes(&zipy->inflate_in,
                      &zipy->inflate_in_cap,
                      ZIP_INFLATE_STREAM_CHUNK)) {
@@ -5494,8 +5508,6 @@ extract_deflate_data_descriptor(zipy_archive_t   *__restrict zipy,
       ret = ZIPY_ZIP_ERR;
       goto done;
     }
-  } else {
-    infl_reset(zipy->inflate_stream, outmap.data, (uint32_t)output_cap, 0);
   }
 
   if (!dec_ptr && seek_set(zipy->fp, info->data_offset) != 0) {
