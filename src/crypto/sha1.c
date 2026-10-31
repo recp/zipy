@@ -156,6 +156,23 @@ sha1_compress(sha1_t *ctx, const uint8_t block[SHA1_BLOCK_SIZE]) {
 #endif
 }
 
+static void
+hmac_sha1_digest20(const hmac_sha1_t *seed, uint8_t block[SHA1_BLOCK_SIZE]) {
+  sha1_t   state;
+  unsigned i;
+
+  /* complete padded blocks need only the five chaining words. */
+  memcpy(state.h, seed->inner.h, sizeof(state.h));
+  sha1_compress(&state, block);
+  for (i = 0; i < 5; i++)
+    store_be32(block + i * 4u, state.h[i]);
+
+  memcpy(state.h, seed->outer.h, sizeof(state.h));
+  sha1_compress(&state, block);
+  for (i = 0; i < 5; i++)
+    store_be32(block + i * 4u, state.h[i]);
+}
+
 void
 sha1_init(sha1_t *ctx) {
   ctx->h[0] = 0x67452301u;
@@ -282,7 +299,7 @@ pbkdf2_hmac_sha1(const uint8_t *password,
                  uint8_t       *out,
                  size_t         out_len) {
   hmac_sha1_t seed;
-  uint8_t     u[SHA1_SIZE];
+  uint8_t     u[SHA1_BLOCK_SIZE];
   uint8_t     t[SHA1_SIZE];
   uint8_t     counter[4];
   size_t      done = 0, n, i;
@@ -296,6 +313,13 @@ pbkdf2_hmac_sha1(const uint8_t *password,
 
   /* the password pads are identical for every HMAC invocation. */
   hmac_sha1_init(&seed, password, password_len);
+
+  if (iterations > 1) {
+    /* every PRF after U1 hashes a digest after its 64-byte key pad. */
+    memset(u + SHA1_SIZE, 0, sizeof(u) - SHA1_SIZE);
+    u[SHA1_SIZE] = 0x80u;
+    store_be64(u + SHA1_BLOCK_SIZE - 8u, (SHA1_BLOCK_SIZE + SHA1_SIZE) * 8u);
+  }
 
   while (done < out_len) {
     /* reuse one scratch HMAC state for the current output block. */
@@ -313,9 +337,7 @@ pbkdf2_hmac_sha1(const uint8_t *password,
     memcpy(t, u, sizeof(t));
 
     for (iter = 1; iter < iterations; iter++) {
-      hmac = seed;
-      hmac_sha1_update(&hmac, u, sizeof(u));
-      hmac_sha1_final(&hmac, u);
+      hmac_sha1_digest20(&seed, u);
 
       for (i = 0; i < sizeof(t); i++) {
         t[i] ^= u[i];
