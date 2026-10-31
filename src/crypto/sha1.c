@@ -18,6 +18,15 @@
 
 #include <string.h>
 
+#if defined(__ARM_FEATURE_SHA2) && defined(__BYTE_ORDER__) \
+    && __BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__
+#  include <arm_neon.h>
+#  define ZIPY_HAVE_ARM_SHA1 1
+#else
+#  define ZIPY_HAVE_ARM_SHA1 0
+#endif
+
+#if !ZIPY_HAVE_ARM_SHA1
 static uint32_t
 rol32(uint32_t x, unsigned n) {
   return (x << n) | (x >> (32u - n));
@@ -30,6 +39,7 @@ load_be32(const uint8_t *p) {
          | ((uint32_t)p[2] << 8)
          | ((uint32_t)p[3]);
 }
+#endif
 
 static void
 store_be32(uint8_t *p, uint32_t x) {
@@ -53,6 +63,52 @@ store_be64(uint8_t *p, uint64_t x) {
 
 static void
 sha1_compress(sha1_t *ctx, const uint8_t block[SHA1_BLOCK_SIZE]) {
+#if ZIPY_HAVE_ARM_SHA1
+  uint32x4_t w[4], abcd, initial, wk;
+  uint32_t   e, next_e;
+  unsigned   i, j;
+
+  for (i = 0; i < 4; i++)
+    w[i] = vreinterpretq_u32_u8(vrev32q_u8(vld1q_u8(block + i * 16u)));
+
+  abcd    = vld1q_u32(ctx->h);
+  e       = ctx->h[4];
+  initial = abcd;
+
+  /* constant ring indices keep the message schedule in registers. */
+#if defined(__clang__)
+#  pragma clang loop unroll(full)
+#endif
+  for (i = 0; i < 20; i++) {
+    j = i & 3u;
+
+    /* after four rounds, E is the previous A rotated by 30 bits. */
+    next_e = vsha1h_u32(vgetq_lane_u32(abcd, 0));
+
+    if (i < 5) {
+      wk   = vaddq_u32(w[j], vdupq_n_u32(0x5A827999u));
+      abcd = vsha1cq_u32(abcd, e, wk);
+    } else if (i < 10) {
+      wk   = vaddq_u32(w[j], vdupq_n_u32(0x6ED9EBA1u));
+      abcd = vsha1pq_u32(abcd, e, wk);
+    } else if (i < 15) {
+      wk   = vaddq_u32(w[j], vdupq_n_u32(0x8F1BBCDCu));
+      abcd = vsha1mq_u32(abcd, e, wk);
+    } else {
+      wk   = vaddq_u32(w[j], vdupq_n_u32(0xCA62C1D6u));
+      abcd = vsha1pq_u32(abcd, e, wk);
+    }
+    e = next_e;
+
+    if (i < 16) {
+      w[j] = vsha1su0q_u32(w[j], w[(j + 1u) & 3u], w[(j + 2u) & 3u]);
+      w[j] = vsha1su1q_u32(w[j], w[(j + 3u) & 3u]);
+    }
+  }
+
+  vst1q_u32(ctx->h, vaddq_u32(abcd, initial));
+  ctx->h[4] += e;
+#else
   uint32_t w[80];
   uint32_t a, b, c, d, e, f, k, tmp;
   unsigned i;
@@ -97,6 +153,7 @@ sha1_compress(sha1_t *ctx, const uint8_t block[SHA1_BLOCK_SIZE]) {
   ctx->h[2] += c;
   ctx->h[3] += d;
   ctx->h[4] += e;
+#endif
 }
 
 void
