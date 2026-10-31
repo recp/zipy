@@ -3802,25 +3802,25 @@ read_store_mem(FILE      *fp,
 }
 
 static int
-inflate_raw_mem(FILE      *fp,
-                uint64_t   compressed_size,
-                uint64_t   uncompressed_size,
-                uint32_t   expectedCrc,
-                int        check_crc,
-                dec_t     *dec,
-                uint8_t  **out,
-                size_t    *out_len) {
-  uint8_t *inbuf, *outbuf;
+inflate_raw_mem(zipy_archive_t *zipy,
+                const uint8_t  *src,
+                uint64_t        compressed_size,
+                uint64_t        uncompressed_size,
+                uint32_t        expectedCrc,
+                int             check_crc,
+                dec_t          *dec,
+                uint8_t       **out,
+                size_t         *out_len) {
+  uint8_t *inbuf, *outbuf = NULL;
+  FILE    *fp;
   size_t   inlen, outlen;
   int      ret;
-
-  inbuf  = NULL;
-  outbuf = NULL;
 
   *out     = NULL;
   *out_len = 0;
 
-  if (!fp)
+  fp = zipy->fp;
+  if (!src && !fp)
     return ZIPY_ZIP_EFILE;
 
   if (compressed_size > UINT32_MAX || uncompressed_size > UINT32_MAX)
@@ -3831,32 +3831,53 @@ inflate_raw_mem(FILE      *fp,
       || outlen == SIZE_MAX)
     return ZIPY_ZIP_EUNSUP;
 
-  inbuf  = malloc(inlen > 0 ? inlen : 1u);
   outbuf = malloc(outlen + 1u);
-  if (!inbuf || !outbuf) {
+  if (!outbuf) {
     ret = ZIPY_ZIP_ERR;
     goto done;
   }
 
-  if (inlen > 0 && fread(inbuf, 1, inlen, fp) != inlen) {
-    ret = ZIPY_ZIP_EFILE;
-    goto done;
-  }
+  /* mapped input and worker-owned decode state avoid per-link setup. */
+  if (!src) {
+    if (!reserve_bytes(&zipy->inflate_in, &zipy->inflate_in_cap, inlen > 0 ? inlen : 1u)) {
+      ret = ZIPY_ZIP_ERR;
+      goto done;
+    }
 
-  if (dec && inlen > 0)
-    dec_decrypt(dec, inbuf, inlen);
+    inbuf = zipy->inflate_in;
+    if (inlen > 0 && fread(inbuf, 1, inlen, fp) != inlen) {
+      ret = ZIPY_ZIP_EFILE;
+      goto done;
+    }
+
+    if (dec && inlen > 0)
+      dec_decrypt(dec, inbuf, inlen);
+    src = inbuf;
+  }
 
   ret = dec_finish(dec, fp);
   if (ret != ZIPY_ZIP_OK)
     goto done;
 
-  if (infl_buf(inbuf,
-               (uint32_t)compressed_size,
-               outbuf,
-               (uint32_t)uncompressed_size,
-               0)
-      != UNZ_OK) {
+  if (!zipy->inflate_stream) {
+    zipy->inflate_stream = infl_init(outbuf, (uint32_t)uncompressed_size, 0);
+    if (!zipy->inflate_stream) {
+      ret = ZIPY_ZIP_ERR;
+      goto done;
+    }
+  } else {
+    infl_reset(zipy->inflate_stream, outbuf, (uint32_t)uncompressed_size, 0);
+  }
+
+  infl_include(zipy->inflate_stream, src, (uint32_t)compressed_size);
+  if (infl(zipy->inflate_stream) != UNZ_OK) {
     ret = ZIPY_ZIP_EINFLATE;
+    goto done;
+  }
+
+  if (infl_output_pos(zipy->inflate_stream) != (uint32_t)uncompressed_size
+      || infl_input_pos(zipy->inflate_stream) != (uint32_t)compressed_size) {
+    ret = ZIPY_ZIP_ESIZE;
     goto done;
   }
 
@@ -3873,7 +3894,6 @@ inflate_raw_mem(FILE      *fp,
 
 done:
   free(outbuf);
-  free(inbuf);
   return ret;
 }
 
@@ -5810,12 +5830,8 @@ extract_entry(zipy_archive_t   *__restrict zipy,
                              &target,
                              &target_len);
     } else {
-      /* the mapped path has not positioned the stream for this reader. */
-      if (mapped_data
-          && (!zipy->fp || seek_set(zipy->fp, dataOffset) != 0))
-        return ZIPY_ZIP_EFILE;
-
-      ret = inflate_raw_mem(zipy->fp,
+      ret = inflate_raw_mem(zipy,
+                            mapped_data,
                             compressed_size,
                             info->entry.uncompressed_size,
                             info->entry.crc32,

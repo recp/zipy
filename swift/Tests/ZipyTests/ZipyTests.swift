@@ -515,13 +515,18 @@ func deflatedSymlinksReadTheirOwnPayload() throws {
     let original = try Data(contentsOf: archive)
     let central = try #require(original.range(of: Data([0x50, 0x4b, 0x01, 0x02]))).lowerBound
 
-    for corrupt in password == nil ? [false, true] : [false] {
+    for corruption in password == nil ? [0, 1, 2] : [0] {
       var data = original
       var mode = UInt32(0o120777 << 16).littleEndian
       withUnsafeBytes(of: &mode) {
         data.replaceSubrange((central + 38)..<(central + 42), with: $0)
       }
-      if corrupt { data[central + 16] ^= 1 }
+      if corruption == 1 {
+        data[central + 16] ^= 1
+      } else if corruption == 2 {
+        data[22] += 1
+        data[central + 24] += 1
+      }
       try data.write(to: archive)
 
       let handle = try #require(archive.withUnsafeFileSystemRepresentation { zipy_open($0) })
@@ -531,11 +536,12 @@ func deflatedSymlinksReadTheirOwnPayload() throws {
       try #require(entry.pointee.method == 8)
 
       for all in [false, true] {
-        let output = root.appendingPathComponent("out-\(password != nil)-\(corrupt)-\(all)")
+        let output = root.appendingPathComponent("out-\(password != nil)-\(corruption)-\(all)")
         try FileManager.default.createDirectory(at: output, withIntermediateDirectories: true)
 
         var options = zipy_extract_options_t()
         zipy_extract_options_init(&options)
+        if corruption == 2 { options.flags |= ZIPY_EXTRACT_NO_CRC.rawValue }
 
         let extract: (UnsafePointer<CChar>?) -> Int32 = { key in
           options.password = key
@@ -546,9 +552,15 @@ func deflatedSymlinksReadTheirOwnPayload() throws {
         }
         let result = password.map { $0.withCString(extract) } ?? extract(nil)
 
-        #expect(result == (corrupt ? ZIPY_ZIP_ECRC.rawValue : ZIPY_ZIP_OK.rawValue))
+        let expected: Int32
+        switch corruption {
+        case 1: expected = ZIPY_ZIP_ECRC.rawValue
+        case 2: expected = ZIPY_ZIP_ESIZE.rawValue
+        default: expected = ZIPY_ZIP_OK.rawValue
+        }
+        #expect(result == expected)
         let link = output.appendingPathComponent("link")
-        if corrupt {
+        if corruption != 0 {
           #expect((try? FileManager.default.destinationOfSymbolicLink(atPath: link.path)) == nil)
         } else {
           #expect(try FileManager.default.destinationOfSymbolicLink(atPath: link.path) == target)
