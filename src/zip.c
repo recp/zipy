@@ -5810,6 +5810,11 @@ extract_entry(zipy_archive_t   *__restrict zipy,
                              &target,
                              &target_len);
     } else {
+      /* the mapped path has not positioned the stream for this reader. */
+      if (mapped_data
+          && (!zipy->fp || seek_set(zipy->fp, dataOffset) != 0))
+        return ZIPY_ZIP_EFILE;
+
       ret = inflate_raw_mem(zipy->fp,
                             compressed_size,
                             info->entry.uncompressed_size,

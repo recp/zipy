@@ -498,6 +498,67 @@ func extractionPreservesFileAndDirectoryMetadata() throws {
 }
 
 @Test
+func deflatedSymlinksReadTheirOwnPayload() throws {
+  let root = try temporaryDirectory()
+  defer { try? FileManager.default.removeItem(at: root) }
+
+  let source = root.appendingPathComponent("source", isDirectory: true)
+  let target = String(repeating: "nested/", count: 24) + "payload.txt"
+
+  try FileManager.default.createDirectory(at: source, withIntermediateDirectories: true)
+  try Data(target.utf8).write(to: source.appendingPathComponent("link"))
+
+  for password in [nil, "secret"] as [String?] {
+    let archive = root.appendingPathComponent("link-\(password != nil).zip")
+    try runZip(in: source, archive: archive, password: password)
+
+    let original = try Data(contentsOf: archive)
+    let central = try #require(original.range(of: Data([0x50, 0x4b, 0x01, 0x02]))).lowerBound
+
+    for corrupt in password == nil ? [false, true] : [false] {
+      var data = original
+      var mode = UInt32(0o120777 << 16).littleEndian
+      withUnsafeBytes(of: &mode) {
+        data.replaceSubrange((central + 38)..<(central + 42), with: $0)
+      }
+      if corrupt { data[central + 16] ^= 1 }
+      try data.write(to: archive)
+
+      let handle = try #require(archive.withUnsafeFileSystemRepresentation { zipy_open($0) })
+      defer { zipy_close(handle) }
+
+      let entry = try #require(zipy_entry(handle, 0))
+      try #require(entry.pointee.method == 8)
+
+      for all in [false, true] {
+        let output = root.appendingPathComponent("out-\(password != nil)-\(corrupt)-\(all)")
+        try FileManager.default.createDirectory(at: output, withIntermediateDirectories: true)
+
+        var options = zipy_extract_options_t()
+        zipy_extract_options_init(&options)
+
+        let extract: (UnsafePointer<CChar>?) -> Int32 = { key in
+          options.password = key
+          return output.withUnsafeFileSystemRepresentation {
+            all ? zipy_extract_all(handle, $0, &options)
+                : zipy_extract_to(handle, 0, $0, &options)
+          }
+        }
+        let result = password.map { $0.withCString(extract) } ?? extract(nil)
+
+        #expect(result == (corrupt ? ZIPY_ZIP_ECRC.rawValue : ZIPY_ZIP_OK.rawValue))
+        let link = output.appendingPathComponent("link")
+        if corrupt {
+          #expect((try? FileManager.default.destinationOfSymbolicLink(atPath: link.path)) == nil)
+        } else {
+          #expect(try FileManager.default.destinationOfSymbolicLink(atPath: link.path) == target)
+        }
+      }
+    }
+  }
+}
+
+@Test
 func parallelAtomicExtractionKeepsSharedPartDirectories() throws {
   let root = try temporaryDirectory()
   defer { try? FileManager.default.removeItem(at: root) }
