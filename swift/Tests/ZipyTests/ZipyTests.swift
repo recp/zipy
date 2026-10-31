@@ -725,6 +725,51 @@ func parallelAtomicExtractionKeepsSharedPartDirectories() throws {
 }
 
 @Test
+func atomicCleanupPreservesArchiveZipyDirectory() throws {
+  let root = try temporaryDirectory()
+  defer { try? FileManager.default.removeItem(at: root) }
+
+  let source = root.appendingPathComponent("source", isDirectory: true)
+  let archive = root.appendingPathComponent("cleanup.zip")
+  let names = ["top-0", "top-1"] + ["a/deep", "b/deep", "Örnek/deep"].flatMap { parent in
+    (0..<16).map { "\(parent)/file-\($0).txt" }
+  }
+
+  try FileManager.default.createDirectory(at: source.appendingPathComponent(".zipy"),
+                                          withIntermediateDirectories: true)
+  for name in names {
+    let file = source.appendingPathComponent(name)
+    try FileManager.default.createDirectory(at: file.deletingLastPathComponent(),
+                                            withIntermediateDirectories: true)
+    try Data((name + " payload").utf8).write(to: file)
+  }
+  try runZip(in: source, archive: archive)
+
+  let handle = try #require(archive.withUnsafeFileSystemRepresentation { zipy_open($0) })
+  defer { zipy_close(handle) }
+
+  for jobs in [1, 4] {
+    let output = root.appendingPathComponent("output-\(jobs)", isDirectory: true)
+    var options = zipy_extract_options_t()
+    zipy_extract_options_init(&options)
+    options.jobs        = numericCast(jobs)
+    options.flags       = ZIPY_EXTRACT_ATOMIC.rawValue
+    options.on_conflict = ZIPY_CONFLICT_OVERWRITE
+
+    #expect(output.withUnsafeFileSystemRepresentation {
+      zipy_extract_all(handle, $0, &options)
+    } == ZIPY_ZIP_OK.rawValue)
+
+    for name in names {
+      #expect(try Data(contentsOf: output.appendingPathComponent(name)) == Data((name + " payload").utf8))
+    }
+    #expect(try FileManager.default.contentsOfDirectory(
+      atPath: output.appendingPathComponent(".zipy").path
+    ).isEmpty)
+  }
+}
+
+@Test
 func cancelledParallelAtomicExtractionRemovesPartialPayloads() throws {
   let root = try temporaryDirectory()
   defer { try? FileManager.default.removeItem(at: root) }

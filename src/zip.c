@@ -2233,16 +2233,23 @@ replace_file(const char *src, const char *dst) {
   return 0;
 }
 
-static void
+static int
 remove_empty_dir(const char *path) {
-  if (!path || !*path)
-    return;
+  int ret;
 
+  if (!path || !*path)
+    return 0;
+
+  do {
 #if defined(_WIN32)
-  (void)_rmdir(path);
+    ret = _rmdir(path);
 #else
-  (void)rmdir(path);
+    ret = rmdir(path);
 #endif
+  } while (ret != 0 && errno == EINTR);
+
+  /* other part directories may still keep an ancestor nonempty. */
+  return ret == 0 || errno == ENOENT || errno == ENOTEMPTY || errno == EEXIST;
 }
 
 static void
@@ -2337,18 +2344,19 @@ resume_part_path(zipy_archive_t     *__restrict zipy,
   return zipy->part_buf.data;
 }
 
-static void
+static int
 cleanup_empty_parts_dirs(zipy_archive_t *__restrict zipy,
                          const char     *__restrict destdir,
                          const char     *__restrict partpath) {
-  char  *p, *last;
+  char  *p;
   size_t stopLen, len;
+  int    ok = 1;
 
   if (!zipy || !destdir || !partpath)
-    return;
+    return 0;
 
   if (!path_buf_set_dir(&zipy->state_buf, destdir, &stopLen))
-    return;
+    return 0;
 
   if (zipy->has_root_zipy) {
     if (!path_buf_append_name(&zipy->state_buf,
@@ -2356,35 +2364,33 @@ cleanup_empty_parts_dirs(zipy_archive_t *__restrict zipy,
                               ".zipy",
                               5u,
                               0))
-      return;
+      return 0;
 
     stopLen = strlen(zipy->state_buf.data);
   }
 
   len = strlen(partpath);
   if (len <= stopLen || strncmp(partpath, zipy->state_buf.data, stopLen) != 0)
-    return;
+    return 0;
 
   if (!path_buf_reserve(&zipy->parent_buf, len + 1u))
-    return;
+    return 0;
 
   memcpy(zipy->parent_buf.data, partpath, len + 1u);
-  for (;;) {
-    last = NULL;
-    for (p = zipy->parent_buf.data; *p; p++) {
-      if (is_fs_sep(*p))
-        last = p;
-    }
-    if (!last)
-      return;
+  for (p = zipy->parent_buf.data + len; p > zipy->parent_buf.data;) {
+    p--;
+    if (!is_fs_sep(*p))
+      continue;
 
-    *last = '\0';
-    len   = strlen(zipy->parent_buf.data);
-    if (len <= stopLen)
-      return;
+    *p = '\0';
+    if ((size_t)(p - zipy->parent_buf.data) <= stopLen)
+      return ok;
 
-    remove_empty_dir(zipy->parent_buf.data);
+    if (!remove_empty_dir(zipy->parent_buf.data))
+      ok = 0;
   }
+
+  return ok;
 }
 
 static void
@@ -6630,8 +6636,10 @@ static void
 cleanup_extract_all_parts(zipy_archive_t      *zipy,
                           const char          *destdir,
                           const unsigned char *skip) {
-  entry_info_t *info;
+  entry_info_t *info, *previous;
   size_t        i, prefixLen;
+
+  previous = NULL;
 
   if (!path_buf_set_dir(&zipy->part_buf, destdir, &prefixLen)
       || !path_buf_append_name(&zipy->part_buf, prefixLen, ".zipy/parts/", 12u, 0))
@@ -6646,6 +6654,11 @@ cleanup_extract_all_parts(zipy_archive_t      *zipy,
         || is_internal_state_name(info->entry.name, info->entry.name_len))
       continue;
 
+    /* adjacent files share the same already-cleaned directory chain. */
+    if (previous && previous->name_parent_len == info->name_parent_len
+        && memcmp(previous->entry.name, info->entry.name, info->name_parent_len) == 0)
+      continue;
+
     if (!path_buf_append_name(&zipy->part_buf,
                               prefixLen,
                               info->entry.name,
@@ -6654,7 +6667,8 @@ cleanup_extract_all_parts(zipy_archive_t      *zipy,
         || !path_buf_append_suffix(&zipy->part_buf, ".part"))
       return;
 
-    cleanup_empty_parts_dirs(zipy, destdir, zipy->part_buf.data);
+    /* failed cleanup must be retried by the next entry in the same parent. */
+    previous = cleanup_empty_parts_dirs(zipy, destdir, zipy->part_buf.data) ? info : NULL;
   }
 
   zipy->parent_cache_valid = 0;
