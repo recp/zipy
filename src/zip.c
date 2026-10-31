@@ -2899,14 +2899,14 @@ archive_cleanup(zipy_archive_t *zipy) {
   path_buf_free(&zipy->state_buf);
   free(zipy->copy_buf);
   zipy->copy_buf = NULL;
-  free(zipy->inflate_in);
-  zipy->inflate_in = NULL;
-  free(zipy->inflate_out);
-  zipy->inflate_out = NULL;
   if (zipy->inflate_stream) {
     infl_destroy(zipy->inflate_stream);
     zipy->inflate_stream = NULL;
   }
+  free(zipy->inflate_in);
+  zipy->inflate_in = NULL;
+  free(zipy->inflate_out);
+  zipy->inflate_out = NULL;
   unmap_archive(zipy);
   if (zipy->fp) {
     fclose(zipy->fp);
@@ -3441,6 +3441,17 @@ inflate_raw_streamed(zipy_archive_t   *__restrict zipy,
     outbuf = zipy->inflate_out;
   }
 
+  /* release the previous input reference before reusing its buffer. */
+  if (!zipy->inflate_stream) {
+    zipy->inflate_stream = infl_init(outbuf, (uint32_t)uncompressed_size, 0);
+    if (!zipy->inflate_stream) {
+      ret = ZIPY_ZIP_ERR;
+      goto done;
+    }
+  } else {
+    infl_reset(zipy->inflate_stream, outbuf, (uint32_t)uncompressed_size, 0);
+  }
+
   n = compressed_size > ZIP_INFLATE_STREAM_CHUNK
         ? ZIP_INFLATE_STREAM_CHUNK
         : (size_t)compressed_size;
@@ -3452,16 +3463,6 @@ inflate_raw_streamed(zipy_archive_t   *__restrict zipy,
   }
 
   inbuf = zipy->inflate_in;
-
-  if (!zipy->inflate_stream) {
-    zipy->inflate_stream = infl_init(outbuf, (uint32_t)uncompressed_size, 0);
-    if (!zipy->inflate_stream) {
-      ret = ZIPY_ZIP_ERR;
-      goto done;
-    }
-  } else {
-    infl_reset(zipy->inflate_stream, outbuf, (uint32_t)uncompressed_size, 0);
-  }
 
   remaining = compressed_size;
   while (remaining > 0) {
@@ -3571,7 +3572,7 @@ inflate_raw(zipy_archive_t   *__restrict zipy,
   uint64_t       remaining;
   size_t         n;
   uint32_t       crc;
-  int            mapped_out, zret, ret;
+  int            mapped_out, whole_input, zret, ret;
   uint32_t       produced;
 
   inbuf = NULL;
@@ -3597,6 +3598,7 @@ inflate_raw(zipy_archive_t   *__restrict zipy,
 
   inlen  = compressed_size > 0 ? (size_t)compressed_size : 1;
   outlen = uncompressed_size > 0 ? (size_t)uncompressed_size : 1;
+  whole_input = compressed_size <= ZIP_INFLATE_STREAM_CHUNK;
 
   memset(&outmap, 0, sizeof(outmap));
   fp = zipy->fp;
@@ -3636,8 +3638,16 @@ inflate_raw(zipy_archive_t   *__restrict zipy,
             ? ZIP_INFLATE_STREAM_CHUNK
             : (size_t)remaining;
 
-      zret = infl_stream(zipy->inflate_stream, src, (uint32_t)n);
-      if (zret < UNZ_OK) {
+      if (whole_input) {
+        if (infl_set_input(zipy->inflate_stream, src, (uint32_t)n) != UNZ_OK) {
+          ret = ZIPY_ZIP_ERR;
+          goto done;
+        }
+        zret = infl(zipy->inflate_stream);
+      } else {
+        zret = infl_stream(zipy->inflate_stream, src, (uint32_t)n);
+      }
+      if (zret < UNZ_OK || (whole_input && zret != UNZ_OK)) {
         ret = ZIPY_ZIP_EINFLATE;
         goto done;
       }
@@ -3737,7 +3747,10 @@ inflate_raw(zipy_archive_t   *__restrict zipy,
     infl_reset(zipy->inflate_stream, outbuf, (uint32_t)uncompressed_size, 0);
   }
 
-  infl_include(zipy->inflate_stream, src, (uint32_t)compressed_size);
+  if (infl_set_input(zipy->inflate_stream, src, (uint32_t)compressed_size) != UNZ_OK) {
+    ret = ZIPY_ZIP_ERR;
+    goto done;
+  }
   if (infl(zipy->inflate_stream) != UNZ_OK) {
     ret = ZIPY_ZIP_EINFLATE;
     goto done;
@@ -3858,6 +3871,17 @@ inflate_raw_mem(zipy_archive_t *zipy,
     goto done;
   }
 
+  /* release the previous input reference before reusing its buffer. */
+  if (!zipy->inflate_stream) {
+    zipy->inflate_stream = infl_init(outbuf, (uint32_t)uncompressed_size, 0);
+    if (!zipy->inflate_stream) {
+      ret = ZIPY_ZIP_ERR;
+      goto done;
+    }
+  } else {
+    infl_reset(zipy->inflate_stream, outbuf, (uint32_t)uncompressed_size, 0);
+  }
+
   /* mapped input and worker-owned decode state avoid per-link setup. */
   if (!src) {
     if (!reserve_bytes(&zipy->inflate_in, &zipy->inflate_in_cap, inlen > 0 ? inlen : 1u)) {
@@ -3880,17 +3904,10 @@ inflate_raw_mem(zipy_archive_t *zipy,
   if (ret != ZIPY_ZIP_OK)
     goto done;
 
-  if (!zipy->inflate_stream) {
-    zipy->inflate_stream = infl_init(outbuf, (uint32_t)uncompressed_size, 0);
-    if (!zipy->inflate_stream) {
-      ret = ZIPY_ZIP_ERR;
-      goto done;
-    }
-  } else {
-    infl_reset(zipy->inflate_stream, outbuf, (uint32_t)uncompressed_size, 0);
+  if (infl_set_input(zipy->inflate_stream, src, (uint32_t)compressed_size) != UNZ_OK) {
+    ret = ZIPY_ZIP_ERR;
+    goto done;
   }
-
-  infl_include(zipy->inflate_stream, src, (uint32_t)compressed_size);
   if (infl(zipy->inflate_stream) != UNZ_OK) {
     ret = ZIPY_ZIP_EINFLATE;
     goto done;
