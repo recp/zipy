@@ -140,12 +140,16 @@ func largePayloadChecksumsRejectCorruption() throws {
 
   let source  = root.appendingPathComponent("source", isDirectory: true)
   let archive = root.appendingPathComponent("checksums.zip")
-  let sizes   = [49152, 49153, 98304, 98311]
+  let sizes   = [49152, 49153, 98304, 98311,
+                 3071, 3072, 3073, 8191, 8192, 8193,
+                 16383, 16384, 16385, 32767, 32768, 32769]
   var payloads: [Data] = []
 
   try FileManager.default.createDirectory(at: source, withIntermediateDirectories: true)
   for (index, size) in sizes.enumerated() {
-    let data = Data((0..<size).map { UInt8(truncatingIfNeeded: $0 * 17) })
+    let data = index.isMultiple(of: 2)
+      ? Data(repeating: 0, count: size)
+      : Data((0..<size).map { UInt8(truncatingIfNeeded: $0 * 17) })
     try data.write(to: source.appendingPathComponent("file-\(index).bin"))
     payloads.append(data)
   }

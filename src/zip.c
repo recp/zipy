@@ -91,7 +91,8 @@
 #define ZIP64_LOCATOR_FIXED 20u
 #define ZIP_MAX_EOCD_SEARCH (ZIP_EOCD_FIXED + 65535u)
 
-#define ZIP_CRC_SEGMENT (16u * 1024u)
+#define ZIP_CRC_SEGMENT       (16u * 1024u)
+#define ZIP_CRC_SMALL_SEGMENT (1024u)
 
 #define ZIP_BUFFER_MIN             (4u * 1024u)
 #define ZIP_IO_CHUNK               (256u * 1024u)
@@ -341,6 +342,28 @@ static const uint32_t crc32_base_table[256] = {
 
 #if ZIPY_HAVE_ARM_CRC32
 /* columns advance a raw CRC state through zero bytes, polynomial 0xedb88320. */
+static const uint32_t crc32_shift1k[32] = {
+  0xF891F16Fu, 0x2A52E49Fu, 0x54A5C93Eu, 0xA94B927Cu,
+  0x89E622B9u, 0xC8BD4333u, 0x4A0B8027u, 0x9417004Eu,
+  0xF35F06DDu, 0x3DCF0BFBu, 0x7B9E17F6u, 0xF73C2FECu,
+  0x35095999u, 0x6A12B332u, 0xD4256664u, 0x733BCA89u,
+  0xE6779512u, 0x179E2C65u, 0x2F3C58CAu, 0x5E78B194u,
+  0xBCF16328u, 0xA293C011u, 0x9E568663u, 0xE7DC0A87u,
+  0x14C9134Fu, 0x2992269Eu, 0x53244D3Cu, 0xA6489A78u,
+  0x97E032B1u, 0xF4B16323u, 0x3213C007u, 0x6427800Eu
+};
+
+static const uint32_t crc32_shift2k[32] = {
+  0x88B6BA63u, 0xCA1C7287u, 0x4F49E34Fu, 0x9E93C69Eu,
+  0xE6568B7Du, 0x17DC10BBu, 0x2FB82176u, 0x5F7042ECu,
+  0xBEE085D8u, 0xA6B00DF1u, 0x96111DA3u, 0xF7533D07u,
+  0x35D77C4Fu, 0x6BAEF89Eu, 0xD75DF13Cu, 0x75CAE439u,
+  0xEB95C872u, 0x0C5A96A5u, 0x18B52D4Au, 0x316A5A94u,
+  0x62D4B528u, 0xC5A96A50u, 0x5023D2E1u, 0xA047A5C2u,
+  0x9BFE4DC5u, 0xEC8D9DCBu, 0x026A3DD7u, 0x04D47BAEu,
+  0x09A8F75Cu, 0x1351EEB8u, 0x26A3DD70u, 0x4D47BAE0u
+};
+
 static const uint32_t crc32_shift16k[32] = {
   0x9D9129BFu, 0xE053553Fu, 0x1BD7AC3Fu, 0x37AF587Eu,
   0x6F5EB0FCu, 0xDEBD61F8u, 0x660BC5B1u, 0xCC178B62u,
@@ -2984,15 +3007,15 @@ crc32_init_tables(void) {
 #if ZIPY_HAVE_ARM_CRC32
 static uint32_t
 crc32_shift(const uint32_t *columns, uint32_t value) {
-  size_t   i      = 0;
+  size_t   i;
   uint32_t result = 0;
 
-  while (value) {
-    if (value & 1u)
-      result ^= columns[i];
+  if (value == 0)
+    return 0;
 
+  for (i = 0; i < 32u; i++) {
+    result ^= columns[i] & (0u - (value & 1u));
     value >>= 1;
-    i++;
   }
 
   return result;
@@ -3024,6 +3047,25 @@ crc32_update_arm(uint32_t                  crc,
           ^ third;
     buf += 3u * ZIP_CRC_SEGMENT;
     len -= 3u * ZIP_CRC_SEGMENT;
+  }
+
+  /* smaller segments keep medium inputs off the dependent tail chain. */
+  while (len >= 3u * ZIP_CRC_SMALL_SEGMENT) {
+    first  = crc;
+    second = 0;
+    third  = 0;
+
+    for (i = 0; i < ZIP_CRC_SMALL_SEGMENT; i += 8u) {
+      first  = __crc32d(first, load_le64(buf + i));
+      second = __crc32d(second, load_le64(buf + ZIP_CRC_SMALL_SEGMENT + i));
+      third  = __crc32d(third, load_le64(buf + 2u * ZIP_CRC_SMALL_SEGMENT + i));
+    }
+
+    crc = crc32_shift(crc32_shift2k, first)
+          ^ crc32_shift(crc32_shift1k, second)
+          ^ third;
+    buf += 3u * ZIP_CRC_SMALL_SEGMENT;
+    len -= 3u * ZIP_CRC_SMALL_SEGMENT;
   }
 
   while (len >= 64u) {
