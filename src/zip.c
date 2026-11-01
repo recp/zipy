@@ -2807,6 +2807,22 @@ mkdir_parent(const char *path) {
 }
 
 static int
+cache_parent_dir(zipy_archive_t *__restrict zipy,
+                 const char     *__restrict path,
+                 size_t                     parent_len) {
+  if (!path_buf_reserve(&zipy->parent_cache, parent_len + 1u))
+    return 0;
+
+  memcpy(zipy->parent_cache.data, path, parent_len);
+  zipy->parent_cache.data[parent_len] = '\0';
+  zipy->parent_cache_len              = parent_len;
+  zipy->parent_cache_valid            = 1;
+  zipy->parent_cache_has_symlink      = 0;
+
+  return 1;
+}
+
+static int
 prepare_parent_dir_len(zipy_archive_t *__restrict zipy,
                        const char     *__restrict path,
                        size_t                     parent_len) {
@@ -2838,16 +2854,7 @@ prepare_parent_dir_len(zipy_archive_t *__restrict zipy,
   if (has_symlink)
     return 0;
 
-  if (!path_buf_reserve(&zipy->parent_cache, parent_len + 1u))
-    return 0;
-
-  memcpy(zipy->parent_cache.data, path, parent_len);
-  zipy->parent_cache.data[parent_len] = '\0';
-  zipy->parent_cache_len              = parent_len;
-  zipy->parent_cache_valid            = 1;
-  zipy->parent_cache_has_symlink      = has_symlink;
-
-  return !has_symlink;
+  return cache_parent_dir(zipy, path, parent_len);
 }
 
 static int
@@ -5817,6 +5824,11 @@ extract_entry(zipy_archive_t   *__restrict zipy,
   if (info->entry.is_directory) {
     if (!mkdirs_buf(destpath, &zipy->parent_buf))
       return ZIPY_ZIP_EFILE;
+
+    /* mkdirs checked every component; retain the leaf for following files. */
+    if (parent_len != SIZE_MAX
+        && !cache_parent_dir(zipy, destpath, parent_len))
+      return ZIPY_ZIP_ERR;
 
     if ((extract_flags & EXTRACT_DELAY_DIR_METADATA) || !apply_metadata)
       return ZIPY_ZIP_OK;

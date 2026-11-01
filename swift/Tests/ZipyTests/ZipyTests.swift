@@ -521,28 +521,74 @@ func extractionRejectsLinkedDirectoryParents() throws {
     let handle = try #require(archive.withUnsafeFileSystemRepresentation { zipy_open($0) })
     defer { zipy_close(handle) }
 
-    for jobs in [1, 4] {
-      let output = root.appendingPathComponent("output-\(preservingLinks)-\(jobs)", isDirectory: true)
-      try FileManager.default.createDirectory(at: output, withIntermediateDirectories: true)
-      try FileManager.default.createSymbolicLink(
-        atPath: output.appendingPathComponent("link").path,
-        withDestinationPath: outside.path
-      )
+    for mode in ["all", "to", "stream"] {
+      for jobs in [1, 4] {
+        let name = "output-\(preservingLinks)-\(mode)-\(jobs)"
+        let output = root.appendingPathComponent(name, isDirectory: true)
+        try FileManager.default.createDirectory(at: output, withIntermediateDirectories: true)
+        try FileManager.default.createSymbolicLink(
+          atPath: output.appendingPathComponent("link").path,
+          withDestinationPath: outside.path
+        )
 
-      var options = zipy_extract_options_t()
-      zipy_extract_options_init(&options)
-      options.jobs        = jobs
-      options.on_conflict = ZIPY_CONFLICT_OVERWRITE
-      options.flags       = ZIPY_EXTRACT_UNSAFE_SYMLINKS.rawValue
+        var options = zipy_extract_options_t()
+        zipy_extract_options_init(&options)
+        options.jobs        = jobs
+        options.on_conflict = ZIPY_CONFLICT_OVERWRITE
+        options.flags       = ZIPY_EXTRACT_UNSAFE_SYMLINKS.rawValue
 
-      let result = output.withUnsafeFileSystemRepresentation {
-        zipy_extract_all(handle, $0, &options)
+        let result = output.withUnsafeFileSystemRepresentation { destination in
+          if mode == "stream" {
+            return archive.withUnsafeFileSystemRepresentation {
+              zipy_extract_stream($0, destination, &options)
+            }
+          }
+
+          if mode == "to" {
+            for index in 0..<zipy_count(handle) {
+              let result = zipy_extract_to(handle, index, destination, &options)
+              if result < ZIPY_ZIP_OK.rawValue { return result }
+            }
+            return ZIPY_ZIP_OK.rawValue
+          }
+
+          return zipy_extract_all(handle, destination, &options)
+        }
+
+        #expect(result == ZIPY_ZIP_EFILE.rawValue)
+        #expect(!FileManager.default.fileExists(atPath: outside.appendingPathComponent("created").path))
+        #expect(try FileManager.default.contentsOfDirectory(atPath: outside.path).isEmpty)
       }
-
-      #expect(result == ZIPY_ZIP_EFILE.rawValue)
-      #expect(!FileManager.default.fileExists(atPath: outside.appendingPathComponent("created").path))
-      #expect(try FileManager.default.contentsOfDirectory(atPath: outside.path).isEmpty)
     }
+  }
+}
+
+@Test
+func directoryEntriesSupportCustomDestinationPaths() throws {
+  let root = try temporaryDirectory()
+  defer { try? FileManager.default.removeItem(at: root) }
+
+  let source  = root.appendingPathComponent("source", isDirectory: true)
+  let archive = root.appendingPathComponent("directory.zip")
+  try FileManager.default.createDirectory(
+    at: source.appendingPathComponent("nested"), withIntermediateDirectories: true
+  )
+  try runZip(in: source, archive: archive)
+
+  let handle = try #require(archive.withUnsafeFileSystemRepresentation { zipy_open($0) })
+  defer { zipy_close(handle) }
+
+  let index = try #require((0..<zipy_count(handle)).first {
+    zipy_entry(handle, $0)?.pointee.is_directory == true
+  })
+
+  for suffix in ["", "/"] {
+    let output = root.appendingPathComponent("custom-\(suffix.isEmpty)").path + suffix
+    #expect(output.withCString { zipy_extract(handle, index, $0) } == ZIPY_ZIP_OK.rawValue)
+
+    var isDirectory: ObjCBool = false
+    #expect(FileManager.default.fileExists(atPath: output, isDirectory: &isDirectory))
+    #expect(isDirectory.boolValue)
   }
 }
 
