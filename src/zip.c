@@ -5243,7 +5243,11 @@ extract_store_data_descriptor(zipy_archive_t   *__restrict zipy,
 
       i   = (size_t)(hit - buf);
       sig = le32(buf + i);
-      if (sig == ZIP_SIGN_DATA_DESC) {
+      /* payload signatures need matching sizes before CRC or file probes. */
+      if (sig == ZIP_SIGN_DATA_DESC
+          && (scan_len - i < 16u
+              || (le32(buf + i + 8u) == base_len + i
+                  && le32(buf + i + 12u) == base_len + i))) {
         uint32_t candidate_crc     = crc32_update(crc, buf, i);
         uint64_t data_len          = base_len + i;
         uint64_t descriptor_offset = info->data_offset + data_len;
@@ -5274,7 +5278,10 @@ extract_store_data_descriptor(zipy_archive_t   *__restrict zipy,
         if (ret < ZIPY_ZIP_OK)
           goto done;
       }
-      if (is_record_signature(sig) && i >= keep_tail - 3u) {
+      if (is_record_signature(sig)
+          && i >= keep_tail - 3u
+          && le32(buf + i - 8u) == base_len + i - 12u
+          && le32(buf + i - 4u) == base_len + i - 12u) {
         size_t   data_in_buf       = i - (keep_tail - 3u);
         uint32_t candidate_crc     = crc32_update(crc, buf, data_in_buf);
         uint64_t data_len          = base_len + data_in_buf;

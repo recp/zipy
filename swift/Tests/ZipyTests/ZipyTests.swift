@@ -1311,6 +1311,78 @@ func aesExtractionValidatesAllKeySizes() throws {
 }
 
 @Test
+func streamedStoredDescriptorsIgnorePayloadSignatures() throws {
+  let root = try temporaryDirectory()
+  defer { try? FileManager.default.removeItem(at: root) }
+
+  let source = root.appendingPathComponent("source", isDirectory: true)
+  let file   = source.appendingPathComponent("payload.bin")
+  let block  = Data([0x50, 0x4b, 0x07, 0x08, 0xff, 0xff, 0xff, 0xff,
+                     0x50, 0x4b, 0x03, 0x04, 0x50, 0x4b, 0x01, 0x02])
+  let sizes  = [262128, 262129, 262132, 262143, 262144, 262145]
+
+  func put(_ value: UInt32, at offset: Int, in data: inout Data) {
+    var little = value.littleEndian
+    withUnsafeBytes(of: &little) {
+      data.replaceSubrange(offset..<(offset + $0.count), with: $0)
+    }
+  }
+
+  try FileManager.default.createDirectory(at: source, withIntermediateDirectories: true)
+
+  for size in sizes {
+    var payload = Data()
+    while payload.count < size {
+      payload.append(block.prefix(min(block.count, size - payload.count)))
+    }
+    try payload.write(to: file)
+
+    let baseArchive = root.appendingPathComponent("base-\(size).zip")
+    try runZip(in: source, archive: baseArchive, storing: true, omittingExtraFields: true)
+    let original = try Data(contentsOf: baseArchive)
+    let dataOffset = 30 + Int(original[26]) + Int(original[27]) * 256
+    let dataEnd = dataOffset + size
+    try #require(original.subdata(in: dataEnd..<(dataEnd + 4)) == Data([0x50, 0x4b, 0x01, 0x02]))
+
+    for signed in [false, true] {
+      var descriptor = signed ? Data([0x50, 0x4b, 0x07, 0x08]) : Data()
+      descriptor.append(original.subdata(in: 14..<26))
+
+      var data = original
+      data[6] |= 8
+      data[dataEnd + 8] |= 8
+      data.replaceSubrange(14..<26, with: Data(count: 12))
+      data.insert(contentsOf: descriptor, at: dataEnd)
+      put(UInt32(dataEnd + descriptor.count), at: data.count - 6, in: &data)
+
+      let archive = root.appendingPathComponent("stream-\(size)-\(signed).zip")
+      try data.write(to: archive)
+
+      let output = root.appendingPathComponent("out-\(size)-\(signed)")
+      var options = zipy_extract_options_t()
+      zipy_extract_options_init(&options)
+      options.flags       = ZIPY_EXTRACT_ATOMIC.rawValue
+      options.on_conflict = ZIPY_CONFLICT_OVERWRITE
+
+      let result = archive.withUnsafeFileSystemRepresentation { input in
+        output.withUnsafeFileSystemRepresentation { zipy_extract_stream(input, $0, &options) }
+      }
+      try #require(result == ZIPY_ZIP_OK.rawValue)
+      #expect(try Data(contentsOf: output.appendingPathComponent("payload.bin")) == payload)
+
+      data[dataEnd + (signed ? 4 : 0)] ^= 1
+      try data.write(to: archive)
+      let rejected = archive.withUnsafeFileSystemRepresentation { input in
+        output.withUnsafeFileSystemRepresentation { zipy_extract_stream(input, $0, &options) }
+      }
+      #expect(rejected < 0)
+      #expect(try Data(contentsOf: output.appendingPathComponent("payload.bin")) == payload)
+      #expect(!FileManager.default.fileExists(atPath: output.appendingPathComponent("payload.bin.part").path))
+    }
+  }
+}
+
+@Test
 func aesStreamDescriptorsValidateAuthentication() throws {
   let root = try temporaryDirectory()
   defer { try? FileManager.default.removeItem(at: root) }
