@@ -5213,19 +5213,14 @@ extract_store_data_descriptor(zipy_archive_t   *__restrict zipy,
 
   remaining = zipy->file_size - info->data_offset - resume_offset;
   while (remaining > 0) {
-    uint64_t read_end;
     size_t   n = remaining > ZIP_IO_CHUNK ? ZIP_IO_CHUNK : (size_t)remaining;
     size_t   scan_len;
     size_t   i;
+    int      restore_pos = 0;
 
     if (tail_len > 0)
       memcpy(buf, tail, tail_len);
     if (fread(buf + tail_len, 1, n, zipy->fp) != n) {
-      ret = ZIPY_ZIP_EFILE;
-      goto done;
-    }
-
-    if (tell_pos(zipy->fp, &read_end) != 0) {
       ret = ZIPY_ZIP_EFILE;
       goto done;
     }
@@ -5252,12 +5247,13 @@ extract_store_data_descriptor(zipy_archive_t   *__restrict zipy,
         uint64_t data_len          = base_len + i;
         uint64_t descriptor_offset = info->data_offset + data_len;
 
-        ret = match_signed_store_descriptor(zipy,
-                                            info,
-                                            descriptor_offset,
-                                            data_len,
-                                            candidate_crc,
-                                            zip64_descriptor);
+        restore_pos = 1;
+        ret         = match_signed_store_descriptor(zipy,
+                                                    info,
+                                                    descriptor_offset,
+                                                    data_len,
+                                                    candidate_crc,
+                                                    zip64_descriptor);
         if (ret == ZIPY_ZIP_OK) {
           if (i > 0) {
             ret = write_file(&outfile, buf, i);
@@ -5287,12 +5283,13 @@ extract_store_data_descriptor(zipy_archive_t   *__restrict zipy,
         uint64_t data_len          = base_len + data_in_buf;
         uint64_t descriptor_offset = info->data_offset + data_len;
 
-        ret = match_unsigned_store_descriptor(zipy,
-                                              info,
-                                              descriptor_offset,
-                                              data_len,
-                                              candidate_crc,
-                                              zip64_descriptor);
+        restore_pos = 1;
+        ret         = match_unsigned_store_descriptor(zipy,
+                                                      info,
+                                                      descriptor_offset,
+                                                      data_len,
+                                                      candidate_crc,
+                                                      zip64_descriptor);
         if (ret == ZIPY_ZIP_OK) {
           if (data_in_buf > 0) {
             ret = write_file(&outfile, buf, data_in_buf);
@@ -5338,7 +5335,9 @@ extract_store_data_descriptor(zipy_archive_t   *__restrict zipy,
       tail_len = scan_len;
     }
 
-    if (seek_set(zipy->fp, read_end) != 0) {
+    /* only descriptor probes disturb the sequential input position. */
+    if (restore_pos
+        && seek_set(zipy->fp, zipy->file_size - remaining) != 0) {
       ret = ZIPY_ZIP_EFILE;
       goto done;
     }

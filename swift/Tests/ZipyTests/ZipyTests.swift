@@ -1335,6 +1335,16 @@ func streamedStoredDescriptorsIgnorePayloadSignatures() throws {
     while payload.count < size {
       payload.append(block.prefix(min(block.count, size - payload.count)))
     }
+
+    // size-matching false candidates must restore the sequential read position.
+    put(0x08074b50, at: 32, in: &payload)
+    put(0, at: 36, in: &payload)
+    put(32, at: 40, in: &payload)
+    put(32, at: 44, in: &payload)
+    put(0, at: 84, in: &payload)
+    put(84, at: 88, in: &payload)
+    put(84, at: 92, in: &payload)
+    put(0x04034b50, at: 96, in: &payload)
     try payload.write(to: file)
 
     let baseArchive = root.appendingPathComponent("base-\(size).zip")
