@@ -1529,14 +1529,14 @@ func encryptedExtractionGrowsInputBuffers() throws {
   }
 }
 
-@Test
-func encryptedSymlinkExtracts() throws {
+@Test(arguments: [false, true])
+func parallelSymlinksExtract(encrypted: Bool) throws {
   let root = try temporaryDirectory()
   defer { try? FileManager.default.removeItem(at: root) }
 
   let source   = root.appendingPathComponent("source", isDirectory: true)
   let payload  = Data(String(repeating: "encrypted payload\n", count: 128).utf8)
-  let password = "zipy-test-password"
+  let password = encrypted ? "zipy-test-password" : nil
 
   try FileManager.default.createDirectory(at: source, withIntermediateDirectories: true)
   try payload.write(to: source.appendingPathComponent("file.txt"))
@@ -1566,12 +1566,13 @@ func encryptedSymlinkExtracts() throws {
     options.jobs        = 2
     options.on_conflict = ZIPY_CONFLICT_OVERWRITE
 
-    let result = password.withCString { passwordC in
-      options.password = passwordC
+    let extract: (UnsafePointer<CChar>?) -> Int32 = { key in
+      options.password = key
       return output.withUnsafeFileSystemRepresentation {
         zipy_extract_all(handle, $0, &options)
       }
     }
+    let result = password.map { $0.withCString(extract) } ?? extract(nil)
 
     try #require(result == ZIPY_ZIP_OK.rawValue)
 

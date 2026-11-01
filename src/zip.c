@@ -4519,7 +4519,7 @@ symlink_target_is_contained(zipy_archive_t *__restrict zipy,
   path_buf_t  localTarget   = { 0 };
   path_buf_t *rootBuf       = zipy ? &zipy->state_buf : &localRoot;
   path_buf_t *targetBuf     = zipy ? &zipy->part_buf : &localTarget;
-  char       *targetText    = NULL;
+  const char *targetText;
   char       *rootBase      = NULL;
   char       *targetBase    = NULL;
   char       *targetBaseAbs = NULL;
@@ -4529,12 +4529,8 @@ symlink_target_is_contained(zipy_archive_t *__restrict zipy,
   if (!destpath || !target || target_len == 0 || memchr(target, '\0', target_len))
     goto done;
 
-  targetText = malloc(target_len + 1u);
-  if (!targetText)
-    goto done;
-
-  memcpy(targetText, target, target_len);
-  targetText[target_len] = '\0';
+  /* extract_entry supplies a NUL-terminated payload with this length. */
+  targetText = (const char *)target;
 
   rootBase = rootdir && *rootdir ? dup_text(rootdir) : parent_path(destpath);
   if (!rootBase || !path_buf_set_canonical(rootBuf, rootBase))
@@ -4567,7 +4563,6 @@ done:
   free(targetBaseAbs);
   free(targetBase);
   free(rootBase);
-  free(targetText);
   if (!zipy) {
     path_buf_free(&localRoot);
     path_buf_free(&localTarget);
@@ -5062,7 +5057,7 @@ clone_init(zipy_archive_t *__restrict clone,
 
   memset(clone, 0, sizeof(*clone));
 
-  needs_fp = !zipy->map || zipy->has_encrypted || zipy->has_symlink;
+  needs_fp = !zipy->map || zipy->has_encrypted;
   if (needs_fp && (!zipy->path || !zipy->fp))
     return 0;
 
