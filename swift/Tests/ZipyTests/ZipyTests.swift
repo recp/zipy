@@ -564,6 +564,47 @@ func extractionRejectsLinkedDirectoryParents() throws {
 }
 
 @Test
+func mixedDeflateBlocksPreserveInputPosition() throws {
+  let root = try temporaryDirectory()
+  defer { try? FileManager.default.removeItem(at: root) }
+
+  let archive = root.appendingPathComponent("mixed.zip")
+  // a stored block followed by an empty fixed-Huffman final block.
+  let data = try #require(Data(base64Encoded:
+    """
+    UEsDBBQAAAAIAAAAIVClIBfbCwAAAAQAAAAJAAAAbWl4ZWQuYmluAAQA+/9BQkNEAwBQSwECFAMUAAAA
+    CAAAACFQpSAX2wsAAAAEAAAACQAAAAAAAAAAAAAApIEAAAAAbWl4ZWQuYmluUEsFBgAAAAABAAEANwAA
+    ADIAAAAAAA==
+    """, options: .ignoreUnknownCharacters))
+  try data.write(to: archive)
+
+  let handle = try #require(archive.withUnsafeFileSystemRepresentation { zipy_open($0) })
+  defer { zipy_close(handle) }
+
+  for streaming in [false, true] {
+    for reportingProgress in [false, true] {
+      let output = root.appendingPathComponent("out-\(streaming)-\(reportingProgress)")
+      var options = zipy_extract_options_t()
+      zipy_extract_options_init(&options)
+      options.flags = ZIPY_EXTRACT_ATOMIC.rawValue
+      if reportingProgress { options.progress = { _, _, _, _ in 1 } }
+
+      let result = output.withUnsafeFileSystemRepresentation { destination in
+        if streaming {
+          return archive.withUnsafeFileSystemRepresentation {
+            zipy_extract_stream($0, destination, &options)
+          }
+        }
+        return zipy_extract_all(handle, destination, &options)
+      }
+
+      try #require(result == ZIPY_ZIP_OK.rawValue)
+      #expect(try Data(contentsOf: output.appendingPathComponent("mixed.bin")) == Data("ABCD".utf8))
+    }
+  }
+}
+
+@Test
 func directoryEntriesSupportCustomDestinationPaths() throws {
   let root = try temporaryDirectory()
   defer { try? FileManager.default.removeItem(at: root) }
